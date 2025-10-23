@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>机甲战棋游戏</title>
+    <style>
+        :root {
+            --bg-color: #1a202c; --border-color: #4a5568; --text-color: #e2e8f0; --primary-color: #4299e1;
+            --hover-bg-color: #2c3748; --disabled-color: #718096; --player-color: #3182ce; --ai-color: #c53030;
+            --highlight-move: rgba(66, 153, 225, 0.3); --highlight-attack: rgba(197, 48, 48, 0.4); --phase-color: #f6ad55;
+            --status-ok: #2ecc71; --status-damaged: #f39c12; --status-destroyed: #e74c3c;
+        }
+        body { font-family: sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: flex-start; padding: 2rem; gap: 2rem; }
+        .panel { background-color: var(--hover-bg-color); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1.5rem; }
+        .sidebar { width: 320px; display: flex; flex-direction: column; gap: 1.5rem; }
+        .game-board { display: grid; grid-template-columns: repeat(10, 50px); grid-template-rows: repeat(10, 50px); border: 2px solid var(--border-color); gap: 1px; background-color: var(--border-color); }
+        .grid-cell { width: 50px; height: 50px; background-color: var(--bg-color); position: relative; display: flex; justify-content: center; align-items: center; }
+        .grid-cell.highlight-move, .grid-cell.highlight-attack { cursor: pointer; }
+        .grid-cell.highlight-move { background-color: var(--highlight-move); } .grid-cell.highlight-attack { background-color: var(--highlight-attack); }
+        .mech-icon { font-size: 36px; position: relative; filter: drop-shadow(0 0 5px); } .mech-icon.player { color: var(--player-color); } .mech-icon.ai { color: var(--ai-color); }
+        .orientation-arrow { position: absolute; font-size: 14px; color: white; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        .orientation-selector { position: absolute; z-index: 10; display: none; flex-direction: column; background-color: rgba(0,0,0,0.8); border-radius: 50%; }
+        .orientation-button { background: none; border: none; color: white; font-size: 24px; cursor: pointer; width: 40px; height: 40px; }
+        table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color); }
+        h4 { margin-top: 0; border-bottom: 2px solid var(--primary-color); padding-bottom: 0.5rem; }
+        .action-item { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-radius: 0.25rem; margin-bottom: 0.5rem; cursor: pointer; transition: background-color 0.2s; }
+        .action-item:hover { background-color: #4a5568; }
+        .action-item.disabled, button.disabled { background-color: var(--bg-color) !important; color: var(--disabled-color) !important; cursor: not-allowed !important; border-color: var(--disabled-color) !important; }
+        .action-cost { font-weight: bold; color: var(--primary-color); }
+        .btn { width: 100%; padding: 0.75rem; border: none; border-radius: 0.25rem; font-size: 1rem; font-weight: bold; cursor: pointer; }
+        .selector-group button { flex: 1; padding: 0.5rem; background-color: transparent; border: 1px solid var(--border-color); color: var(--text-color); cursor: pointer; }
+        .selector-group button.active { background-color: var(--primary-color); border-color: var(--primary-color); }
+        .combat-log { background-color: var(--bg-color); padding: 1rem; border-radius: 0.25rem; height: 200px; overflow-y: auto; }
+        .phase-indicator { text-align: center; font-size: 1.2rem; font-weight: bold; color: var(--phase-color); padding: 0.5rem; border: 1px solid var(--phase-color); border-radius: 0.5rem; margin-bottom: 1rem; }
+        #part-selector-modal, #game-over-modal { display:none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: var(--hover-bg-color); border: 2px solid var(--primary-color); border-radius: 0.5rem; padding: 2rem; z-index: 100; text-align: center; }
+        .status-ok { color: var(--status-ok); } .status-damaged { color: var(--status-damaged); } .status-destroyed { color: var(--status-destroyed); text-decoration: line-through; }
+    </style>
+</head>
+<body>
+    <div class="sidebar panel">
+        <h4>玩家机甲</h4>
+
+        <!-- [新增] 仅在生存模式下显示击败数 -->
+        {% if game_mode == 'horde' %}
+        <div style="text-align: center; font-size: 1.5rem; color: var(--phase-color);">
+            击败数: <span id="defeat-count">{{ ai_defeat_count }}</span>
+        </div>
+        {% endif %}
+
+        <div class="phase-indicator">阶段: {{ {'timing': '1. 选择时机', 'stance': '2. 选择姿态', 'adjustment': '3. 调整阶段', 'main': '4. 执行动作'}[game.turn_phase] }}</div>
+        <div style="display: flex; justify-content: space-around; text-align: center;">
+            <div><div>行动时点 (AP)</div><div style="font-size: 2rem; font-weight: bold;">{{ game.player_ap }}</div></div>
+            <div><div>调整时点 (TP)</div><div style="font-size: 2rem; font-weight: bold;">{{ game.player_tp }}</div></div>
+        </div>
+
+        <!-- 玩家状态面板 -->
+        <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
+            <tbody>
+                {% for slot, part in game.player_mech.parts.items() %}
+                <tr>
+                    <td>{{ slot }}</td>
+                    <td>{{ part.name }}</td>
+                    <td class="status-{{ part.status }}">{{ part.status }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <!-- 控制器 -->
+        <div id="phase-timing-controls"><h4>选择时机</h4><div class="selector-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"><button id="timing-近战" onclick="selectTiming('近战')">近战</button><button id="timing-射击" onclick="selectTiming('射击')">射击</button><button id="timing-移动" onclick="selectTiming('移动')">移动</button><button id="timing-战术" disabled>战术</button></div><button class="btn" style="margin-top: 1rem; background-color: var(--primary-color);" onclick="confirmTiming()">确认时机</button></div>
+        <div id="phase-stance-controls"><h4>姿态选择</h4><div class="selector-group" style="display: flex;"><button id="stance-defense" class="{{ 'active' if game.player_mech.stance == 'defense' else '' }}" onclick="changeStance('defense')">防御</button><button id="stance-agile" class="{{ 'active' if game.player_mech.stance == 'agile' else '' }}" onclick="changeStance('agile')">机动</button><button id="stance-attack" class="{{ 'active' if game.player_mech.stance == 'attack' else '' }}" onclick="changeStance('attack')">攻击</button></div><button class="btn" style="margin-top: 1rem; background-color: var(--primary-color);" onclick="confirmStance()">确认姿态</button></div>
+        <div id="phase-adjustment-controls"><h4>调整时点动作 (TP)</h4><div id="action-adjust-move" class="action-item" onclick="selectAction('调整移动', 0, 'TP', '', 'system')"><span>调整移动</span><span class="action-cost">1 TP</span></div><div id="action-change-orientation" class="action-item" onclick="selectAction('仅转向', 0, 'TP', '', 'system')"><span>仅转向</span><span class="action-cost">1 TP</span></div><button class="btn" style="margin-top: 1rem;" onclick="skipAdjustment()">跳过调整</button></div>
+        <div id="phase-main-controls"><h4>行动时点动作 (AP)</h4>
+            {% for action, part_slot in game.player_mech.get_all_actions() %}
+            {% set action_id = (part_slot, action.name) %}
+            {% set is_used = action_id in player_actions_used %}
+            <div class="action-item {{ 'disabled' if is_used else '' }}"
+                 id="action-{{ action.name }}-{{ part_slot }}"
+                 data-action-type="{{ action.action_type }}"
+                 {% if not is_used %}
+                 onclick="selectAction('{{ action.name }}', {{ action.range_val }}, '{{ action.action_type }}', '{{ action.cost }}', '{{ part_slot }}')"
+                 data-original-onclick="selectAction('{{ action.name }}', {{ action.range_val }}, '{{ action.action_type }}', '{{ action.cost }}', '{{ part_slot }}')"
+                 {% endif %}
+                 title="{{ '本回合已使用' if is_used else '' }}">
+                <span>{{ action.name }} ({{ part_slot }})</span>
+                {% if action.cost == 'L' %}
+                    <span class="action-cost">2 AP + 1 TP</span>
+                {% else %}
+                    <span class="action-cost">{{ action.cost.count('M')*2 + action.cost.count('S')*1 }} AP</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+
+        <form id="end-turn-form" action="{{ url_for('end_turn') }}" method="POST" style="display: none;"><button type="submit"></button></form>
+        <button id="end-turn-btn" class="btn" style="background-color: #c53030;" onclick="document.getElementById('end-turn-form').submit();">结束回合</button>
+    </div>
+    <div class="game-board" id="game-board">
+        {% for y in range(1, 11) %}{% for x in range(1, 11) %}
+        <div class="grid-cell" id="cell-{{x}}-{{y}}" data-x="{{x}}" data-y="{{y}}">
+            {% if game.player_pos[0] == x and game.player_pos[1] == y %}<div class="mech-icon player">🤖<span class="orientation-arrow" id="player-arrow"></span></div>{% endif %}
+            {% if game.ai_pos[0] == x and game.ai_pos[1] == y %}<div class="mech-icon ai">👾<span class="orientation-arrow" id="ai-arrow"></span></div>{% endif %}
+        </div>{% endfor %}{% endfor %}
+        <div id="orientation-selector" class="orientation-selector"><button class="orientation-button" onclick="setFinalOrientation('N')">⬆</button><button class="orientation-button" onclick="setFinalOrientation('E')">➡</button><button class="orientation-button" onclick="setFinalOrientation('S')">⬇</button><button class="orientation-button" onclick="setFinalOrientation('W')">⬅</button></div>
+    </div>
+    <div class="sidebar panel">
+        <h4>AI机甲状态</h4>
+        <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
+            <tbody>
+                {% for slot, part in game.ai_mech.parts.items() %}
+                <tr>
+                    <td>{{ slot }}</td>
+                    <td>{{ part.name }}</td>
+                    <td class="status-{{ part.status }}">{{ part.status }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <h4>战斗日志</h4>
+        <div class="combat-log">{% for entry in combat_log %}<div class="log-entry">{{ entry }}</div>{% else %}<div>暂无战斗记录。</div>{% endfor %}</div>
+    </div>
+
+    <!-- 攻击部位选择弹窗 -->
+    <div id="part-selector-modal"><h4>选择攻击部位</h4><div id="part-buttons" style="display: flex; flex-direction: column; gap: 1rem;"></div><button class="btn" style="margin-top: 1rem; background-color: #c53030;" onclick="closePartSelector()">取消</button></div>
+
+    <!-- 游戏结束弹窗 -->
+    <div id="game-over-modal">
+        <!-- [修改] 增加 white-space: pre-wrap; 以支持换行显示分数 -->
+        <h2 id="game-over-title" style="font-size: 2rem; margin-bottom: 1.5rem; white-space: pre-wrap;"></h2>
+        <form action="{{ url_for('reset_game') }}" method="POST">
+            <button class="btn" style="background-color: var(--primary-color);" type="submit">返回机库</button>
+        </form>
+    </div>
+<script>
+    let selectedAction = {};
+    const gameState = {
+        turnPhase: '{{ game.turn_phase }}',
+        timing: '{{ game.timing or "" }}',
+        openingMoveTaken: {{ 'true' if game.opening_move_taken else 'false' }},
+        isPlayerLocked: {{ 'true' if is_player_locked else 'false' }},
+        gameOver: '{{ game.game_over or "" }}'
+    };
+    // [修改] 传递 game_mode 和 ai_defeat_count 到 JS
+    const gameMode = '{{ game_mode }}';
+    const defeatCount = {{ ai_defeat_count }};
+    const orientationMap = {'N': '↑', 'S': '↓', 'E': '→', 'W': '←'};
+
+    document.addEventListener('DOMContentLoaded', () => {
+        updateUIForPhase();
+        document.getElementById('player-arrow').innerText = orientationMap['{{ game.player_mech.orientation }}'];
+        document.getElementById('ai-arrow').innerText = orientationMap['{{ game.ai_mech.orientation }}'];
+
+        if (gameState.gameOver) {
+            showGameOverModal(gameState.gameOver);
+        }
+
+        const log = document.querySelector('.combat-log');
+        log.scrollTop = log.scrollHeight;
+    });
+
+    function showGameOverModal(status) {
+        const modal = document.getElementById('game-over-modal');
+        const title = document.getElementById('game-over-title');
+
+        if (status === 'player_win') {
+            title.innerText = '胜利！';
+            title.style.color = 'var(--status-ok)';
+        } else { // 'ai_win'
+            title.innerText = '失败！';
+            // [新增] 如果是生存模式，则显示最终分数
+            if (gameMode === 'horde') {
+                title.innerText = `结束\n最终击败数: ${defeatCount}`;
+            }
+            title.style.color = 'var(--status-destroyed)';
+        }
+
+        modal.style.display = 'block';
+        document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
+            if (!el.closest('#game-over-modal')) {
+                el.disabled = true;
+            }
+        });
+    }
+
+    function updateUIForPhase() {
+        if (gameState.gameOver) return;
+
+        ['timing', 'stance', 'adjustment', 'main'].forEach(phase => { document.getElementById(`phase-${phase}-controls`).style.display = gameState.turnPhase === phase ? 'block' : 'none'; });
+        if (gameState.turnPhase === 'timing') document.querySelectorAll('#phase-timing-controls button').forEach(btn => { btn.classList.toggle('active', btn.innerText === gameState.timing); });
+
+        if (gameState.turnPhase === 'main') {
+            document.querySelectorAll('#phase-main-controls .action-item').forEach(item => {
+                let isDisabled = false;
+                let title = '';
+
+                if (item.classList.contains('disabled') && item.title === '本回合已使用') {
+                    isDisabled = true;
+                    title = '本回合已使用';
+                } else {
+                    if (!gameState.openingMoveTaken && item.dataset.actionType !== gameState.timing) {
+                        isDisabled = true;
+                        title = '非当前时机的起手动作';
+                    }
+                    if (gameState.isPlayerLocked && item.dataset.actionType === '射击') {
+                        isDisabled = true;
+                        title = '被近战锁定，无法射击';
+                    }
+                }
+
+                if(isDisabled) {
+                    item.classList.add('disabled');
+                    item.onclick = null;
+                    item.title = title;
+                } else {
+                    if (item.title !== '本回合已使用') {
+                        item.classList.remove('disabled');
+                        item.title = '';
+                        const originalOnclick = item.getAttribute('data-original-onclick');
+                        if (originalOnclick) {
+                            item.onclick = () => eval(originalOnclick);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    function clearHighlights() { document.querySelectorAll('.grid-cell').forEach(c => { c.classList.remove('highlight-move', 'highlight-attack'); c.onclick = null; }); document.getElementById('orientation-selector').style.display = 'none'; }
+
+    function selectAction(name, range, type, cost, partSlot) {
+        clearHighlights();
+        selectedAction = { name, range, type, cost, slot: partSlot };
+        let url = '', body = {};
+
+        if (type === '移动' || name === '调整移动') {
+            url = '/get_move_range';
+            body = { action_name: name, part_slot: partSlot };
+        }
+        else if (type === '近战' || type === '射击') {
+            url = '/get_attack_range';
+            body = { action_name: name, part_slot: partSlot };
+        }
+        else if (name === '仅转向') {
+            showOrientationSelector({{ game.player_pos[0] }}, {{ game.player_pos[1] }}, true);
+            return;
+        }
+
+        if(url) fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) }).then(res => res.json()).then(data => {
+            if(data.valid_moves) data.valid_moves.forEach(([x,y]) => { const c = document.getElementById(`cell-${x}-${y}`); c.classList.add('highlight-move'); c.onclick = () => showOrientationSelector(x,y); });
+            if(data.valid_targets) data.valid_targets.forEach(t => { const [x,y] = t.pos; const c = document.getElementById(`cell-${x}-${y}`); c.classList.add('highlight-attack'); c.onclick = () => initiateAttack(x, y, t.is_back_attack); });
+        });
+    }
+
+    function initiateAttack(x, y, isBackAttack) { selectedAction.targetPos = [x, y]; if (isBackAttack) { showPartSelector(); } else { executeAttack(); }}
+
+    function showPartSelector() {
+        const modal = document.getElementById('part-selector-modal'), buttons = document.getElementById('part-buttons'); buttons.innerHTML = '';
+        const aiParts = {{ game.ai_mech.to_dict()['parts'] | tojson }};
+        for (const slot in aiParts) { if (aiParts[slot].status !== 'destroyed') { const btn = document.createElement('button'); btn.className = 'btn'; btn.style.backgroundColor = 'var(--primary-color)'; btn.innerText = `${aiParts[slot].name} (${slot})`; btn.onclick = () => confirmPartSelection(slot); buttons.appendChild(btn); }}
+        modal.style.display = 'block';
+    }
+
+    function closePartSelector() { document.getElementById('part-selector-modal').style.display = 'none'; clearHighlights(); }
+    function confirmPartSelection(partSlot) { selectedAction.targetPartName = partSlot; closePartSelector(); executeAttack(); }
+    function showOrientationSelector(x, y, isRotationOnly = false) { const s = document.getElementById('orientation-selector'); document.getElementById(`cell-${x}-${y}`).appendChild(s); s.style.display = 'flex'; selectedAction.targetPos = [x, y]; selectedAction.isRotationOnly = isRotationOnly; }
+    function setFinalOrientation(o) { selectedAction.finalOrientation = o; executeMove(); }
+
+    function postAndReload(url, body = {}) {
+        fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                window.location.reload();
+            } else if (data.message) {
+                console.error('Action failed:', data.message);
+                window.location.reload();
+            }
+        });
+    }
+
+    function selectTiming(t) { gameState.timing = t; postAndReload('/select_timing', { timing: t }); }
+    function confirmTiming() { postAndReload('/confirm_timing'); }
+    function changeStance(s) { postAndReload('/change_stance', { stance: s }); }
+    function confirmStance() { postAndReload('/confirm_stance'); }
+    function skipAdjustment() { postAndReload('/skip_adjustment'); }
+
+    function executeMove() {
+        let url = selectedAction.isRotationOnly ? '/change_orientation' : (selectedAction.name === '调整移动' ? '/execute_adjust_move' : '/move_player');
+        postAndReload(url, {
+            action_name: selectedAction.name,
+            target_pos: selectedAction.targetPos,
+            final_orientation: selectedAction.finalOrientation,
+            part_slot: selectedAction.slot
+        });
+    }
+
+    function executeAttack() {
+        let body = {
+            action_name: selectedAction.name,
+            target_pos: selectedAction.targetPos,
+            part_slot: selectedAction.slot
+        };
+        if (selectedAction.targetPartName) { body.target_part_name = selectedAction.targetPartName; }
+        postAndReload('/execute_attack', body);
+    }
+</script>
+</body>
+</html>

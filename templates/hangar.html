@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>机库 - 机甲整备</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .part-card { transition: all 0.2s ease-in-out; }
+        .part-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+        input[type="radio"]:checked + label { border-color: #3b82f6; background-color: #2563eb20; }
+    </style>
+</head>
+<body class="bg-gray-800 text-gray-200 font-mono">
+    <div class="container mx-auto p-8">
+        <h1 class="text-4xl font-bold text-center mb-2 text-blue-400">机库整备</h1>
+        <p class="text-center text-gray-400 mb-8">为你的机甲选择装备，然后进入战场。</p>
+
+        <form action="{{ url_for('start_game') }}" method="POST">
+            <!-- 机甲部件选择 -->
+            <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">1. 选择你的机甲部件</h2>
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-6">
+
+                <!-- 核心 -->
+                <div class="col-span-1">
+                    <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">核心</h3>
+                    {% for name, part in cores.items() %}
+                    <div class="mb-4">
+                        <input type="radio" id="core_{{ name }}" name="core" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
+                        <label for="core_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
+                            <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                            <p class="text-sm">装甲: {{ part.armor }}, 结构: {{ part.structure }}, 闪避: {{ part.evasion }}, 电子: {{ part.electronics }}</p>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- 下肢 -->
+                <div class="col-span-1">
+                    <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">下肢</h3>
+                    {% for name, part in legs.items() %}
+                    <div class="mb-4">
+                        <input type="radio" id="legs_{{ name }}" name="legs" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
+                        <label for="legs_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
+                             <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                            <p class="text-sm">装甲: {{ part.armor }}, 结构: {{ part.structure }}, 闪避: {{ part.evasion }}</p>
+                            <p class="text-sm">调整移动: {{ part.adjust_move }}</p>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- 左臂 -->
+                <div class="col-span-1">
+                    <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">左臂</h3>
+                    {% for name, part in left_arms.items() %}
+                    <div class="mb-4">
+                        <input type="radio" id="left_arm_{{ name }}" name="left_arm" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
+                        <label for="left_arm_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
+                             <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                            <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
+                            <p class="text-sm">动作: {{ part.actions[0].name if part.actions else '无' }}</p>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- 右臂 -->
+                <div class="col-span-1">
+                    <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">右臂</h3>
+                     {% for name, part in right_arms.items() %}
+                    <div class="mb-4">
+                        <input type="radio" id="right_arm_{{ name }}" name="right_arm" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
+                        <label for="right_arm_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
+                            <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                            <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
+                            <p class="text-sm">动作: {{ part.actions[0].name if part.actions else '无' }}</p>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- 背包 -->
+                <div class="col-span-1">
+                    <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">背包</h3>
+                    {% for name, part in backpacks.items() %}
+                    <div class="mb-4">
+                        <input type="radio" id="backpack_{{ name }}" name="backpack" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
+                        <label for="backpack_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
+                            <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                            <p class="text-sm">装甲: {{ part.armor }}, 闪避: {{ part.evasion }}, 电子: {{ part.electronics }}</p>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+
+            </div>
+
+            <!-- [修改] AI 对手选择 -->
+            <div class="mt-10">
+                <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">2. 选择初始对手</h2>
+                <div class="flex justify-center flex-wrap gap-6">
+                    {% for key, loadout in ai_loadouts.items() %}
+                    <div class="mb-4">
+                        <input type="radio" id="ai_{{ key }}" name="ai_opponent" value="{{ key }}" class="hidden" required {% if loop.first %}checked{% endif %}>
+                        <label for="ai_{{ key }}" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-72">
+                            <h4 class="font-bold text-xl text-blue-300">{{ loadout.name }}</h4>
+                            <p class="text-sm mt-2">核心: {{ loadout.selection.core }}</p>
+                            <p class="text-sm">武器: {{ loadout.selection.left_arm }}, {{ loadout.selection.right_arm }}</p>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- [新增] 游戏模式选择 -->
+            <div class="mt-10">
+                <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">3. 选择游戏模式</h2>
+                <div class="flex justify-center flex-wrap gap-6">
+                    <!-- 决斗模式 (新默认) -->
+                    <div class="mb-4">
+                        <input type="radio" id="mode_duel" name="game_mode" value="duel" class="hidden" required checked>
+                        <label for="mode_duel" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-72">
+                            <h4 class="font-bold text-xl text-blue-300">决斗模式 (1v1)</h4>
+                            <p class="text-sm mt-2">正面对决。</p>
+                        </label>
+                    </div>
+                    <!-- 生存模式 -->
+                    <div class="mb-4">
+                        <input type="radio" id="mode_horde" name="game_mode" value="horde" class="hidden" required>
+                        <label for="mode_horde" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-72">
+                            <h4 class="font-bold text-xl text-blue-300">生存模式 (Horde)</h4>
+                            <p class="text-sm mt-2">迎战从底部不断刷新的敌人。</p>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 开始按钮 -->
+            <div class="mt-10 text-center">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-10 rounded-lg text-2xl transition-all duration-300 shadow-lg hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
+                    开始战斗
+                </button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
