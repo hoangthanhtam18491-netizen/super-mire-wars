@@ -4,8 +4,9 @@ from data_models import Mech, Part, Action
 # [修正] 导入所有部件和动作，以及 AI_LOADOUTS
 from parts_database import (
     ALL_PARTS, CORES, LEGS, LEFT_ARMS, RIGHT_ARMS, BACKPACKS,
-    ACTION_BENPAO, ACTION_HEAVY_STRIKE, ACTION_JUJI, ACTION_PAOJI,
-    ACTION_CIJI, ACTION_DIANSHE
+    ACTION_BENPAO, ACTION_JINGJU, ACTION_JUJI, ACTION_PAOJI,
+    ACTION_CIJI, ACTION_DIANSHE, ACTION_HUIZHAN, ACTION_TIAOYUE,
+    ACTION_SUSHE, ACTION_DIANSHE_ZHAN, ACTION_DIANSHE_CI, ACTION_SUSHE_BIPAO
 )
 import random  # 导入 random
 
@@ -125,9 +126,33 @@ AI_LOADOUT_STANDARD = {
     }
 }
 
+AI_LOADOUT_LIGHTA = {
+    'name': "AI机甲 (高速射手型)",
+    'selection': {
+        'core': 'GK-08 "哨兵"核心',
+        'legs': 'RL-03D “快马”高速下肢',
+        'left_arm': '猴版R-20 肩置磁轨炮（左）',
+        'right_arm': '猴版R-20 肩置磁轨炮（右）',
+        'backpack': '未完成的TB-600 跳跃背包'
+    }
+}
+
+AI_LOADOUT_LIGHTB = {
+    'name': "AI机甲 (高速近战型)",
+    'selection': {
+        'core': 'GK-08 "哨兵"核心',
+        'legs': 'RL-03D “快马”高速下肢',
+        'left_arm': '62型 臂盾 + 未完成的CC-20 单手剑（左）',
+        'right_arm': '63型 臂炮 + 未完成CC-20 单手剑（右）',
+        'backpack': '未完成的TB-600 跳跃背包'
+    }
+}
+
 AI_LOADOUTS = {
     "heavy": AI_LOADOUT_HEAVY,
-    "standard": AI_LOADOUT_STANDARD
+    "standard": AI_LOADOUT_STANDARD,
+    "lighta": AI_LOADOUT_LIGHTA,
+    "lightb": AI_LOADOUT_LIGHTB,
 }
 
 

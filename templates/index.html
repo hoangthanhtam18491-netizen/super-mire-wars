@@ -5,8 +5,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>超级泥沼大战 - 开始</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- [新增] 规则模态框样式 -->
+    <style>
+        #rules-modal-backdrop {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 40;
+            justify-content: center;
+            align-items: center;
+        }
+        #rules-modal-content {
+            background-color: #2d3748; /* bg-gray-700 */
+            color: #e2e8f0; /* text-gray-200 */
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            position: relative;
+            z-index: 50;
+            line-height: 1.6;
+        }
+        /* [新增] 自定义滚动条样式 */
+        #rules-modal-content::-webkit-scrollbar { width: 8px; }
+        #rules-modal-content::-webkit-scrollbar-thumb { background-color: #4a5568; border-radius: 4px; }
+        #rules-modal-content::-webkit-scrollbar-track { background-color: #2d3748; }
+    </style>
 </head>
-<body class="bg-gray-800 text-white flex items-center justify-center h-screen font-mono relative"> <!-- [修改] 增加 relative 定位 -->
+<body class="bg-gray-800 text-white flex items-center justify-center h-screen font-mono relative">
+
+    <!-- [新增] 规则按钮 -->
+    <button onclick="openRulesModal()" class="fixed top-4 left-4 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg text-sm transition-all duration-300 shadow-lg z-20">
+        玩家规则
+    </button>
+
     <div class="text-center">
         <h1 class="text-5xl font-bold mb-8 animate-pulse">超级泥沼大战</h1>
         <!-- 链接到机库 -->
@@ -15,8 +53,8 @@
         </a>
     </div>
 
-    <!-- [新增] 更新介绍 -->
-    <div class="absolute bottom-4 right-4 bg-gray-900 bg-opacity-70 p-4 rounded-lg shadow-lg max-w-xs text-sm text-gray-400">
+    <!-- [修改] 更新日志 (增加 z-index) -->
+    <div class="absolute bottom-4 right-4 bg-gray-900 bg-opacity-70 p-4 rounded-lg shadow-lg max-w-xs text-sm text-gray-400 z-10">
         <h3 class="font-bold text-base text-gray-200 mb-2 border-b border-gray-700 pb-1">更新日志</h3>
         {% if update_notes %}
             <ul class="list-none space-y-1">
@@ -28,5 +66,28 @@
             <p>暂无更新记录。</p>
         {% endif %}
     </div>
+
+    <!-- [新增] 规则模态框 -->
+    <div id="rules-modal-backdrop" onclick="closeRulesModal()">
+        <!-- 阻止点击内容区域关闭模态框 -->
+        <div id="rules-modal-content" onclick="event.stopPropagation()">
+            <button onclick="closeRulesModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white text-3xl font-bold">&times;</button>
+            <!-- 规则内容将由 Flask 注入 -->
+            {{ rules_html | safe }}
+        </div>
+    </div>
+
+    <!-- [新增] 模态框控制脚本 -->
+    <script>
+        const modalBackdrop = document.getElementById('rules-modal-backdrop');
+
+        function openRulesModal() {
+            modalBackdrop.style.display = 'flex';
+        }
+
+        function closeRulesModal() {
+            modalBackdrop.style.display = 'none';
+        }
+    </script>
 </body>
 </html>

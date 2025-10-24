@@ -59,7 +59,7 @@
                         <label for="left_arm_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
                              <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
                             <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
-                            <p class="text-sm">动作: {{ part.actions[0].name if part.actions else '无' }}</p>
+                            <p class="text-sm">动作: {{ part.actions | map(attribute='name') | join(', ') if part.actions else '无' }}</p>
                         </label>
                     </div>
                     {% endfor %}
@@ -74,7 +74,7 @@
                         <label for="right_arm_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
                             <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
                             <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
-                            <p class="text-sm">动作: {{ part.actions[0].name if part.actions else '无' }}</p>
+                            <p class="text-sm">动作: {{ part.actions | map(attribute='name') | join(', ') if part.actions else '无' }}</p>
                         </label>
                     </div>
                     {% endfor %}

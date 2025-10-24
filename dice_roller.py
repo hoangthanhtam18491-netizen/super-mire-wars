@@ -11,6 +11,13 @@ DICE_FACES = {
     'blue': ['evasion', 'evasion', 'eye', 'eye', 'lightning', 'blank', 'blank', 'blank']
 }
 
+# [新增] 定义黑骰子的面
+BLACK_DIE_FACES = ['core', 'legs', 'left_arm', 'right_arm', 'backpack', 'any']
+
+def roll_black_die():
+    """投掷一个黑骰子（部位骰）并返回结果。"""
+    return random.choice(BLACK_DIE_FACES)
+
 # 用于将骰面结果映射到中文名称
 RESULT_MAP = {
     'heavy_hit': '重击',

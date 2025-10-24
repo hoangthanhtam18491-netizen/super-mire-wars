@@ -250,8 +250,18 @@
         });
     }
 
-    function initiateAttack(x, y, isBackAttack) { selectedAction.targetPos = [x, y]; if (isBackAttack) { showPartSelector(); } else { executeAttack(); }}
+    function initiateAttack(x, y, isBackAttack) {
+        selectedAction.targetPos = [x, y];
+        if (isBackAttack) {
+            // [修改] 背击时，总是显示部位选择器，让玩家选择
+            showPartSelector();
+        } else {
+            // 非背击，直接执行攻击（后端会投骰子）
+            executeAttack();
+        }
+    }
 
+D
     function showPartSelector() {
         const modal = document.getElementById('part-selector-modal'), buttons = document.getElementById('part-buttons'); buttons.innerHTML = '';
         const aiParts = {{ game.ai_mech.to_dict()['parts'] | tojson }};
@@ -260,7 +270,15 @@
     }
 
     function closePartSelector() { document.getElementById('part-selector-modal').style.display = 'none'; clearHighlights(); }
-    function confirmPartSelection(partSlot) { selectedAction.targetPartName = partSlot; closePartSelector(); executeAttack(); }
+
+    function confirmPartSelection(partSlot) {
+        selectedAction.targetPartName = partSlot;
+        closePartSelector();
+        // [修改] 确认选择后，*总是*调用 executeAttack
+        // 无论是背击还是黑骰子 'any'，这都是下一步
+        executeAttack();
+    }
+
     function showOrientationSelector(x, y, isRotationOnly = false) { const s = document.getElementById('orientation-selector'); document.getElementById(`cell-${x}-${y}`).appendChild(s); s.style.display = 'flex'; selectedAction.targetPos = [x, y]; selectedAction.isRotationOnly = isRotationOnly; }
     function setFinalOrientation(o) { selectedAction.finalOrientation = o; executeMove(); }
 
@@ -269,10 +287,19 @@
         .then(res => res.json())
         .then(data => {
             if(data.success) {
-                window.location.reload();
+                // [新增] 检查是否需要后续动作
+                if (data.action_required === 'select_part') {
+                    // 黑骰子掷出了 'any'，或者这是一个背击
+                    // 我们不需要重载，只需要打开弹窗
+                    console.log("服务器要求选择部位...");
+                    showPartSelector();
+                } else {
+                    // 正常重载
+                    window.location.reload();
+                }
             } else if (data.message) {
                 console.error('Action failed:', data.message);
-                window.location.reload();
+                window.location.reload(); // [修改] 即使失败也重载，以同步服务器日志
             }
         });
     }
@@ -294,14 +321,31 @@
     }
 
     function executeAttack() {
+        // [修改] 检查 selectedAction.targetPartName 是否已存在
+        // 如果存在 (来自 showPartSelector -> confirmPartSelection)，
+        // 这意味着这是背击或黑骰子掷出 'any' 后的第二次调用。
         let body = {
             action_name: selectedAction.name,
             target_pos: selectedAction.targetPos,
             part_slot: selectedAction.slot
         };
-        if (selectedAction.targetPartName) { body.target_part_name = selectedAction.targetPartName; }
+
+        // 如果玩家已经通过弹窗选择了部位 (无论是背击还是黑骰子'any')
+        if (selectedAction.targetPartName) {
+            body.target_part_name = selectedAction.targetPartName;
+            // [重要] 执行后清除，以便下次攻击是新的
+            delete selectedAction.targetPartName;
+        }
+
+        // 无论如何都发送请求
+        // 1. 如果是背击 (第一次), body 没有 target_part_name -> 后端返回 'select_part'
+        // 2. 如果是正面/非招架, body 没有 target_part_name -> 后端投骰子:
+        //    a. 结果是 'core' 等 -> 后端直接结算并重载
+        //    b. 结果是 'any' -> 后端返回 'select_part'
+        // 3. 如果是背击/any 后的第二次调用, body 有 target_part_name -> 后端直接结算
         postAndReload('/execute_attack', body);
     }
 </script>
 </body>
 </html>
+
