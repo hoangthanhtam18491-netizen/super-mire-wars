@@ -1,12 +1,13 @@
 class Action:
     """定义一个动作，如攻击或移动。"""
 
-    def __init__(self, name, action_type, cost, dice, range_val=0):
+    def __init__(self, name, action_type, cost, dice, range_val=0, effects=None):
         self.name = name
         self.action_type = action_type  # '近战', '射击', '移动'
         self.cost = cost  # 'S', 'M', 'L'
         self.dice = dice  # e.g., '1黄3红'
         self.range_val = range_val
+        self.effects = effects if effects is not None else {}  # [新增] 效果字典
 
     def to_dict(self):
         """将Action对象序列化为字典。"""
@@ -16,12 +17,20 @@ class Action:
             'cost': self.cost,
             'dice': self.dice,
             'range_val': self.range_val,
+            'effects': self.effects,  # [新增]
         }
 
     @classmethod
     def from_dict(cls, data):
         """从字典创建Action对象。"""
-        return cls(**data)
+        return cls(
+            name=data['name'],
+            action_type=data['action_type'],
+            cost=data['cost'],
+            dice=data['dice'],
+            range_val=data.get('range_val', 0),
+            effects=data.get('effects', {}),  # [新增]
+        )
 
 
 class Part:
@@ -100,13 +109,13 @@ class Mech:
         for part_slot, part in self.parts.items():
             if part.status != 'destroyed':
                 for action in part.actions:
-                    all_actions.append( (action, part_slot) )
+                    all_actions.append((action, part_slot))
         return all_actions
 
     def get_part_by_name(self, name_or_slot):
         """
-        [已修正] 根据部件的显示名称或其槽位名称获取部件对象。
-        优先匹配显示名称，如果找不到，则尝试匹配槽位名。
+        根据部件的显示名称或其槽位名（'core', 'legs'等）获取部件对象。
+        优先匹配显示名称。
         """
         for part in self.parts.values():
             if part.name == name_or_slot:

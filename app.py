@@ -1,105 +1,62 @@
 import os
 import random
-import re  # [新增] 导入 re 用于简单的 Markdown 转换
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 from data_models import Mech, Part, Action
 from combat_system import resolve_attack
+from dice_roller import roll_black_die
 from game_logic import (
     GameState, is_back_attack, create_mech_from_selection, get_player_lock_status,
-    AI_LOADOUTS
+    AI_LOADOUTS,
+    _get_distance, is_in_forward_arc  # [新增] 导入距离和视线函数
 )
 from ai_system import run_ai_turn
-from dice_roller import roll_dice, roll_black_die  # 导入 roll_black_die
 from parts_database import (
     PLAYER_CORES, PLAYER_LEGS, PLAYER_LEFT_ARMS, PLAYER_RIGHT_ARMS, PLAYER_BACKPACKS
 )
+# [新增] 导入 markdown 和 bleach 用于规则显示
+import markdown
+import bleach
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # 用于 session 加密
-
-
-# --- [新增] Markdown 转换辅助函数 ---
-def convert_md_to_html(md_text):
-    """一个简单的 Markdown 到 HTML 的转换器，用于规则显示。"""
-    html_lines = []
-    in_list = False
-
-    for line in md_text.split('\n'):
-        line_stripped = line.strip()
-
-        if not line_stripped:
-            if in_list:
-                html_lines.append('</ul>')
-                in_list = False
-            html_lines.append('<br>')
-            continue
-
-        if line_stripped.startswith('## '):
-            if in_list:
-                html_lines.append('</ul>')
-                in_list = False
-            html_lines.append(f'<h3 class="text-2xl font-bold mt-4 mb-2 text-blue-300">{line_stripped[3:]}</h3>')
-        elif line_stripped.startswith('# '):
-            if in_list:
-                html_lines.append('</ul>')
-                in_list = False
-            html_lines.append(f'<h2 class="text-3xl font-bold mb-4 text-blue-400">{line_stripped[2:]}</h2>')
-        elif line_stripped.startswith('* '):
-            if not in_list:
-                html_lines.append('<ul class="list-disc list-inside text-left space-y-2">')
-                in_list = True
-            html_lines.append(f'<li>{line_stripped[2:]}</li>')
-        else:
-            if in_list:
-                html_lines.append('</ul>')
-                in_list = False
-            # 将 [文本] 替换为高亮
-            line_with_markup = re.sub(r'\[(.*?)\]', r'<span class="text-yellow-400">[\1]</span>', line_stripped)
-            # 将 `text` 替换为高亮
-            line_with_markup = re.sub(r'`(.*?)`',
-                                      r'<code class="bg-gray-900 text-green-300 px-2 py-1 rounded">\1</code>',
-                                      line_with_markup)
-            html_lines.append(f'<p class="text-left">{line_with_markup}</p>')
-
-    if in_list:
-        html_lines.append('</ul>')
-
-    return '\n'.join(html_lines)
-
-
-# --- 辅助函数结束 ---
 
 
 # --- 核心路由 ---
 
 @app.route('/')
 def index():
-    """[修改] 显示开始页面，并加载规则。"""
+    """渲染游戏的主索引/开始页面。"""
+    # [新增] 在这里编写更新介绍
     update_notes = [
-        "版本 v1.1 更新:",
+        "版本 v1.2 更新:",
         "- 增加了几个新的部件",
         "- 强化了AI的智力。",
         "- 增加了两个新的AI对手",
-        "- 增加了规则介绍",
-        "- 补充了黑骰子的判定"
+        "- 修复了游戏介绍缺失",
+        "- 增加了个新的效果词条"
     ]
 
-    rules_html = "<h3>规则文件 (Game Introduction.md) 未找到。</h3>"
+    # [新增] 读取并转换规则 Markdown 文件
+    rules_html = ""
     try:
-        # 假设规则文件位于 Flask 应用的根目录
-        with open('Game Introduction.md', 'r', encoding='utf-8') as f:
+        with open("游戏规则介绍.md", "r", encoding="utf-8") as f:
             md_content = f.read()
-            rules_html = convert_md_to_html(md_content)
+            # 转换 Markdown 为 HTML
+            html = markdown.markdown(md_content)
+            # 清理 HTML，只允许安全的标签
+            allowed_tags = ['h1', 'h2', 'h3', 'p', 'ul', 'ol', 'li', 'strong', 'em', 'br', 'div']
+            rules_html = bleach.clean(html, tags=allowed_tags)
     except FileNotFoundError:
-        print("警告：未在根目录找到 'Game Introduction.md'。")
+        rules_html = "<p>错误：未找到 游戏规则介绍.md 文件。</p>"
     except Exception as e:
-        print(f"读取规则文件时出错: {e}")
+        rules_html = f"<p>加载规则时出错: {e}</p>"
 
     return render_template('index.html', update_notes=update_notes, rules_html=rules_html)
 
 
 @app.route('/hangar')
 def hangar():
+    """渲染机库页面，用于机甲组装和模式选择。"""
     return render_template(
         'hangar.html',
         cores=PLAYER_CORES,
@@ -113,7 +70,7 @@ def hangar():
 
 @app.route('/start_game', methods=['POST'])
 def start_game():
-    """[修改] 从机库接收机甲配置和游戏模式，并开始游戏。"""
+    """处理来自机库的表单，初始化游戏状态并重定向到游戏界面。"""
     selection = {
         'core': request.form.get('core'),
         'legs': request.form.get('legs'),
@@ -154,7 +111,7 @@ def start_game():
 
 @app.route('/game', methods=['GET'])
 def game():
-    """显示主游戏界面。"""
+    """渲染主游戏界面，显示棋盘、状态和日志。"""
     if 'game_state' not in session:
         return redirect(url_for('hangar'))
 
@@ -180,7 +137,7 @@ def game():
 
 @app.route('/reset_game', methods=['POST'])
 def reset_game():
-    """重置游戏会话并返回机库。"""
+    """清除会话数据，重置游戏并返回机库。"""
     session.pop('game_state', None)
     session.pop('combat_log', None)
     return redirect(url_for('hangar'))
@@ -188,7 +145,7 @@ def reset_game():
 
 @app.route('/end_turn', methods=['POST'])
 def end_turn():
-    """ [修改 v1.1] 玩家结束回合，触发 AI 回合 (支持多次攻击)。"""
+    """玩家结束回合，触发AI回合逻辑，并在AI行动后刷新游戏状态。"""
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over:
         return redirect(url_for('game'))
@@ -214,48 +171,46 @@ def end_turn():
 
         target_part_slot = None
 
-        # 1. 检查背击 (AI选择)
-        if back_attack:
-            log.append("> [背击] AI 随机选择目标部位...")
-            # [优化] AI 优先攻击已受损的部件
-            damaged_parts = [s for s, p in game_state_obj.player_mech.parts.items() if p.status == 'damaged']
-            if damaged_parts:
-                target_part_slot = random.choice(damaged_parts)
-            else:
-                valid_parts = [s for s, p in game_state_obj.player_mech.parts.items() if p.status != 'destroyed']
-                target_part_slot = random.choice(valid_parts) if valid_parts else 'core'
-
-        # 2. 检查近战招架 (玩家自动招架)
-        elif attack_action.action_type == '近战':
+        # 1. 检查招架 (如果不被背击)
+        if attack_action.action_type == '近战' and not back_attack:
             parry_parts = [(s, p) for s, p in game_state_obj.player_mech.parts.items() if
                            p.parry > 0 and p.status != 'destroyed']
             if parry_parts:
                 target_part_slot, best_parry_part = max(parry_parts, key=lambda item: item[1].parry)
                 log.append(f"> 玩家决定用 [{best_parry_part.name}] 进行招架！")
 
-        # 3. [修改] 投掷黑骰子
+        # 2. 如果不招架，则投掷黑骰子
         if not target_part_slot:
-            roll_result = roll_black_die()
-            log.append(f"> [部位骰] AI 投掷黑骰子，结果为: [{roll_result}]。")
+            hit_roll_result = roll_black_die()
+            log.append(f"> AI 投掷部位骰结果: 【{hit_roll_result}】")
 
-            if roll_result == 'any':
-                # AI获得“任意选择”权，逻辑同背击
-                log.append("> AI 获得任意选择权...")
+            if hit_roll_result == 'any' or back_attack:
+                if back_attack:
+                    log.append("> [背击] AI 获得任意选择权！")
+                else:
+                    log.append("> AI 获得任意选择权！")
+
+                # AI 优先攻击受损部件，其次是核心
                 damaged_parts = [s for s, p in game_state_obj.player_mech.parts.items() if p.status == 'damaged']
                 if damaged_parts:
                     target_part_slot = random.choice(damaged_parts)
+                    log.append(f"> AI 优先攻击已受损部件: [{target_part_slot}]。")
+                elif game_state_obj.player_mech.parts['core'].status != 'destroyed':
+                    target_part_slot = 'core'
+                    log.append("> AI 决定攻击 [核心]。")
                 else:
+                    # 如果核心已毁，随便选一个
                     valid_parts = [s for s, p in game_state_obj.player_mech.parts.items() if p.status != 'destroyed']
                     target_part_slot = random.choice(valid_parts) if valid_parts else 'core'
+
+            elif game_state_obj.player_mech.parts.get(hit_roll_result) and game_state_obj.player_mech.parts[
+                hit_roll_result].status != 'destroyed':
+                target_part_slot = hit_roll_result
             else:
-                target_part_slot = roll_result
-
-            # 检查骰子结果对应的部件是否已摧毁
-            target_part_obj = game_state_obj.player_mech.parts.get(target_part_slot)
-            if not target_part_obj or target_part_obj.status == 'destroyed':
-                log.append(f"> 部位 [{target_part_slot}] 已摧毁，自动命中 [core]。")
                 target_part_slot = 'core'
+                log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
 
+        # 3. 解析攻击
         attack_log, result = resolve_attack(
             attacker_mech=game_state_obj.ai_mech,
             defender_mech=game_state_obj.player_mech,
@@ -299,6 +254,7 @@ def end_turn():
 
 @app.route('/select_timing', methods=['POST'])
 def select_timing():
+    """(AJAX) 接收玩家选择的“时机”并更新会话。"""
     data = request.get_json()
     timing = data.get('timing')
     game_state_obj = GameState.from_dict(session.get('game_state'))
@@ -311,6 +267,7 @@ def select_timing():
 
 @app.route('/confirm_timing', methods=['POST'])
 def confirm_timing():
+    """(AJAX) 确认玩家的“时机”选择，并将游戏阶段推进到“姿态”。"""
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'timing' and game_state_obj.timing and not game_state_obj.game_over:
         game_state_obj.turn_phase = 'stance'
@@ -324,6 +281,7 @@ def confirm_timing():
 
 @app.route('/change_stance', methods=['POST'])
 def change_stance():
+    """(AJAX) 接收玩家选择的“姿态”并更新会话。"""
     data = request.get_json()
     new_stance = data.get('stance')
     game_state_obj = GameState.from_dict(session.get('game_state'))
@@ -336,6 +294,7 @@ def change_stance():
 
 @app.route('/confirm_stance', methods=['POST'])
 def confirm_stance():
+    """(AJAX) 确认玩家的“姿态”选择，并将游戏阶段推进到“调整”。"""
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'stance' and not game_state_obj.game_over:
         game_state_obj.turn_phase = 'adjustment'
@@ -349,6 +308,7 @@ def confirm_stance():
 
 @app.route('/execute_adjust_move', methods=['POST'])
 def execute_adjust_move():
+    """(AJAX) 处理玩家的“调整移动”动作，消耗TP并推进到“主动作”。"""
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'adjustment' and game_state_obj.player_tp >= 1 and not game_state_obj.game_over:
@@ -366,6 +326,7 @@ def execute_adjust_move():
 
 @app.route('/change_orientation', methods=['POST'])
 def change_orientation():
+    """(AJAX) 处理玩家仅“调整转向”的动作，消耗TP并推进到“主动作”。"""
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'adjustment' and game_state_obj.player_tp >= 1 and not game_state_obj.game_over:
@@ -382,6 +343,7 @@ def change_orientation():
 
 @app.route('/skip_adjustment', methods=['POST'])
 def skip_adjustment():
+    """(AJAX) 处理玩家跳过“调整阶段”的请求，推进到“主动作”。"""
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'adjustment' and not game_state_obj.game_over:
         game_state_obj.turn_phase = 'main'
@@ -396,6 +358,7 @@ def skip_adjustment():
 def execute_main_action(game, action, action_name, part_slot):
     """
     (服务器端) 验证并执行一个主动作。
+    检查AP/TP消耗、起手动作规则和动作是否已使用。
     """
     log = session.get('combat_log', [])
     action_id = (part_slot, action_name)
@@ -436,6 +399,7 @@ def execute_main_action(game, action, action_name, part_slot):
 
 @app.route('/move_player', methods=['POST'])
 def move_player():
+    """(AJAX) 处理玩家的“移动”类型动作（非调整移动）。"""
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over: return jsonify({'success': False})
@@ -449,28 +413,28 @@ def move_player():
         if part.status != 'destroyed':
             action = next((a for a in part.actions if a.name == action_name), None)
 
-    # [修改] 移动动作也使用新的逻辑流程
-    # 1. 验证 AP/TP 消耗
-    if not (game_state_obj.turn_phase == 'main' and action and execute_main_action(game_state_obj, action, action_name,
-                                                                                   part_slot)):
-        # execute_main_action 已经记录了错误日志
-        return jsonify({'success': False})
-
-    # 2. 执行移动
-    game_state_obj.player_pos = tuple(data.get('target_pos'))
-    game_state_obj.player_mech.orientation = data.get('final_orientation')
-    session['game_state'] = game_state_obj.to_dict()
-    log = session.get('combat_log', [])
-    log.append(f"> 玩家执行 [{action.name}]。")
-    session['combat_log'] = log
-    return jsonify({'success': True})
+    if game_state_obj.turn_phase == 'main' and action and execute_main_action(game_state_obj, action, action_name,
+                                                                              part_slot):
+        game_state_obj.player_pos = tuple(data.get('target_pos'))
+        game_state_obj.player_mech.orientation = data.get('final_orientation')
+        session['game_state'] = game_state_obj.to_dict()
+        log = session.get('combat_log', [])
+        log.append(f"> 玩家执行 [{action.name}]。")
+        session['combat_log'] = log
+        return jsonify({'success': True})
+    return jsonify({'success': False})
 
 
 @app.route('/execute_attack', methods=['POST'])
 def execute_attack():
+    """
+    (AJAX) 处理玩家的“攻击”动作（近战或射击）。
+    这是核心的战斗路由，负责处理目标选择、射程验证、近战锁定检查，
+    并在必要时（如背击或掷出'any'）请求前端选择部位。
+    """
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
-    log = session.get('combat_log', [])
+    log = session.get('combat_log', [])  # [修改] 提早获取日志
     if game_state_obj.game_over: return jsonify({'success': False})
 
     action_name = data.get('action_name')
@@ -482,75 +446,99 @@ def execute_attack():
         if part.status != 'destroyed':
             attack_action = next((a for a in part.actions if a.name == action_name), None)
 
-    if not attack_action:
-        log.append(f"> [错误] 无法找到动作: {action_name}。")
-        session['combat_log'] = log
-        return jsonify({'success': False, 'message': '动作未找到。'})
+    # [修改] 将 execute_main_action 移到所有检查之后
+    if game_state_obj.turn_phase == 'main' and attack_action:
 
-    if game_state_obj.turn_phase != 'main':
-        log.append(f"> [错误] 非主要动作阶段。")
-        session['combat_log'] = log
-        return jsonify({'success': False, 'message': '非主要动作阶段。'})
+        # [新增] 服务器端射程验证（包含【静止】效果）
+        if attack_action.action_type == '射击':
+            effective_range = attack_action.range_val
+            static_bonus = attack_action.effects.get("static_range_bonus", 0)
 
-    # --- [BUG修复] 新的逻辑流程 ---
+            if static_bonus > 0 and game_state_obj.player_tp >= 1:
+                effective_range += static_bonus
+                log.append(f"> 动作效果【静止】触发！射程 +{static_bonus}。")
 
-    # 1. 确定目标 (背击, 招架, 黑骰子)
-    target_part_slot = data.get('target_part_name')
-    is_target_determined = (target_part_slot is not None)
+            target_pos_tuple = tuple(data.get('target_pos'))
+            dist = _get_distance(game_state_obj.player_pos, target_pos_tuple)
 
-    back_attack = is_back_attack(game_state_obj.player_pos, game_state_obj.ai_pos,
-                                 game_state_obj.ai_mech.orientation)
-
-    if not is_target_determined:
-        if back_attack:
-            log.append("> [背击] 请选择目标部位。")
-            session['combat_log'] = log
-            return jsonify({'success': True, 'action_required': 'select_part'})
-
-        if attack_action.action_type == '近战':
-            parry_parts = [(s, p) for s, p in game_state_obj.ai_mech.parts.items() if
-                           p.parry > 0 and p.status != 'destroyed']
-            if parry_parts:
-                target_part_slot, parry_part_obj = max(parry_parts, key=lambda item: item[1].parry)
-                log.append(f"> AI 决定用 [{parry_part_obj.name}] 进行招架！")
-                is_target_determined = True
-
-        if not is_target_determined:
-            roll_result = roll_black_die()
-            log.append(f"> [部位骰] 玩家投掷黑骰子，结果为: [{roll_result}]。")
-
-            if roll_result == 'any':
-                log.append("> 玩家获得任意选择权！请选择目标部位。")
+            if dist > effective_range:
+                log.append(f"> [错误] 目标超出有效射程 {effective_range} (距离 {dist})。")
                 session['combat_log'] = log
-                return jsonify({'success': True, 'action_required': 'select_part'})
+                return jsonify({'success': False, 'message': 'Target out of range.'})
 
-            target_part_slot = roll_result
-            is_target_determined = True
+            if not is_in_forward_arc(game_state_obj.player_pos, game_state_obj.player_mech.orientation,
+                                     target_pos_tuple):
+                log.append(f"> [错误] 目标不在前方视线内。")
+                session['combat_log'] = log
+                return jsonify({'success': False, 'message': 'Target not in forward arc.'})
 
-            # 检查骰子结果对应的部件是否已摧毁
-            target_part_obj = game_state_obj.ai_mech.parts.get(target_part_slot)
-            if not target_part_obj or target_part_obj.status == 'destroyed':
-                log.append(f"> 部位 [{target_part_slot}] 已摧毁，自动命中 [core]。")
-                target_part_slot = 'core'
+        # [新增] 验证近战射程
+        if attack_action.action_type == '近战':
+            # 使用 calculate_attack_range 验证目标是否合法
+            valid_targets = game_state_obj.calculate_attack_range(
+                game_state_obj.player_mech,
+                game_state_obj.player_pos,
+                attack_action
+            )
+            if not any(t['pos'] == tuple(data.get('target_pos')) for t in valid_targets):
+                log.append(f"> [错误] 目标不在近战攻击范围内。")
+                session['combat_log'] = log
+                return jsonify({'success': False, 'message': 'Target out of melee range.'})
 
-    # 2. 如果目标已确定 (无论是第一次还是第二次请求)，则消耗AP并执行
-    if is_target_determined:
-
-        # 2a. [BUG修复] 在这里消耗 AP/TP
-        if not execute_main_action(game_state_obj, attack_action, action_name, part_slot):
-            # AP/TP 不足, 或动作已使用
-            # execute_main_action 已经记录了日志
-            return jsonify({'success': False, 'message': '动作执行失败。'})
-
-        # 2b. 检查近战锁定
+        # --- 检查锁定 ---
         is_player_locked, _ = get_player_lock_status(game_state_obj)
         if is_player_locked and attack_action.action_type == '射击':
             log.append(f"> [错误] 你被近战锁定，无法执行 [{attack_action.name}]！")
             session['combat_log'] = log
-            # 注意：AP/TP 已经被消耗了，因为这是规则（尝试射击但失败）
-            return jsonify({'success': True})  # 返回True以重载并显示日志
+            return jsonify({'success': False, 'message': '被近战锁定，无法射击！'})
 
-        # 2c. 解析攻击
+        # --- 检查目标选择 ---
+        back_attack = is_back_attack(game_state_obj.player_pos, game_state_obj.ai_pos,
+                                     game_state_obj.ai_mech.orientation)
+
+        target_part_slot = data.get('target_part_name')
+
+        if not target_part_slot:
+            # 1. 检查背击 (玩家优先选择)
+            if back_attack:
+                log.append("> [背击] 玩家获得任意选择权！请选择目标部位。")
+                session['combat_log'] = log
+                return jsonify({'success': True, 'action_required': 'select_part'})
+
+            # 2. 检查AI招架
+            if attack_action.action_type == '近战':
+                parry_parts = [(s, p) for s, p in game_state_obj.ai_mech.parts.items() if
+                               p.parry > 0 and p.status != 'destroyed']
+                if parry_parts:
+                    target_part_slot, best_parry_part = max(parry_parts, key=lambda item: item[1].parry)
+                    log.append(f"> AI 决定用 [{best_parry_part.name}] 进行招架！")
+
+            # 3. 投掷黑骰子
+            if not target_part_slot:
+                hit_roll_result = roll_black_die()
+                log.append(f"> 玩家投掷部位骰结果: 【{hit_roll_result}】")
+
+                if hit_roll_result == 'any':
+                    log.append("> 玩家获得任意选择权！请选择目标部位。")
+                    session['combat_log'] = log
+                    return jsonify({'success': True, 'action_required': 'select_part'})
+
+                elif game_state_obj.ai_mech.parts.get(hit_roll_result) and game_state_obj.ai_mech.parts[
+                    hit_roll_result].status != 'destroyed':
+                    target_part_slot = hit_roll_result
+                else:
+                    target_part_slot = 'core'
+                    log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
+
+        # --- 所有检查通过，现在执行动作（消耗AP/TP） ---
+        if not execute_main_action(game_state_obj, attack_action, action_name, part_slot):
+            # ... (如果AP/TP不足或起手动作错误，execute_main_action 会返回 False)
+            session['combat_log'] = log  # 确保日志被保存
+            return jsonify({'success': False, 'message': 'Action cost validation failed.'})
+
+        # --- 动作执行成功，开始结算 ---
+
+        # 解析攻击
         attack_log, result = resolve_attack(
             attacker_mech=game_state_obj.player_mech,
             defender_mech=game_state_obj.ai_mech,
@@ -560,12 +548,14 @@ def execute_attack():
         )
         log.extend(attack_log)
 
-        # 2d. 检查游戏结束
+        # [修改] 检查AI是否在这次攻击中被击败
         ai_was_defeated = game_state_obj.ai_mech.parts[
                               'core'].status == 'destroyed' or game_state_obj.ai_mech.get_active_parts_count() < 3
 
+        # [修改] check_game_over 现在会处理重生逻辑
         game_is_over = game_state_obj.check_game_over()
 
+        # [新增] 检查是否是Horde模式且AI被击败（现在 game_over is None 且 ai_mech 是全新的）
         if game_state_obj.game_mode == 'horde' and ai_was_defeated and not game_is_over:
             log.append(f"> [生存模式] 击败了 {game_state_obj.ai_defeat_count} 台敌机！")
             log.append(f"> [警告] 新的敌人出现: {game_state_obj.ai_mech.name}！")
@@ -574,16 +564,15 @@ def execute_attack():
         session['combat_log'] = log
         return jsonify({'success': True})
 
-    # 理论上不应该到达这里
-    log.append("[严重错误] 攻击逻辑未处理。")
-    session['combat_log'] = log
-    return jsonify({'success': False, 'message': '攻击逻辑未处理。'})
+    session['combat_log'] = log  # 确保即使攻击失败，日志也会被保存
+    return jsonify({'success': False})
 
 
 # --- 数据请求路由 ---
 
 @app.route('/get_move_range', methods=['POST'])
 def get_move_range():
+    """(AJAX) 根据请求的移动动作，计算并返回所有有效的移动格子坐标。"""
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over: return jsonify({'valid_moves': []})
@@ -618,6 +607,7 @@ def get_move_range():
 
 @app.route('/get_attack_range', methods=['POST'])
 def get_attack_range():
+    """(AJAX) 根据请求的攻击动作，计算并返回所有有效的攻击目标。"""
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over: return jsonify({'valid_targets': []})
@@ -631,12 +621,16 @@ def get_attack_range():
             action = next((a for a in part.actions if a.name == action_name), None)
 
     if action:
-        return jsonify({'valid_targets': game_state_obj.calculate_attack_range(game_state_obj.player_mech,
-                                                                               game_state_obj.player_pos, action)})
+        # [修改] 传入玩家当前的TP，以便计算【静止】效果
+        return jsonify({'valid_targets': game_state_obj.calculate_attack_range(
+            game_state_obj.player_mech,
+            game_state_obj.player_pos,
+            action,
+            current_tp=game_state_obj.player_tp  # [新增]
+        )})
     return jsonify({'valid_targets': []})
 
 
 if __name__ == '__main__':
     app.run(debug=True)
-
 

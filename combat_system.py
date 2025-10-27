@@ -15,6 +15,11 @@ def parse_dice_string(dice_str):
 
 
 def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_back_attack=False):
+    """
+        处理一次完整的攻击结算流程。
+        包括：确定目标 -> 投掷攻击骰 -> 投掷防御骰 -> 结算（抵消） -> 应用伤害和状态变化。
+        返回一个战斗日志列表和最终结果（'击穿'或'无效'）。
+        """
     # [已修正] 使用机甲的 name 属性动态生成日志
     log = [f"> {attacker_mech.name} 使用 [{action.name}] 攻击 {defender_mech.name}。"]
 
@@ -26,7 +31,7 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
     elif action.action_type == '近战' and target_part.parry > 0:
         log.append(f"  > {defender_mech.name} 决定用 [{target_part.name}] 进行招架！")
     else:
-        log.append(f"  > 随机命中部位为: {target_part.name} ({target_part_name} 槽位)。")
+        log.append(f"  > 命中部位为: {target_part.name} ({target_part_name} 槽位)。")
 
     # 2. 投掷攻击骰
     attack_dice_counts = parse_dice_string(action.dice)
@@ -42,6 +47,17 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
 
     # 3. 投掷受击骰
     white_dice_count = target_part.structure if target_part.status == 'damaged' else target_part.armor
+
+    # [新增] 检查动作的特殊效果
+    if action.effects:
+        # 检查【穿甲】效果
+        ap_value = action.effects.get("armor_piercing", 0)
+        if ap_value > 0:
+            log.append(f"  > 动作效果【穿甲{ap_value}】触发！")
+            original_dice = white_dice_count
+            white_dice_count = max(0, white_dice_count - ap_value)  # 确保白骰不为负数
+            log.append(f"  > 受击方白骰从 {original_dice} 减少为 {white_dice_count}。")
+
     blue_dice_count = defender_mech.get_total_evasion() if defender_mech.stance == 'agile' else 0
     if action.action_type == '近战' and target_part.parry > 0 and not is_back_attack:
         white_dice_count += target_part.parry

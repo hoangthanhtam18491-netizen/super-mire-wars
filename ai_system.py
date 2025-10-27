@@ -20,12 +20,11 @@ def _parse_dice_string_for_eval(dice_str):
     return yellow, red
 
 
-def _evaluate_action_strength(action, available_s_action_count, is_in_range=False):
+def _evaluate_action_strength(action, available_s_action_count, is_in_range):
+
     """
-    [修改 v1.5] 评估动作的强度，红骰权重更高。
-    用于AI决策（例如决定个性，选择最佳攻击）。
-    - available_s_action_count: AI本回合可用的S动作总数。
-    - is_in_range: 此动作是否当前就在射程内。
+    根据骰子、成本和射程，评估一个攻击动作的相对强度。
+    - available_s_action_count (int): AI本回合总共可用的S动作数量。
     """
     if not action: return 0
     if action.action_type not in ['近战', '射击']: return 0
@@ -35,18 +34,18 @@ def _evaluate_action_strength(action, available_s_action_count, is_in_range=Fals
     # 红骰 (重击概率高) 权重设为 1.5，黄骰 (轻击概率高) 权重设为 1
     strength = (yellow * 1.0) + (red * 1.5)
 
-    # 成本调整
+    # L/M/S 成本调整 (S 动作更有价值，L 动作成本高)
     if action.cost == 'S':
-        strength *= 1.2  # S 动作（1AP）更灵活，基础加分
+        strength *= 1.2  # S 动作（1AP）更灵活
+        # [新增 v1.5] 如果AI只有一个S动作，其价值降低
         if available_s_action_count == 1:
-            # [新规则] 只有一个S动作，价值降低 (0.7 pen)
-            # 因为S动作的价值在于能连续执行两次
-            strength *= 0.7
+            strength *= 0.7  # 惩罚：单独的S动作不如组合S动作
+
     elif action.cost == 'L':
-        strength *= 0.8  # L 动作（2AP+1TP）成本高，基础减分
+        strength *= 0.8  # L 动作（2AP+1TP）成本高
+        # [新增 v1.5] 如果L动作已经在射程内，价值提高
         if is_in_range:
-            # [新规则] L动作在射程内，价值大幅提升 (1.5 buff)
-            strength *= 1.5
+            strength *= 1.5  # 奖励：L动作已就位
 
     return strength
 
@@ -75,10 +74,10 @@ def _get_orientation_to_target(start_pos, target_pos):
         return 'S' if dy > 0 else 'N'
 
 
-def _calculate_ai_attack_range(game, action, start_pos, orientation, target_pos):
+def _calculate_ai_attack_range(game, action, start_pos, orientation, target_pos, current_tp=0):
     """
-    从AI的视角计算攻击范围，分离近战和射击。
-    此版本接受 start_pos 和 orientation 以便“预演”。
+    模拟计算AI在特定位置和朝向下，能否攻击到目标。
+    处理近战范围、射击视线和【静止】等效果。
     """
     targets = []
     sx, sy = start_pos
@@ -102,8 +101,16 @@ def _calculate_ai_attack_range(game, action, start_pos, orientation, target_pos)
     elif action.action_type == '射击':
         if not is_in_forward_arc(start_pos, orientation, target_pos):
             return []
+
+        # AI的动态射程计算
+        final_range = action.range_val
+        if action.effects:
+            bonus = action.effects.get("static_range_bonus", 0)
+            if bonus > 0 and current_tp >= 1:
+                final_range += bonus
+
         dist = _get_distance(start_pos, target_pos)
-        is_valid_target = (dist <= action.range_val)
+        is_valid_target = (dist <= final_range)
 
     if is_valid_target:
         targets.append({'pos': target_pos})
@@ -111,10 +118,12 @@ def _calculate_ai_attack_range(game, action, start_pos, orientation, target_pos)
     return targets
 
 
-def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_max, goal='ideal', action_to_check=None):
+def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_max, goal='ideal', action_to_check=None,
+                             current_tp=0):
     """
     使用 A* 寻路算法为 AI 寻找最佳移动位置。
-    (此函数的核心逻辑在 v1.0 中已足够健壮，无需修改)
+    根据 'goal' (ideal, farthest_in_range, closest) 来确定最佳落点。
+    会考虑近战锁定带来的额外移动成本。
     """
     start_pos = game.ai_pos
     target_pos = game.player_pos
@@ -145,7 +154,9 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
             start_pos_action_valid = False
         else:
             start_pos_action_valid = bool(
-                _calculate_ai_attack_range(game, action_to_check, start_pos, sim_orientation, target_pos))
+                # [修改] 传入 current_tp (代表AI不动时的TP)
+                _calculate_ai_attack_range(game, action_to_check, start_pos, sim_orientation, target_pos, current_tp)
+            )
 
     if start_pos_action_valid:
         best_spot_closest = start_pos
@@ -170,7 +181,8 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
                 is_action_valid = False
             else:
                 is_action_valid = bool(_calculate_ai_attack_range(
-                    game, action_to_check, current_pos, sim_orientation, target_pos
+                    game, action_to_check, current_pos, sim_orientation, target_pos,
+                    current_tp=0  # [修改] 传入 0，因为AI移动到这里TP就没了
                 ))
 
         if is_action_valid:
@@ -242,9 +254,9 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
 
 def run_ai_turn(game):
     """
-    [优化 v1.4] 运行AI的完整回合，强化姿态决策。
-    - AI 会在一个循环中尝试用完所有 AP。
-    - [重大] 返回一个 *攻击动作列表* (list of actions)。
+    AI回合的决策主函数。
+    依次执行：状态分析 -> 姿态决策 -> 调整移动决策 -> 主动作循环。
+    返回一个日志列表和一个待结算的攻击动作列表。
     """
     log = []
     ap = 2
@@ -284,29 +296,65 @@ def run_ai_turn(game):
         if action_id not in game.ai_actions_used_this_turn:
             available_actions.append((action, part_slot))
 
-    # [新增 v1.5] 计算 S 动作总数
-    available_s_action_count = sum(1 for a, s in available_actions if a.cost == 'S')
-
     # "预演" 朝向
     sim_orientation = _get_orientation_to_target(game.ai_pos, game.player_pos)
 
     # [优化 v1.1] 使用 _evaluate_action_strength 评估最佳动作
-    # [修改 v1.5] 传入 S 动作数量, is_in_range=False (此时只是潜力评估)
+    # [修改 v1.5] 传递 S 动作数量和是否在射程内
+    available_s_actions_count = sum(1 for a, s in available_actions if a.cost == 'S')
+
+    # [修改] 评估时传入当前的tp (此时为1)
+    melee_actions_now = [
+        (a, slot) for (a, slot) in available_actions if
+        a.action_type == '近战' and _calculate_ai_attack_range(game, a, game.ai_pos, sim_orientation,
+                                                               game.player_pos, current_tp=tp)
+    ]
+    shoot_actions_now = [
+        (a, slot) for (a, slot) in available_actions if
+        a.action_type == '射击' and _calculate_ai_attack_range(game, a, game.ai_pos, sim_orientation,
+                                                               game.player_pos, current_tp=tp) and not is_ai_locked
+    ]
+
     best_melee_tuple = max(
-        [(a, slot) for (a, slot) in available_actions if a.action_type == '近战'],
-        key=lambda item: _evaluate_action_strength(item[0], available_s_action_count, is_in_range=False),
+        melee_actions_now,
+        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, is_in_range=True),
         default=None
     )
     best_shoot_tuple = max(
-        [(a, slot) for (a, slot) in available_actions if a.action_type == '射击'],
-        key=lambda item: _evaluate_action_strength(item[0], available_s_action_count, is_in_range=False),
+        shoot_actions_now,
+        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, is_in_range=True),
         default=None
     )
 
-    best_melee_strength = _evaluate_action_strength(best_melee_tuple[0], available_s_action_count,
-                                                    is_in_range=False) if best_melee_tuple else 0
-    best_shoot_strength = _evaluate_action_strength(best_shoot_tuple[0], available_s_action_count,
-                                                    is_in_range=False) if best_shoot_tuple else 0
+    # [修改 v1.5] L 动作加分 (如果不在射程内)
+    best_l_melee_tuple = max(
+        [(a, slot) for (a, slot) in available_actions if a.action_type == '近战' and a.cost == 'L'],
+        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count,
+                                                   is_in_range=bool(melee_actions_now)),
+        default=None
+    )
+    best_l_shoot_tuple = max(
+        [(a, slot) for (a, slot) in available_actions if a.action_type == '射击' and a.cost == 'L'],
+        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count,
+                                                   is_in_range=bool(shoot_actions_now)),
+        default=None
+    )
+
+    # (合并评估)
+    if best_l_melee_tuple and _evaluate_action_strength(best_l_melee_tuple[0], available_s_actions_count,
+                                                        bool(melee_actions_now)) > _evaluate_action_strength(
+            best_melee_tuple[0] if best_melee_tuple else None, available_s_actions_count, True):
+        best_melee_tuple = best_l_melee_tuple
+
+    if best_l_shoot_tuple and _evaluate_action_strength(best_l_shoot_tuple[0], available_s_actions_count,
+                                                        bool(shoot_actions_now)) > _evaluate_action_strength(
+            best_shoot_tuple[0] if best_shoot_tuple else None, available_s_actions_count, True):
+        best_shoot_tuple = best_l_shoot_tuple
+
+    best_melee_strength = _evaluate_action_strength(best_melee_tuple[0], available_s_actions_count,
+                                                    True) if best_melee_tuple else 0
+    best_shoot_strength = _evaluate_action_strength(best_shoot_tuple[0], available_s_actions_count,
+                                                    True) if best_shoot_tuple else 0
 
     ai_personality = 'brawler'
     # [优化 v1.1] 使用 strength (强度) 而不是 dice 数量 (len)
@@ -314,19 +362,14 @@ def run_ai_turn(game):
         ai_personality = 'sniper'
 
     # [优化 v1.1] 在 "预演" 当前位置是否能攻击时，也使用 strength 排序
-    # [修改 v1.5] 传入 S 动作数量, is_in_range=True (因为此列表中的动作 *确实* 在射程内)
     melee_actions = sorted(
-        [(a, slot) for (a, slot) in available_actions if
-         a.action_type == '近战' and _calculate_ai_attack_range(game, a, game.ai_pos, sim_orientation,
-                                                                game.player_pos)],
-        key=lambda item: _evaluate_action_strength(item[0], available_s_action_count, is_in_range=True),
+        melee_actions_now,  # [修改] 使用已计算的列表
+        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, is_in_range=True),
         reverse=True
     )
     shoot_actions = sorted(
-        [(a, slot) for (a, slot) in available_actions if
-         a.action_type == '射击' and _calculate_ai_attack_range(game, a, game.ai_pos, sim_orientation,
-                                                                game.player_pos) and not is_ai_locked],
-        key=lambda item: _evaluate_action_strength(item[0], available_s_action_count, is_in_range=True),
+        shoot_actions_now,  # [修改] 使用已计算的列表
+        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, is_in_range=True),
         reverse=True
     )
 
@@ -337,7 +380,7 @@ def run_ai_turn(game):
     timing = '移动'
     stance = 'agile'  # [修改 v1.2] 默认姿态改为 'agile'
     best_attack_action_tuple = None
-    is_in_attack_range = bool(melee_actions) or bool(shoot_actions)
+    is_in_attack_range = bool(melee_actions) or bool(shoot_actions)  # [修改] 使用 melee_actions
 
     if ai_personality == 'brawler':
         if melee_actions:
@@ -415,18 +458,24 @@ def run_ai_turn(game):
 
         planned_attack_action = best_attack_action_tuple[0] if best_attack_action_tuple else None
         is_attack_planned = planned_attack_action is not None
-        is_in_range_now = bool(melee_actions) or bool(shoot_actions)
+        is_in_range_now = bool(melee_actions) or bool(shoot_actions)  # [修改]
 
         if is_attack_planned and is_in_range_now and planned_attack_action.cost != 'L' and not is_ai_locked:
             log.append(f"> AI 正在评估 '风筝' (Kiting) 移动...")
             attack_range_min, attack_range_max = (1, 1)
             if planned_attack_action.action_type == '射击':
                 attack_range_min = 1
-                attack_range_max = planned_attack_action.range_val
+                # [修改] 考虑【静止】效果
+                effective_range = planned_attack_action.range_val
+                if planned_attack_action.effects.get("static_range_bonus", 0) > 0 and tp >= 1:
+                    effective_range += planned_attack_action.effects.get("static_range_bonus", 0)
+                attack_range_max = effective_range
+
             kiting_pos = _find_best_move_position(game, adjust_move_val,
                                                   attack_range_min, attack_range_max,
                                                   goal='farthest_in_range',
-                                                  action_to_check=planned_attack_action)
+                                                  action_to_check=planned_attack_action,
+                                                  current_tp=tp)  # [修改] 传入tp
             if kiting_pos and _get_distance(kiting_pos, game.player_pos) > _get_distance(game.ai_pos, game.player_pos):
                 potential_adjust_move_pos = kiting_pos
                 potential_attack_timing = timing
@@ -438,7 +487,7 @@ def run_ai_turn(game):
             log.append(f"> AI 正在评估 '接近' (Approaching) 移动...")
             if best_melee_tuple and best_melee_tuple[0].cost != 'L':
                 ideal_pos_for_melee = _find_best_move_position(game, adjust_move_val, 1, 1, 'ideal',
-                                                               best_melee_tuple[0])
+                                                               best_melee_tuple[0], current_tp=tp)  # [修改] 传入tp
                 if ideal_pos_for_melee:
                     potential_adjust_move_pos = ideal_pos_for_melee
                     potential_attack_timing = '近战'
@@ -447,7 +496,7 @@ def run_ai_turn(game):
                 0].cost != 'L':
                 ideal_range_min, ideal_range_max = (5, 8) if ai_personality == 'sniper' else (2, 5)
                 ideal_pos_for_shoot = _find_best_move_position(game, adjust_move_val, ideal_range_min, ideal_range_max,
-                                                               'ideal', best_shoot_tuple[0])
+                                                               'ideal', best_shoot_tuple[0], current_tp=tp)  # [修改] 传入tp
                 if ideal_pos_for_shoot:
                     potential_adjust_move_pos = ideal_pos_for_shoot
                     potential_attack_timing = '射击'
@@ -485,29 +534,32 @@ def run_ai_turn(game):
             if action_id not in game.ai_actions_used_this_turn:
                 current_available_actions_tuples.append((action, part_slot))
 
-        # [新增 v1.5] 在循环内部重新计算 S 动作数量
-        current_s_action_count = sum(1 for a, s in current_available_actions_tuples if a.cost == 'S')
-
         if not current_available_actions_tuples:
             log.append("> AI 已无可用动作。")
             break  # 退出 while ap > 0 循环
+
+        # [新增 v1.5] 在循环开始时重新计算可用的S动作数量
+        current_available_s_count = sum(1 for a, s in current_available_actions_tuples if a.cost == 'S')
 
         # 2. 重新评估当前状况
         current_orientation = game.ai_mech.orientation
         is_ai_locked_now = get_ai_lock_status(game)[0]
 
-        # [修改 v1.5] 评估时传入 current_s_action_count 和 is_in_range=True
         possible_now_melee = sorted(
             [(a, slot) for (a, slot) in current_available_actions_tuples if
              a.action_type == '近战' and _calculate_ai_attack_range(game, a, game.ai_pos, current_orientation,
-                                                                    game.player_pos)],
-            key=lambda item: _evaluate_action_strength(item[0], current_s_action_count, is_in_range=True), reverse=True
+                                                                    game.player_pos, current_tp=tp)],  # [修改] 传入tp
+            key=lambda item: _evaluate_action_strength(item[0], current_available_s_count, is_in_range=True),
+            reverse=True
         )
         possible_now_shoot = sorted(
             [(a, slot) for (a, slot) in current_available_actions_tuples if
              a.action_type == '射击' and _calculate_ai_attack_range(game, a, game.ai_pos, current_orientation,
-                                                                    game.player_pos) and not is_ai_locked_now],
-            key=lambda item: _evaluate_action_strength(item[0], current_s_action_count, is_in_range=True), reverse=True
+                                                                    game.player_pos,
+                                                                    current_tp=tp) and not is_ai_locked_now],
+            # [修改] 传入tp
+            key=lambda item: _evaluate_action_strength(item[0], current_available_s_count, is_in_range=True),
+            reverse=True
         )
         possible_now_move = sorted(
             [(a, slot) for (a, slot) in current_available_actions_tuples if a.action_type == '移动'],
@@ -542,14 +594,13 @@ def run_ai_turn(game):
             all_possible_actions = possible_now_melee + possible_now_shoot + possible_now_move
 
             for (action, slot) in all_possible_actions:
-                cost_ap, cost_tp = _get_action_cost(action)
-                if ap < cost_ap or tp < cost_tp:
+                cost_ap, cost_tp_cost = _get_action_cost(action)  # [修正] 避免与 tp 变量重名
+                if ap < cost_ap or tp < cost_tp_cost:
                     continue  # 成本不足
 
                 strength = 0
                 if action.action_type in ['近战', '射击']:
-                    # [修改 v1.5] 评估时传入 current_s_action_count 和 is_in_range=True
-                    strength = _evaluate_action_strength(action, current_s_action_count, is_in_range=True)
+                    strength = _evaluate_action_strength(action, current_available_s_count, is_in_range=True)
                 elif action.action_type == '移动':
                     strength = 0.5  # 移动的优先级较低
 
@@ -602,15 +653,17 @@ def run_ai_turn(game):
 
             if ai_personality == 'brawler':
                 # 全力接近
-                ideal_move_pos = _find_best_move_position(game, action_obj.range_val, 1, 1, 'closest', None)
+                ideal_move_pos = _find_best_move_position(game, action_obj.range_val, 1, 1, 'closest', None,
+                                                          current_tp=0)
             else:  # 'sniper'
                 if is_ai_locked_now:
                     # 逃离
                     ideal_move_pos = _find_best_move_position(game, action_obj.range_val, 3, 15, 'farthest_in_range',
-                                                              None)
+                                                              None, current_tp=0)
                 else:
                     # 寻找理想距离
-                    ideal_move_pos = _find_best_move_position(game, action_obj.range_val, 5, 8, 'ideal', None)
+                    ideal_move_pos = _find_best_move_position(game, action_obj.range_val, 5, 8, 'ideal', None,
+                                                              current_tp=0)
 
             if ideal_move_pos and ideal_move_pos != game.ai_pos:
                 game.ai_pos = ideal_move_pos

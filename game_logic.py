@@ -6,7 +6,8 @@ from parts_database import (
     ALL_PARTS, CORES, LEGS, LEFT_ARMS, RIGHT_ARMS, BACKPACKS,
     ACTION_BENPAO, ACTION_JINGJU, ACTION_JUJI, ACTION_PAOJI,
     ACTION_CIJI, ACTION_DIANSHE, ACTION_HUIZHAN, ACTION_TIAOYUE,
-    ACTION_SUSHE, ACTION_DIANSHE_ZHAN, ACTION_DIANSHE_CI, ACTION_SUSHE_BIPAO
+    ACTION_SUSHE, ACTION_DIANSHE_ZHAN, ACTION_DIANSHE_CI, ACTION_SUSHE_BIPAO,
+    ACTION_BENPAO_MA  # [修正] 导入漏掉的动作
 )
 import random  # 导入 random
 
@@ -131,8 +132,8 @@ AI_LOADOUT_LIGHTA = {
     'selection': {
         'core': 'GK-08 "哨兵"核心',
         'legs': 'RL-03D “快马”高速下肢',
-        'left_arm': '猴版R-20 肩置磁轨炮（左）',
-        'right_arm': '猴版R-20 肩置磁轨炮（右）',
+        'left_arm': 'R-20 肩置磁轨炮（左）',
+        'right_arm': 'R-20 肩置磁轨炮（右）',
         'backpack': '未完成的TB-600 跳跃背包'
     }
 }
@@ -249,7 +250,7 @@ class GameState:
 
     def check_game_over(self):
         """
-        [修改] 检查游戏是否结束。
+        检查游戏是否结束。
         在 'horde' 模式下，AI被击败会重生。
         返回 True 表示游戏结束, False 表示游戏继续。
         """
@@ -320,7 +321,8 @@ class GameState:
 
     def calculate_move_range(self, start_pos, move_distance):
         """
-        [采用] 使用A* (Dijkstra) 算法计算移动范围，采用你更新的“简化脱离成本”逻辑。
+         使用 A* (Dijkstra) 算法计算从 'start_pos' 出发在 'move_distance' 内所有可达的格子。
+        会计算因“近战锁定”导致的额外移动成本。
         """
         pq = [(0, start_pos)]  # (cost, pos)
         visited = {start_pos: 0}
@@ -369,7 +371,11 @@ class GameState:
 
         return list(set(valid_moves))  # 去重
 
-    def calculate_attack_range(self, attacker_mech, start_pos, action):
+    def calculate_attack_range(self, attacker_mech, start_pos, action, current_tp=0):
+        """
+        计算一个攻击动作（近战或射击）的有效目标。
+        处理近战朝向、射击视线和动态射程（如【静止】效果）。
+        """
         targets = []
         target_pos = self.ai_pos
         sx, sy = start_pos
@@ -395,11 +401,20 @@ class GameState:
         elif action.action_type == '射击':
             if not is_in_forward_arc(start_pos, orientation, target_pos):
                 return []
-            dist = abs(sx - tx) + abs(sy - ty)
-            if dist <= action.range_val:
+
+            # [新增] 计算动态射程
+            final_range = action.range_val
+            if action.effects:
+                bonus = action.effects.get("static_range_bonus", 0)
+                if bonus > 0 and current_tp >= 1:  # 检查TP是否>=1
+                    final_range += bonus
+
+            dist = _get_distance(start_pos, target_pos)
+            if dist <= final_range:  # [修改] 使用 final_range
                 is_valid_target = True
 
         if is_valid_target:
             back_attack = is_back_attack(start_pos, target_pos, self.ai_mech.orientation)
             targets.append({'pos': target_pos, 'is_back_attack': back_attack})
         return targets
+

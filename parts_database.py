@@ -9,7 +9,8 @@ ACTION_HUIZHAN = Action(name='挥斩', action_type='近战', cost='S', dice='4�
 
 # 射击 (Ranged)
 ACTION_DIANSHE = Action(name="点射", action_type="射击", cost="M", dice="1黄3红", range_val=6)
-ACTION_DIANSHE_CI = Action(name="点射（磁）", action_type="射击", cost="S", dice="3红", range_val=6)
+# [修改] 增加 "static_range_bonus" 效果
+ACTION_DIANSHE_CI = Action(name="点射【磁】", action_type="射击", cost="S", dice="3红", range_val=6, effects={"armor_piercing": 1, "static_range_bonus": 2})
 ACTION_JUJI = Action(name="狙击", action_type="射击", cost="M", dice="2黄2红", range_val=12)
 ACTION_PAOJI = Action(name="炮击", action_type="射击", cost="L", dice="1黄4红", range_val=12)
 ACTION_SUSHE_BIPAO = Action(name="速射", action_type="射击", cost="S", dice="4黄", range_val=6)
@@ -40,14 +41,14 @@ PLAYER_LEGS = {
 
 PLAYER_LEFT_ARMS = {
     'CC-3 格斗刀': Part(name='CC-3 格斗刀', armor=4, structure=0, parry=1, actions=[ACTION_CIJI]),
-    '猴版R-20 肩置磁轨炮（左）': Part(name='猴版R-20 肩置磁轨炮（左）', armor=4, structure=0, parry=0, actions=[ACTION_DIANSHE_CI]),
+    'R-20 肩置磁轨炮（左）': Part(name='R-20 肩置磁轨炮（左）', armor=4, structure=0, parry=0, actions=[ACTION_DIANSHE_CI]),
     '62型 臂盾 + 未完成的CC-20 单手剑（左）': Part(name='62型 臂盾 + 未完成的CC-20 单手剑（左）', armor=5, structure=0, parry=3, actions=[ACTION_HUIZHAN]),
 }
 
 PLAYER_RIGHT_ARMS = {
     'AC-32 自动步枪': Part(name='AC-32 自动步枪', armor=4, structure=0, actions=[ACTION_DIANSHE]),
     '猴版AC-35 狙击步枪': Part(name='猴版AC-35 狙击步枪', armor=4, structure=0, actions=[ACTION_JUJI]),
-    '猴版R-20 肩置磁轨炮（右）': Part(name='猴版R-20 肩置磁轨炮（右）', armor=4, structure=0, parry=0, actions=[ACTION_DIANSHE_CI]),
+    'R-20 肩置磁轨炮（右）': Part(name='R-20 肩置磁轨炮（右）', armor=4, structure=0, parry=0, actions=[ACTION_DIANSHE_CI]),
     'AC-39 战术步枪': Part(name='AC-39 战术步枪', armor=4, structure=0, actions=[ACTION_SUSHE, ACTION_DIANSHE_ZHAN]),
     '63型 臂炮 + 未完成CC-20 单手剑（右）': Part(name='63型 臂炮 + 未完成CC-20 单手剑（右）', armor=4, structure=0, parry=2, actions=[ACTION_HUIZHAN, ACTION_SUSHE_BIPAO]),
 }
@@ -93,3 +94,5 @@ BACKPACKS = {**PLAYER_BACKPACKS, **AI_ONLY_BACKPACKS}
 # --- 整合到一个字典中，方便按名称查找 ---
 # [修正] 确保 ALL_PARTS 包含所有部件
 ALL_PARTS = {**CORES, **LEGS, **LEFT_ARMS, **RIGHT_ARMS, **BACKPACKS}
+
+
