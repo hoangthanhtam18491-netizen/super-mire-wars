@@ -39,7 +39,7 @@ def index():
     # [新增] 读取并转换规则 Markdown 文件
     rules_html = ""
     try:
-        with open("游戏规则介绍.md", "r", encoding="utf-8") as f:
+        with open("Game Introduction.md", "r", encoding="utf-8") as f:
             md_content = f.read()
             # 转换 Markdown 为 HTML
             html = markdown.markdown(md_content)
@@ -47,7 +47,7 @@ def index():
             allowed_tags = ['h1', 'h2', 'h3', 'p', 'ul', 'ol', 'li', 'strong', 'em', 'br', 'div']
             rules_html = bleach.clean(html, tags=allowed_tags)
     except FileNotFoundError:
-        rules_html = "<p>错误：未找到 游戏规则介绍.md 文件。</p>"
+        rules_html = "<p>错误：未找到 Game Introduction.md 文件。</p>"
     except Exception as e:
         rules_html = f"<p>加载规则时出错: {e}</p>"
 
