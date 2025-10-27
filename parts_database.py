@@ -6,6 +6,7 @@ from data_models import Action, Part
 ACTION_CIJI = Action(name="刺击", action_type="近战", cost="S", dice="3黄1红", range_val=1)
 ACTION_JINGJU = Action(name='近距开火', action_type='近战', cost='S', dice='5黄', range_val=1)
 ACTION_HUIZHAN = Action(name='挥斩', action_type='近战', cost='S', dice='4黄1红', range_val=1)
+ACTION_DUNJI = Action(name="盾击", action_type="近战", cost="S", dice="5黄", range_val=1)
 
 # 射击 (Ranged)
 ACTION_DIANSHE = Action(name="点射", action_type="射击", cost="M", dice="1黄3红", range_val=6)
@@ -43,6 +44,7 @@ PLAYER_LEFT_ARMS = {
     'CC-3 格斗刀': Part(name='CC-3 格斗刀', armor=4, structure=0, parry=1, actions=[ACTION_CIJI]),
     'R-20 肩置磁轨炮（左）': Part(name='R-20 肩置磁轨炮（左）', armor=4, structure=0, parry=0, actions=[ACTION_DIANSHE_CI]),
     '62型 臂盾 + 未完成的CC-20 单手剑（左）': Part(name='62型 臂盾 + 未完成的CC-20 单手剑（左）', armor=5, structure=0, parry=3, actions=[ACTION_HUIZHAN]),
+    '55型 轻盾': Part(name='55型 轻盾', armor=5, structure=0, parry=2, actions=[ACTION_DUNJI]),
 }
 
 PLAYER_RIGHT_ARMS = {
