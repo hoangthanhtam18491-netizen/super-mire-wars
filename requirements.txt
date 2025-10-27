@@ -1,2 +1,5 @@
+bleach==6.2.0
 gunicorn==23.0.0
+Markdown==3.9
 packaging==25.0
+webencodings==0.5.1
