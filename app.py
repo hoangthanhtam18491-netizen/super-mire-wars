@@ -84,14 +84,14 @@ def index():
         "- 补充了黑骰子的判定"
     ]
 
-    rules_html = "<h3>规则文件 (游戏规则介绍.md) 未找到。</h3>"
+    rules_html = "<h3>规则文件 (Game Introduction.md) 未找到。</h3>"
     try:
         # 假设规则文件位于 Flask 应用的根目录
-        with open('游戏规则介绍.md', 'r', encoding='utf-8') as f:
+        with open('Game Introduction.md', 'r', encoding='utf-8') as f:
             md_content = f.read()
             rules_html = convert_md_to_html(md_content)
     except FileNotFoundError:
-        print("警告：未在根目录找到 '游戏规则介绍.md'。")
+        print("警告：未在根目录找到 'Game Introduction.md'。")
     except Exception as e:
         print(f"读取规则文件时出错: {e}")
 
