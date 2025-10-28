@@ -10,7 +10,6 @@ ACTION_DUNJI = Action(name="盾击", action_type="近战", cost="S", dice="5黄"
 
 # 射击 (Ranged)
 ACTION_DIANSHE = Action(name="点射", action_type="射击", cost="M", dice="1黄3红", range_val=6)
-# [修改] 增加 "static_range_bonus" 效果
 ACTION_DIANSHE_CI = Action(name="点射【磁】", action_type="射击", cost="S", dice="3红", range_val=6, effects={"armor_piercing": 1, "static_range_bonus": 2})
 ACTION_JUJI = Action(name="狙击", action_type="射击", cost="M", dice="2黄2红", range_val=12)
 ACTION_PAOJI = Action(name="炮击", action_type="射击", cost="L", dice="1黄4红", range_val=12)
