@@ -35,7 +35,38 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
 
     # 2. 投掷攻击骰
     attack_dice_counts = parse_dice_string(action.dice)
+
+    # [新增] 检查攻击方的被动效果 (例如：增强冷却)
+    passive_effects = attacker_mech.get_passive_effects()
+    for effect_dict in passive_effects:
+        if "passive_dice_boost" in effect_dict:
+            boost_rule = effect_dict["passive_dice_boost"]
+            # 检查触发条件
+            if (attacker_mech.stance == boost_rule.get("trigger_stance") and
+                    action.action_type == boost_rule.get("trigger_type")):
+
+                dice_type_to_check = boost_rule.get("dice_type")  # e.g., "yellow_count"
+                base_count = attack_dice_counts.get(dice_type_to_check, 0)
+
+                if base_count > 0:
+                    ratio_base = boost_rule.get("ratio_base", 3)
+                    ratio_add = boost_rule.get("ratio_add", 1)
+                    # 计算加成
+                    bonus_dice = (base_count // ratio_base) * ratio_add
+                    if bonus_dice > 0:
+                        log.append(f"  > [被动效果: 增强冷却] 触发！")
+                        log.append(f"  > 攻击姿态下的射击动作，黄骰 {base_count} -> {base_count + bonus_dice}。")
+                        attack_dice_counts[dice_type_to_check] = base_count + bonus_dice
+
     attack_roll = roll_dice(**attack_dice_counts)
+    # [新增] 检查动作的特殊效果 (例如：频闪武器)
+    if action.effects:
+        # 检查【频闪武器】效果 (convert_lightning_to_crit)
+        if action.effects.get("convert_lightning_to_crit") and '闪电' in attack_roll:
+            lightning_count = attack_roll.pop('闪电')
+            attack_roll['重击'] = attack_roll.get('重击', 0) + lightning_count
+            log.append(f"  > 动作效果【频闪武器】触发！")
+            log.append(f"  > {lightning_count}个[闪电] 变为 {lightning_count}个[重击]。")
     if attacker_mech.stance == 'attack':
         if '空心轻击' in attack_roll:
             attack_roll['轻击'] = attack_roll.get('轻击', 0) + attack_roll.pop('空心轻击')

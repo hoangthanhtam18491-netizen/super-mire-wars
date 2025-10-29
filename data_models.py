@@ -136,6 +136,19 @@ class Mech:
         """计算未被摧毁的部件数量。"""
         return sum(1 for part in self.parts.values() if part.status != 'destroyed')
 
+    def get_passive_effects(self):
+        """
+        [新增] 收集机甲所有未摧毁部件上的所有被动动作的效果。
+        返回一个效果字典列表: [{'effect_name': {...}}, ...]
+        """
+        passive_effects = []
+        for part_slot, part in self.parts.items():
+            if part.status != 'destroyed':
+                for action in part.actions:
+                    if action.action_type == '被动' and action.effects:
+                        passive_effects.append(action.effects)
+        return passive_effects
+
     def to_dict(self):
         """将Mech对象序列化为字典。"""
         return {
