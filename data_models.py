@@ -37,7 +37,7 @@ class Part:
     """定义一个机甲部件。"""
 
     def __init__(self, name, armor, structure, parry=0, evasion=0, electronics=0, adjust_move=0, actions=None,
-                 status='ok'):
+                 status='ok', tags=None): # [新增] tags 属性
         self.name = name
         self.armor = armor
         self.structure = structure
@@ -47,6 +47,7 @@ class Part:
         self.adjust_move = adjust_move
         self.actions = actions if actions is not None else []
         self.status = status  # 'ok', 'damaged', 'destroyed'
+        self.tags = tags if tags is not None else [] # [新增] tags 列表
 
     def to_dict(self):
         """将Part对象序列化为字典。"""
@@ -59,7 +60,8 @@ class Part:
             'electronics': self.electronics,
             'adjust_move': self.adjust_move,
             'actions': [action.to_dict() for action in self.actions],
-            'status': self.status
+            'status': self.status,
+            'tags': self.tags,  # [新增]
         }
 
     @classmethod
@@ -77,7 +79,8 @@ class Part:
             electronics=data.get('electronics', 0),
             adjust_move=data.get('adjust_move', 0),
             actions=actions,
-            status=data.get('status', 'ok')
+            status=data.get('status', 'ok'),
+            tags=data.get('tags', []) # [新增]
         )
 
 

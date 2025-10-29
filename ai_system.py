@@ -21,10 +21,10 @@ def _parse_dice_string_for_eval(dice_str):
 
 
 def _evaluate_action_strength(action, available_s_action_count, is_in_range):
-
     """
-    根据骰子、成本和射程，评估一个攻击动作的相对强度。
+    根据骰子、成本、射程和效果，评估一个攻击动作的相对强度。
     - available_s_action_count (int): AI本回合总共可用的S动作数量。
+    [优化 v1.6] 加入对穿甲和毁伤效果的评估。
     """
     if not action: return 0
     if action.action_type not in ['近战', '射击']: return 0
@@ -47,10 +47,20 @@ def _evaluate_action_strength(action, available_s_action_count, is_in_range):
         if is_in_range:
             strength *= 1.5  # 奖励：L动作已就位
 
+    # [优化 v1.6] 效果强度加成
+    if action.effects:
+        # 穿甲效果 (每点穿甲增加 0.5 强度)
+        ap_bonus = action.effects.get("armor_piercing", 0) * 0.5
+        strength += ap_bonus
+
+        # 毁伤效果 (增加 1.0 强度)
+        if action.effects.get("devastating", False):
+            strength += 1.0
+
     return strength
 
 
-# --- [新增 v1.4] AI 动作成本辅助函数 ---
+# --- AI 动作成本辅助函数 ---
 def _get_action_cost(action):
     """(辅助函数) 获取动作的 AP/TP 成本。"""
     cost_ap = action.cost.count('M') * 2 + action.cost.count('S') * 1
@@ -105,15 +115,37 @@ def _calculate_ai_attack_range(game, action, start_pos, orientation, target_pos,
         # AI的动态射程计算
         final_range = action.range_val
         if action.effects:
-            bonus = action.effects.get("static_range_bonus", 0)
-            if bonus > 0 and current_tp >= 1:
-                final_range += bonus
+            # 1. 检查【静止】效果
+            static_bonus = action.effects.get("static_range_bonus", 0)
+            if static_bonus > 0 and current_tp >= 1:
+                final_range += static_bonus
+
+            # 2. 检查【双手】效果
+            two_handed_bonus = action.effects.get("two_handed_range_bonus", 0)
+            if two_handed_bonus > 0:
+                attacker_mech = game.ai_mech
+                part_slot_of_action = None
+                for slot, part in attacker_mech.parts.items():
+                    # 确保部件存在且未被摧毁
+                    if part and part.status != 'destroyed' and any(a.name == action.name for a in part.actions):
+                        part_slot_of_action = slot
+                        break
+
+                other_arm_part = None
+                if part_slot_of_action == 'left_arm':
+                    other_arm_part = attacker_mech.parts.get('right_arm')
+                elif part_slot_of_action == 'right_arm':
+                    other_arm_part = attacker_mech.parts.get('left_arm')
+
+                # 检查另一只手是否有【空手】标签且未被摧毁
+                if other_arm_part and other_arm_part.status != 'destroyed' and "【空手】" in other_arm_part.tags:
+                    final_range += two_handed_bonus
 
         dist = _get_distance(start_pos, target_pos)
         is_valid_target = (dist <= final_range)
 
     if is_valid_target:
-        targets.append({'pos': target_pos})
+        targets.append({'pos': target_pos}) # AI 只需知道目标位置即可
 
     return targets
 
@@ -131,7 +163,7 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
     # 锁定者 (玩家)
     locker_mech = game.player_mech
     locker_pos = game.player_pos
-    locker_can_lock = locker_mech.has_melee_action() and locker_mech.parts['core'].status != 'destroyed'
+    locker_can_lock = locker_mech and locker_mech.has_melee_action() and locker_mech.parts.get('core') and locker_mech.parts['core'].status != 'destroyed'
 
     pq = [(0, start_pos)]  # (cost, pos)
     visited = {start_pos: 0}  # {pos: cost}
@@ -142,10 +174,10 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
     dist_from_ideal_mid = float('inf')
     dist_for_farthest = -1
 
-    best_spot_closest = None  # [优化] 默认为 None，以便区分“没找到”和“起始点就是最佳”
+    best_spot_closest = None
     min_dist_found = _get_distance(start_pos, target_pos)
 
-    # [优化] 如果起始点满足要求，将其设为默认的 best_spot_closest
+    # 如果起始点满足要求，将其设为默认的 best_spot_closest
     start_pos_action_valid = True
     if action_to_check:
         sim_orientation = _get_orientation_to_target(start_pos, target_pos)
@@ -154,7 +186,6 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
             start_pos_action_valid = False
         else:
             start_pos_action_valid = bool(
-                # [修改] 传入 current_tp (代表AI不动时的TP)
                 _calculate_ai_attack_range(game, action_to_check, start_pos, sim_orientation, target_pos, current_tp)
             )
 
@@ -182,7 +213,7 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
             else:
                 is_action_valid = bool(_calculate_ai_attack_range(
                     game, action_to_check, current_pos, sim_orientation, target_pos,
-                    current_tp=0  # [修改] 传入 0，因为AI移动到这里TP就没了
+                    current_tp=0 # 移动后 TP 归零
                 ))
 
         if is_action_valid:
@@ -205,7 +236,6 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
                             dist_from_ideal_mid = new_dist_from_mid
 
             # 目标 2: 'closest'
-            # [优化] 确保 best_spot_closest 被初始化
             if best_spot_closest is None:
                 best_spot_closest = current_pos
                 min_dist_found = current_dist
@@ -213,8 +243,8 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
                 min_dist_found = current_dist
                 best_spot_closest = current_pos
             elif current_dist == min_dist_found:
-                # [优化] 检查 visited[best_spot_closest] 是否存在
-                if best_spot_closest not in visited or cost < visited[best_spot_closest]:
+                # 如果距离相同，优先选择成本更低的位置
+                if best_spot_closest not in visited or cost < visited.get(best_spot_closest, float('inf')):
                     best_spot_closest = current_pos
 
         # --- 探索邻居 ---
@@ -230,12 +260,12 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
 
             if not (1 <= nx <= game.board_width and 1 <= ny <= game.board_height):
                 continue
-            if next_pos == game.player_pos:
+            if next_pos == game.player_pos: # 不能移动到玩家位置
                 continue
 
             move_cost = 1
             if current_is_locked:
-                move_cost += 1
+                move_cost += 1 # 脱离锁定增加成本
             new_cost = cost + move_cost
 
             if new_cost <= move_distance and (next_pos not in visited or new_cost < visited[next_pos]):
@@ -249,6 +279,63 @@ def _find_best_move_position(game, move_distance, ideal_range_min, ideal_range_m
         return best_spot_closest
     return None
 
+# [优化 v1.6] 新增辅助函数：寻找最远的可移动位置
+def _find_farthest_move_position(game, move_distance):
+    """
+    使用 BFS 寻找在移动距离内，离玩家最远的有效格子。
+    """
+    start_pos = game.ai_pos
+    target_pos = game.player_pos
+    queue = [(start_pos, 0)]  # (pos, cost)
+    visited = {start_pos}
+    reachable_positions = [] # 存储所有可达的位置及其成本
+
+    # 确定锁定者 (玩家) - 用于计算移动成本
+    locker_mech = game.player_mech
+    locker_pos = game.player_pos
+    locker_can_lock = locker_mech and locker_mech.has_melee_action() and locker_mech.parts.get('core') and locker_mech.parts['core'].status != 'destroyed'
+
+    while queue:
+        (x, y), cost = queue.pop(0)
+        current_pos = (x, y)
+
+        if cost > 0: # 必须是移动过的位置
+            reachable_positions.append((current_pos, cost))
+
+        current_is_locked = False
+        if locker_can_lock:
+             current_is_locked = _is_tile_locked_by_opponent(
+                 game, current_pos, game.ai_mech, locker_pos, locker_mech
+             )
+
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = x + dx, y + dy
+            next_pos = (nx, ny)
+
+            if not (1 <= nx <= game.board_width and 1 <= ny <= game.board_height):
+                continue
+            if next_pos == game.player_pos:
+                continue
+            if next_pos in visited:
+                continue
+
+            move_cost_step = 1
+            if current_is_locked:
+                move_cost_step += 1
+            new_cost = cost + move_cost_step
+
+            if new_cost <= move_distance:
+                visited.add(next_pos)
+                queue.append((next_pos, new_cost))
+
+    if not reachable_positions:
+        return None # 无法移动
+
+    # 找到距离玩家最远的位置
+    farthest_pos = max(reachable_positions, key=lambda item: (_get_distance(item[0], target_pos), -item[1]))[0] # 距离优先，然后成本低优先
+
+    return farthest_pos
+
 
 # --- AI 主逻辑 ---
 
@@ -261,9 +348,9 @@ def run_ai_turn(game):
     log = []
     ap = 2
     tp = 1
+    # [修正] 确保AI动作在回合开始时清空
     game.ai_actions_used_this_turn = []
 
-    # [v1.4] 这将存储所有需要 app.py 结算的攻击
     attacks_to_resolve_list = []
 
     # --- 阶段 0: 状态分析 ---
@@ -273,19 +360,17 @@ def run_ai_turn(game):
     total_evasion = game.ai_mech.get_total_evasion()
     log.append(f"> AI 总闪避值: {total_evasion}")
 
-    # [新增 v1.2] 分析 AI 自身状态
-    core_damaged = game.ai_mech.parts['core'].status == 'damaged'
-    legs_damaged = game.ai_mech.parts['legs'].status == 'damaged'
+    core_damaged = game.ai_mech.parts.get('core') and game.ai_mech.parts['core'].status == 'damaged'
+    legs_part = game.ai_mech.parts.get('legs')
+    legs_damaged = legs_part and legs_part.status == 'damaged'
     is_damaged = core_damaged or legs_damaged
     if is_damaged:
         log.append("> AI 关键部件 (核心或腿部) 已受损。")
 
-    # [新增 v1.2] 分析玩家威胁
     is_player_adjacent = _is_adjacent(game.ai_pos, game.player_pos)
 
-    # [新增 v1.3] 分析玩家状态 (用于激进决策)
-    player_core_status = game.player_mech.parts['core'].status
-    player_is_damaged = player_core_status == 'damaged'
+    player_core = game.player_mech.parts.get('core')
+    player_is_damaged = player_core and player_core.status == 'damaged'
     if player_is_damaged:
         log.append("> [AI 侦测] 玩家核心受损！")
 
@@ -294,16 +379,18 @@ def run_ai_turn(game):
     for action, part_slot in all_actions_raw:
         action_id = (part_slot, action.name)
         if action_id not in game.ai_actions_used_this_turn:
-            available_actions.append((action, part_slot))
+             # [新增] 检查部件是否被摧毁
+             part_obj = game.ai_mech.parts.get(part_slot)
+             if part_obj and part_obj.status != 'destroyed':
+                available_actions.append((action, part_slot))
+
 
     # "预演" 朝向
     sim_orientation = _get_orientation_to_target(game.ai_pos, game.player_pos)
 
-    # [优化 v1.1] 使用 _evaluate_action_strength 评估最佳动作
-    # [修改 v1.5] 传递 S 动作数量和是否在射程内
     available_s_actions_count = sum(1 for a, s in available_actions if a.cost == 'S')
 
-    # [修改] 评估时传入当前的tp (此时为1)
+    # 评估当前位置可用的攻击
     melee_actions_now = [
         (a, slot) for (a, slot) in available_actions if
         a.action_type == '近战' and _calculate_ai_attack_range(game, a, game.ai_pos, sim_orientation,
@@ -326,124 +413,99 @@ def run_ai_turn(game):
         default=None
     )
 
-    # [修改 v1.5] L 动作加分 (如果不在射程内)
+    # 评估所有可用的 L 动作 (即使不在射程内)
     best_l_melee_tuple = max(
         [(a, slot) for (a, slot) in available_actions if a.action_type == '近战' and a.cost == 'L'],
-        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count,
-                                                   is_in_range=bool(melee_actions_now)),
+        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, is_in_range=bool(melee_actions_now)),
         default=None
     )
     best_l_shoot_tuple = max(
         [(a, slot) for (a, slot) in available_actions if a.action_type == '射击' and a.cost == 'L'],
-        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count,
-                                                   is_in_range=bool(shoot_actions_now)),
+        key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, is_in_range=bool(shoot_actions_now)),
         default=None
     )
 
-    # (合并评估)
-    if best_l_melee_tuple and _evaluate_action_strength(best_l_melee_tuple[0], available_s_actions_count,
-                                                        bool(melee_actions_now)) > _evaluate_action_strength(
-            best_melee_tuple[0] if best_melee_tuple else None, available_s_actions_count, True):
+    # 合并评估 L 动作和非 L 动作，选出最佳近战和射击
+    current_best_melee_strength = _evaluate_action_strength(best_melee_tuple[0] if best_melee_tuple else None, available_s_actions_count, True)
+    l_melee_strength = _evaluate_action_strength(best_l_melee_tuple[0] if best_l_melee_tuple else None, available_s_actions_count, bool(melee_actions_now))
+    if l_melee_strength > current_best_melee_strength:
         best_melee_tuple = best_l_melee_tuple
 
-    if best_l_shoot_tuple and _evaluate_action_strength(best_l_shoot_tuple[0], available_s_actions_count,
-                                                        bool(shoot_actions_now)) > _evaluate_action_strength(
-            best_shoot_tuple[0] if best_shoot_tuple else None, available_s_actions_count, True):
+    current_best_shoot_strength = _evaluate_action_strength(best_shoot_tuple[0] if best_shoot_tuple else None, available_s_actions_count, True)
+    l_shoot_strength = _evaluate_action_strength(best_l_shoot_tuple[0] if best_l_shoot_tuple else None, available_s_actions_count, bool(shoot_actions_now))
+    if l_shoot_strength > current_best_shoot_strength:
         best_shoot_tuple = best_l_shoot_tuple
 
-    best_melee_strength = _evaluate_action_strength(best_melee_tuple[0], available_s_actions_count,
-                                                    True) if best_melee_tuple else 0
-    best_shoot_strength = _evaluate_action_strength(best_shoot_tuple[0], available_s_actions_count,
-                                                    True) if best_shoot_tuple else 0
+    # 最终的最佳强度
+    best_melee_strength = _evaluate_action_strength(best_melee_tuple[0] if best_melee_tuple else None, available_s_actions_count, bool(melee_actions_now or best_melee_tuple))
+    best_shoot_strength = _evaluate_action_strength(best_shoot_tuple[0] if best_shoot_tuple else None, available_s_actions_count, bool(shoot_actions_now or best_shoot_tuple))
 
+
+    # --- AI 个性与时机决策 ---
     ai_personality = 'brawler'
-    # [优化 v1.1] 使用 strength (强度) 而不是 dice 数量 (len)
     if best_shoot_strength > best_melee_strength:
         ai_personality = 'sniper'
 
-    # [优化 v1.1] 在 "预演" 当前位置是否能攻击时，也使用 strength 排序
     melee_actions = sorted(
-        melee_actions_now,  # [修改] 使用已计算的列表
+        melee_actions_now,
         key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, is_in_range=True),
         reverse=True
     )
     shoot_actions = sorted(
-        shoot_actions_now,  # [修改] 使用已计算的列表
+        shoot_actions_now,
         key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, is_in_range=True),
         reverse=True
     )
 
     move_action_tuple = next(((a, slot) for (a, slot) in available_actions if a.action_type == '移动'), None)
-    move_action = move_action_tuple[0] if move_action_tuple else None
 
-    # --- 阶段 1: 决策与时机 ---
     timing = '移动'
-    stance = 'agile'  # [修改 v1.2] 默认姿态改为 'agile'
+    stance = 'agile'
     best_attack_action_tuple = None
-    is_in_attack_range = bool(melee_actions) or bool(shoot_actions)  # [修改] 使用 melee_actions
+    is_in_attack_range = bool(melee_actions) or bool(shoot_actions)
 
     if ai_personality == 'brawler':
-        if melee_actions:
-            best_attack_action_tuple = melee_actions[0]  # [优化 v1.1] 用排序后的最佳动作
+        # 如果当前位置就能近战，或者有强力L近战动作
+        if melee_actions or (best_melee_tuple and best_melee_tuple[0].cost == 'L'):
             timing = '近战'
-            stance = 'attack'  # 默认 'attack'
-        else:
+            stance = 'attack'
+            best_attack_action_tuple = best_melee_tuple # 用评估出的最佳（可能 L）
+        else: # 需要移动才能近战
             timing = '移动'
-            stance = 'agile'  # 默认 'agile'
+            stance = 'agile'
     elif ai_personality == 'sniper':
-        if shoot_actions:
-            best_attack_action_tuple = shoot_actions[0]  # [优化 v1.1] 用排序后的最佳动作
+        if shoot_actions or (best_shoot_tuple and best_shoot_tuple[0].cost == 'L'):
             timing = '射击'
-            stance = 'attack'  # 默认 'attack'
-        else:
+            stance = 'attack'
+            best_attack_action_tuple = best_shoot_tuple # 用评估出的最佳（可能 L）
+        else: # 需要移动才能射击
             timing = '移动'
-            stance = 'agile'  # 默认 'agile'
+            stance = 'agile'
 
     log.append(f"> AI ({ai_personality}) 选择了时机: [{timing}]。")
 
-    # --- [修改 v1.3] 姿态决策 (Overrides) ---
-    # 优先级 0: [激进] 玩家受损且 AI 能攻击 -> 攻击
+    # --- 姿态决策 (Overrides) ---
     if player_is_damaged and is_in_attack_range:
         stance = 'attack'
         log.append("> AI 侦测到玩家受损且在射程内，强制切换到 [攻击] 姿态！")
-
-    # 优先级 1: [防御] 被锁定且无法反击
     elif is_ai_locked and not is_in_attack_range:
-        if total_evasion > 5:
-            stance = 'agile'
-            log.append("> AI 被锁定但闪避值高，切换到 [机动] 姿态以求生存。")
-        else:
-            stance = 'defense'
-            log.append("> AI 被锁定且无法反击，切换到 [防御] 姿态。")
-
-    # 优先级 2: [防御] AI 受损且被近身
+        stance = 'agile' if total_evasion > 5 else 'defense'
+        log.append(f"> AI 被锁定且无法反击，切换到 [{stance}] 姿态。")
     elif is_damaged and is_player_adjacent:
-        if total_evasion > 5:
-            stance = 'agile'
-            log.append("> AI 受损但闪避值高，切换到 [机动] 姿态以求生存。")
-        else:
-            stance = 'defense'
-            log.append("> AI 关键部件受损且玩家逼近，切换到 [防御] 姿态。")
-
-    # 优先级 3: [机动] 高闪避 (覆盖 P0 之外的 'attack' 姿态)
+        stance = 'agile' if total_evasion > 5 else 'defense'
+        log.append(f"> AI 受损且玩家逼近，切换到 [{stance}] 姿态。")
     elif stance == 'attack' and total_evasion > 5:
         stance = 'agile'
         log.append(f"> AI 闪避值 ({total_evasion}) > 5，倾向于 [机动] 姿态。")
-
-    # 优先级 4: 计划移动 (如果不是以上情况)
-    elif timing == '移动':
-        # 确保 stance 保持为 'agile' 以便移动
+    elif timing == '移动' and stance != 'defense': # 如果没被防御覆盖
         stance = 'agile'
-        # 仅在日志中记录（如果它没有被防御覆盖）
-        if stance == 'agile':
-            log.append("> AI 计划移动，切换到 [机动] 姿态。")
+        log.append("> AI 计划移动，切换到 [机动] 姿态。")
 
     # --- 阶段 2: 切换姿态 ---
     game.ai_mech.stance = stance
     log.append(f"> AI 切换姿态至: [{game.ai_mech.stance}]。")
 
     # --- 阶段 2.5: 调整移动 "预演" (TP) ---
-    legs_part = game.ai_mech.parts.get('legs')
     adjust_move_val = 0
     if legs_part and legs_part.status != 'destroyed':
         adjust_move_val = legs_part.adjust_move
@@ -451,64 +513,73 @@ def run_ai_turn(game):
             adjust_move_val *= 2
 
     potential_adjust_move_pos = None
-    potential_attack_timing = None
+    potential_attack_timing = timing # 默认维持原时机
 
     if tp >= 1 and adjust_move_val > 0:
         log.append(f"> AI 正在评估 (TP) 调整移动... (范围: {adjust_move_val})")
 
         planned_attack_action = best_attack_action_tuple[0] if best_attack_action_tuple else None
-        is_attack_planned = planned_attack_action is not None
-        is_in_range_now = bool(melee_actions) or bool(shoot_actions)  # [修改]
+        is_in_range_now = is_in_attack_range # 是否在当前位置就能攻击
 
-        if is_attack_planned and is_in_range_now and planned_attack_action.cost != 'L' and not is_ai_locked:
-            log.append(f"> AI 正在评估 '风筝' (Kiting) 移动...")
-            attack_range_min, attack_range_max = (1, 1)
-            if planned_attack_action.action_type == '射击':
-                attack_range_min = 1
-                # [修改] 考虑【静止】效果
-                effective_range = planned_attack_action.range_val
-                if planned_attack_action.effects.get("static_range_bonus", 0) > 0 and tp >= 1:
-                    effective_range += planned_attack_action.effects.get("static_range_bonus", 0)
-                attack_range_max = effective_range
+        # 尝试风筝 (仅当计划攻击且在射程内，且不是L动作，且未被锁定)
+        if planned_attack_action and is_in_range_now and planned_attack_action.cost != 'L' and not is_ai_locked:
+            log.append(f"> AI 正在评估 '风筝' 移动...")
+            attack_range_min, attack_range_max = (1, 1) if planned_attack_action.action_type == '近战' else (1, planned_attack_action.range_val)
+            # 考虑静止效果对风筝目标范围的影响
+            if planned_attack_action.action_type == '射击' and planned_attack_action.effects.get("static_range_bonus", 0) > 0 and tp >= 1:
+                attack_range_max += planned_attack_action.effects.get("static_range_bonus", 0)
 
             kiting_pos = _find_best_move_position(game, adjust_move_val,
                                                   attack_range_min, attack_range_max,
                                                   goal='farthest_in_range',
                                                   action_to_check=planned_attack_action,
-                                                  current_tp=tp)  # [修改] 传入tp
+                                                  current_tp=tp)
             if kiting_pos and _get_distance(kiting_pos, game.player_pos) > _get_distance(game.ai_pos, game.player_pos):
                 potential_adjust_move_pos = kiting_pos
-                potential_attack_timing = timing
+                # potential_attack_timing 保持不变
                 log.append(f"> AI 发现 '风筝' 位置: {kiting_pos}。")
             else:
-                log.append(f"> AI 未找到比当前更远的 '风筝' 位置。")
+                log.append("> AI 未找到比当前更远的 '风筝' 位置。")
 
+        # 如果不风筝，尝试通过调整移动进入攻击范围
         if not potential_adjust_move_pos:
-            log.append(f"> AI 正在评估 '接近' (Approaching) 移动...")
-            if best_melee_tuple and best_melee_tuple[0].cost != 'L':
-                ideal_pos_for_melee = _find_best_move_position(game, adjust_move_val, 1, 1, 'ideal',
-                                                               best_melee_tuple[0], current_tp=tp)  # [修改] 传入tp
-                if ideal_pos_for_melee:
-                    potential_adjust_move_pos = ideal_pos_for_melee
+            log.append(f"> AI 正在评估 '接近/定位' 移动...")
+            # 检查是否有近战动作可以通过调整进入范围 (且不是L)
+            potential_melee_target = max(
+                [(a, slot) for (a, slot) in available_actions if a.action_type == '近战' and a.cost != 'L'],
+                key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, False), default=None
+            )
+            if potential_melee_target:
+                 ideal_pos_melee = _find_best_move_position(game, adjust_move_val, 1, 1, 'ideal', potential_melee_target[0], current_tp=tp)
+                 if ideal_pos_melee:
+                    potential_adjust_move_pos = ideal_pos_melee
                     potential_attack_timing = '近战'
-                    log.append(f"> AI 发现可以通过调整移动到 {ideal_pos_for_melee} 来发动近战。")
-            if not potential_adjust_move_pos and best_shoot_tuple and not is_ai_locked and best_shoot_tuple[
-                0].cost != 'L':
-                ideal_range_min, ideal_range_max = (5, 8) if ai_personality == 'sniper' else (2, 5)
-                ideal_pos_for_shoot = _find_best_move_position(game, adjust_move_val, ideal_range_min, ideal_range_max,
-                                                               'ideal', best_shoot_tuple[0], current_tp=tp)  # [修改] 传入tp
-                if ideal_pos_for_shoot:
-                    potential_adjust_move_pos = ideal_pos_for_shoot
-                    potential_attack_timing = '射击'
-                    log.append(f"> AI 发现可以通过调整移动到 {ideal_pos_for_shoot} 来发动射击。")
+                    log.append(f"> AI 发现可以通过调整移动到 {ideal_pos_melee} 来发动近战。")
+
+            # 如果没找到近战机会，或者AI是狙击手，尝试射击
+            if not potential_adjust_move_pos and not is_ai_locked:
+                potential_shoot_target = max(
+                    [(a, slot) for (a, slot) in available_actions if a.action_type == '射击' and a.cost != 'L'],
+                    key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, False), default=None
+                )
+                if potential_shoot_target:
+                    ideal_range_min_shoot, ideal_range_max_shoot = (5, 8) if ai_personality == 'sniper' else (2, 5)
+                    ideal_pos_shoot = _find_best_move_position(game, adjust_move_val, ideal_range_min_shoot, ideal_range_max_shoot, 'ideal', potential_shoot_target[0], current_tp=tp)
+                    if ideal_pos_shoot:
+                        potential_adjust_move_pos = ideal_pos_shoot
+                        potential_attack_timing = '射击'
+                        log.append(f"> AI 发现可以通过调整移动到 {ideal_pos_shoot} 来发动射击。")
+
             if not potential_adjust_move_pos:
                 log.append(f"> AI 未找到合适的 (TP) 调整移动位置 (或需为 L 动作保留 TP)。")
 
     # --- 阶段 3: 调整动作 (TP) ---
-    if potential_adjust_move_pos and potential_attack_timing:
+    adjustment_action_taken = False
+    if potential_adjust_move_pos:
         log.append(f"> AI 决定执行调整移动！")
         game.ai_pos = potential_adjust_move_pos
         tp -= 1
+        adjustment_action_taken = True
         if timing != potential_attack_timing:
             log.append(f"> AI 将时机从 [{timing}] 更改为 [{potential_attack_timing}]！")
             timing = potential_attack_timing
@@ -516,29 +587,32 @@ def run_ai_turn(game):
         if game.ai_mech.orientation != target_orientation:
             log.append(f"> AI 调整移动后立即转向 {target_orientation}。")
             game.ai_mech.orientation = target_orientation
+    # 如果没移动，但可以转向
     else:
         target_orientation = _get_orientation_to_target(game.ai_pos, game.player_pos)
         if game.ai_mech.orientation != target_orientation and tp >= 1:
             log.append(f"> AI 消耗1 TP进行转向, 朝向从 {game.ai_mech.orientation} 变为 {target_orientation}。")
             game.ai_mech.orientation = target_orientation
             tp -= 1
+            adjustment_action_taken = True # 转向也算调整动作
 
-    # --- [修改 v1.4] 阶段 4: 主要动作 (AP) 循环 ---
+    # --- 阶段 4: 主要动作 (AP) 循环 ---
     opening_move_taken = False
 
     while ap > 0:
-        # 1. 获取当前可用的动作 (未在本回合使用过的)
+        # 1. 获取当前可用的动作
         current_available_actions_tuples = []
         for action, part_slot in all_actions_raw:
-            action_id = (part_slot, action.name)
-            if action_id not in game.ai_actions_used_this_turn:
-                current_available_actions_tuples.append((action, part_slot))
+             action_id = (part_slot, action.name)
+             if action_id not in game.ai_actions_used_this_turn:
+                 part_obj = game.ai_mech.parts.get(part_slot)
+                 if part_obj and part_obj.status != 'destroyed':
+                     current_available_actions_tuples.append((action, part_slot))
 
         if not current_available_actions_tuples:
             log.append("> AI 已无可用动作。")
-            break  # 退出 while ap > 0 循环
+            break
 
-        # [新增 v1.5] 在循环开始时重新计算可用的S动作数量
         current_available_s_count = sum(1 for a, s in current_available_actions_tuples if a.cost == 'S')
 
         # 2. 重新评估当前状况
@@ -547,30 +621,26 @@ def run_ai_turn(game):
 
         possible_now_melee = sorted(
             [(a, slot) for (a, slot) in current_available_actions_tuples if
-             a.action_type == '近战' and _calculate_ai_attack_range(game, a, game.ai_pos, current_orientation,
-                                                                    game.player_pos, current_tp=tp)],  # [修改] 传入tp
-            key=lambda item: _evaluate_action_strength(item[0], current_available_s_count, is_in_range=True),
-            reverse=True
+             a.action_type == '近战' and _calculate_ai_attack_range(game, a, game.ai_pos, current_orientation, game.player_pos, current_tp=tp)],
+            key=lambda item: _evaluate_action_strength(item[0], current_available_s_count, is_in_range=True), reverse=True
         )
         possible_now_shoot = sorted(
             [(a, slot) for (a, slot) in current_available_actions_tuples if
-             a.action_type == '射击' and _calculate_ai_attack_range(game, a, game.ai_pos, current_orientation,
-                                                                    game.player_pos,
-                                                                    current_tp=tp) and not is_ai_locked_now],
-            # [修改] 传入tp
-            key=lambda item: _evaluate_action_strength(item[0], current_available_s_count, is_in_range=True),
-            reverse=True
+             a.action_type == '射击' and _calculate_ai_attack_range(game, a, game.ai_pos, current_orientation, game.player_pos, current_tp=tp) and not is_ai_locked_now],
+            key=lambda item: _evaluate_action_strength(item[0], current_available_s_count, is_in_range=True), reverse=True
         )
         possible_now_move = sorted(
             [(a, slot) for (a, slot) in current_available_actions_tuples if a.action_type == '移动'],
-            key=lambda item: item[0].range_val, reverse=True  # 简单评估：移动距离越长越好
+            key=lambda item: item[0].range_val, reverse=True
         )
 
         # 3. 决策逻辑
         action_to_perform_tuple = None
+        action_log_prefix = ""
 
         if not opening_move_taken:
             # --- 3a. 必须执行起手动作 ---
+            action_log_prefix = "起手动作"
             log.append(f"> AI 正在寻找时机为 [{timing}] 的起手动作...")
             if timing == '近战' and possible_now_melee:
                 action_to_perform_tuple = possible_now_melee[0]
@@ -578,95 +648,153 @@ def run_ai_turn(game):
                 action_to_perform_tuple = possible_now_shoot[0]
             elif timing == '移动' and possible_now_move:
                 action_to_perform_tuple = possible_now_move[0]
+            # [新增] 如果起手动作是L动作，也允许执行
+            elif timing == '近战' and best_melee_tuple and best_melee_tuple[0].cost == 'L':
+                 action_to_perform_tuple = best_melee_tuple
+            elif timing == '射击' and best_shoot_tuple and best_shoot_tuple[0].cost == 'L':
+                 action_to_perform_tuple = best_shoot_tuple
+
 
             if not action_to_perform_tuple:
                 log.append(f"> AI 无法执行时机为 [{timing}] 的起手动作！回合结束。")
-                break  # 退出 while ap > 0 循环
+                break # 无法执行起手，回合结束
 
         else:
             # --- 3b. 起手动作已完成, 寻找额外动作 ---
-            log.append(f"> AI 尚有 {ap}AP，正在寻找额外动作...")
+            action_log_prefix = "额外动作"
+            log.append(f"> AI 尚有 {ap}AP {tp}TP，正在寻找额外动作...")
 
-            best_overall_action = None
+            best_overall_action_tuple = None
             best_strength = -1
 
-            # 优先攻击, 其次移动
-            all_possible_actions = possible_now_melee + possible_now_shoot + possible_now_move
+            # 评估所有当前可用的、成本足够的动作
+            all_possible_now = possible_now_melee + possible_now_shoot + possible_now_move
+            valid_extra_actions = []
+            for (action, slot) in all_possible_now:
+                cost_ap_check, cost_tp_check = _get_action_cost(action)
+                if ap >= cost_ap_check and tp >= cost_tp_check:
+                    valid_extra_actions.append((action, slot))
 
-            for (action, slot) in all_possible_actions:
-                cost_ap, cost_tp_cost = _get_action_cost(action)  # [修正] 避免与 tp 变量重名
-                if ap < cost_ap or tp < cost_tp_cost:
-                    continue  # 成本不足
+            if not valid_extra_actions:
+                 log.append("> AI 无成本足够的额外动作。")
+                 break # 没有可执行的动作了
 
-                strength = 0
-                if action.action_type in ['近战', '射击']:
-                    strength = _evaluate_action_strength(action, current_available_s_count, is_in_range=True)
-                elif action.action_type == '移动':
-                    strength = 0.5  # 移动的优先级较低
+            # 从成本足够的动作中选择最优的
+            action_to_perform_tuple = max(
+                valid_extra_actions,
+                key=lambda item: _evaluate_action_strength(item[0], current_available_s_count, True) if item[0].action_type in ['近战', '射击']
+                                 else (0.5 if item[0].action_type == '移动' else 0), # 移动优先级较低
+                default=None
+            )
 
-                if strength > best_strength:
-                    best_strength = strength
-                    best_overall_action = (action, slot)
-
-            action_to_perform_tuple = best_overall_action
 
         # --- 4. 执行动作 ---
         if not action_to_perform_tuple:
-            log.append("> AI 找不到更多可执行的动作。")
-            break  # 退出 while ap > 0 循环
+            log.append(f"> AI 找不到可执行的 {action_log_prefix}。")
+            # 如果是起手动作找不到，上面已经 break 了
+            # 如果是额外动作找不到，则正常结束循环
+            break
 
         (action_obj, action_slot) = action_to_perform_tuple
-        cost_ap, cost_tp = _get_action_cost(action_obj)
+        cost_ap, cost_tp_action = _get_action_cost(action_obj) # 避免与外层 tp 重名
 
-        # 最终成本检查
-        if ap < cost_ap or tp < cost_tp:
+        # 最终成本检查 (理论上在额外动作选择时已检查过)
+        if ap < cost_ap or tp < cost_tp_action:
             log.append(
-                f"> [成本检查失败] AI 试图执行 [{action_obj.name}] (需 {cost_ap}AP {cost_tp}TP) 但只有 ( {ap}AP {tp}TP)。")
-            # 将此动作标记为已用 (防止无限循环)
+                f"> [成本检查失败] AI 试图执行 [{action_obj.name}] (需 {cost_ap}AP {cost_tp_action}TP) 但只有 ( {ap}AP {tp}TP)。")
+            # 标记为已用防止无限循环
             game.ai_actions_used_this_turn.append((action_slot, action_obj.name))
-            continue  # 继续 while 循环, 寻找更便宜的动作
+            continue # 尝试寻找其他动作
 
         # --- 确认执行动作 ---
-        log_msg_action_type = "起手动作" if not opening_move_taken else "额外动作"
-        log.append(f"> AI 执行 [{log_msg_action_type}] [{action_obj.name}] (消耗 {cost_ap}AP, {cost_tp}TP)。")
+        log.append(f"> AI 执行 [{action_log_prefix}] [{action_obj.name}] (来自 {action_slot}, 消耗 {cost_ap}AP, {cost_tp_action}TP)。")
 
-        # 标记为已用
         action_id = (action_slot, action_obj.name)
         game.ai_actions_used_this_turn.append(action_id)
-
-        # 扣除资源
         ap -= cost_ap
-        tp -= cost_tp
+        tp -= cost_tp_action
 
         if not opening_move_taken:
             opening_move_taken = True
 
         # --- 处理动作效果 ---
         if action_obj.action_type in ['近战', '射击']:
-            # [v1.4] 添加到待结算列表
             attacks_to_resolve_list.append(action_obj)
 
         elif action_obj.action_type == '移动':
-            # AI 需要在此时 *真正* 移动
-            log.append(f"> AI 正在为 [{action_obj.name}] 寻找目标...")
-            ideal_move_pos = None
+            log.append(f"> AI 正在为 [{action_obj.name}] 寻找移动目标...")
+            move_target_pos = None
+            move_distance_val = action_obj.range_val
+
+            # [优化 v1.6] 更精细的移动目标选择
+            current_dist_to_player = _get_distance(game.ai_pos, game.player_pos)
 
             if ai_personality == 'brawler':
-                # 全力接近
-                ideal_move_pos = _find_best_move_position(game, action_obj.range_val, 1, 1, 'closest', None,
-                                                          current_tp=0)
+                # 斗殴者总是试图接近
+                move_target_pos = _find_best_move_position(game, move_distance_val, 1, 1, 'closest', None, current_tp=0)
             else:  # 'sniper'
                 if is_ai_locked_now:
-                    # 逃离
-                    ideal_move_pos = _find_best_move_position(game, action_obj.range_val, 3, 15, 'farthest_in_range',
-                                                              None, current_tp=0)
+                    # 被锁定时，全力逃离
+                    log.append("> AI (狙击手) 被锁定，尝试逃离！")
+                    move_target_pos = _find_farthest_move_position(game, move_distance_val)
+                elif current_dist_to_player < 5:
+                     # 距离太近 (<5)，尝试拉开到理想距离 (5-8)
+                     log.append("> AI (狙击手) 距离过近，尝试拉开距离...")
+                     move_target_pos = _find_best_move_position(game, move_distance_val, 5, 8, 'farthest_in_range', None, current_tp=0)
                 else:
-                    # 寻找理想距离
-                    ideal_move_pos = _find_best_move_position(game, action_obj.range_val, 5, 8, 'ideal', None,
-                                                              current_tp=0)
+                    # 距离合适 (>=5)，尝试在理想距离 (5-8) 内找到最佳位置
+                    log.append("> AI (狙击手) 尝试寻找理想射击位置...")
+                    move_target_pos = _find_best_move_position(game, move_distance_val, 5, 8, 'ideal', None, current_tp=0)
 
-            if ideal_move_pos and ideal_move_pos != game.ai_pos:
-                game.ai_pos = ideal_move_pos
+            # 如果主要目标没找到，尝试找任何能移动的位置 (避免浪费AP)
+            if not move_target_pos:
+                 log.append("> AI 未找到理想移动位置，尝试寻找任意可移动位置...")
+                 # 使用 A* 找一个成本最低的可达点 (相当于 BFS 找最近的可达点)
+                 pq_any = [(0, game.ai_pos)]
+                 visited_any = {game.ai_pos: 0}
+                 found_any_move = False
+                 # [新增] 在循环外定义锁定者信息
+                 locker_mech = game.player_mech
+                 locker_pos = game.player_pos
+                 locker_can_lock = locker_mech and locker_mech.has_melee_action() and locker_mech.parts.get('core') and locker_mech.parts['core'].status != 'destroyed'
+                 # --- Fix Indentation within this loop ---
+                 while pq_any:
+                     cost_any, pos_any = heapq.heappop(pq_any)
+                     if cost_any > move_distance_val:
+                         continue
+                     # Check if this position is a valid move target (cost > 0 and not player pos)
+                     if cost_any > 0 and pos_any != game.player_pos:
+                         # We found *a* possible move, store it as a fallback
+                         # We'll prioritize closer/cheaper moves found earlier by A* nature
+                         if not found_any_move: # Only store the first valid one found
+                             move_target_pos = pos_any
+                             found_any_move = True
+                             # Optional: break here if *any* move is acceptable
+                             # break
+
+                     # Calculate locking cost for pathfinding
+                     is_locked_at_pos = False
+                     if locker_can_lock: # Use locker_can_lock defined outside the loop
+                         is_locked_at_pos = _is_tile_locked_by_opponent(game, pos_any, game.ai_mech, locker_pos, locker_mech)
+                     step_cost = 1 + (1 if is_locked_at_pos else 0)
+
+                     # Explore neighbors
+                     for dx_any, dy_any in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                         nx_any, ny_any = pos_any[0] + dx_any, pos_any[1] + dy_any
+                         next_pos_any = (nx_any, ny_any)
+                         # Check bounds and if already visited with lower cost
+                         if 1 <= nx_any <= game.board_width and 1 <= ny_any <= game.board_height:
+                             new_cost_any = cost_any + step_cost
+                             if new_cost_any <= move_distance_val and (next_pos_any not in visited_any or new_cost_any < visited_any[next_pos_any]):
+                                 # Don't add player position to visited/queue for pathfinding
+                                 if next_pos_any != game.player_pos:
+                                     visited_any[next_pos_any] = new_cost_any
+                                     heapq.heappush(pq_any, (new_cost_any, next_pos_any))
+                 # --- End of Indentation Fix ---
+
+            # 执行移动
+            if move_target_pos and move_target_pos != game.ai_pos:
+                game.ai_pos = move_target_pos
                 log.append(f"> AI 移动到 {game.ai_pos}。")
                 # 移动后必须转向
                 target_orientation = _get_orientation_to_target(game.ai_pos, game.player_pos)

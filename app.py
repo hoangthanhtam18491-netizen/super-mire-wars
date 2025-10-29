@@ -30,10 +30,8 @@ def index():
     update_notes = [
         "版本 v1.2 更新:",
         "- 增加了几个新的部件",
-        "- 强化了AI的智力。",
-        "- 增加了两个新的AI对手",
-        "- 修复了游戏介绍缺失",
-        "- 增加了个新的效果词条"
+        "- 增加了目前可用部件的效果词条",
+        "- 修正了近战锁定"
     ]
 
     # [新增] 读取并转换规则 Markdown 文件
@@ -452,11 +450,23 @@ def execute_attack():
         # [新增] 服务器端射程验证（包含【静止】效果）
         if attack_action.action_type == '射击':
             effective_range = attack_action.range_val
-            static_bonus = attack_action.effects.get("static_range_bonus", 0)
 
+            # 1. 检查【静止】效果
+            static_bonus = attack_action.effects.get("static_range_bonus", 0)
             if static_bonus > 0 and game_state_obj.player_tp >= 1:
                 effective_range += static_bonus
                 log.append(f"> 动作效果【静止】触发！射程 +{static_bonus}。")
+
+            # 2. [新增] 检查【双手】效果
+            two_handed_bonus = attack_action.effects.get("two_handed_range_bonus", 0)
+            if two_handed_bonus > 0:
+                # 'part_slot' (例如 'right_arm') 在这个函数中是可用的
+                other_arm_slot = 'left_arm' if part_slot == 'right_arm' else 'right_arm'
+                other_arm_part = game_state_obj.player_mech.parts.get(other_arm_slot)
+
+                if other_arm_part and "【空手】" in other_arm_part.tags:
+                    effective_range += two_handed_bonus
+                    log.append(f"> 动作效果【【双手】+2射程】触发 (另一只手为【空手】)！射程 +{two_handed_bonus}。")
 
             target_pos_tuple = tuple(data.get('target_pos'))
             dist = _get_distance(game_state_obj.player_pos, target_pos_tuple)
@@ -498,37 +508,53 @@ def execute_attack():
 
         target_part_slot = data.get('target_part_name')
 
+        # [新增] 检查【双手】狙击效果
+        has_two_handed_sniper = attack_action.effects.get("two_handed_sniper", False)
+        two_handed_sniper_active = False
+        if has_two_handed_sniper:
+            other_arm_slot = 'left_arm' if part_slot == 'right_arm' else 'right_arm'
+            other_arm_part = game_state_obj.player_mech.parts.get(other_arm_slot)
+            if other_arm_part and "【空手】" in other_arm_part.tags:
+                two_handed_sniper_active = True
+                log.append(f"> 动作效果【【双手】获得狙击】触发 (另一只手为【空手】)！")
+
+
         if not target_part_slot:
-            # 1. 检查背击 (玩家优先选择)
-            if back_attack:
-                log.append("> [背击] 玩家获得任意选择权！请选择目标部位。")
+            # 1. 检查背击 或 [新增] 检查激活的【双手】狙击效果
+            if back_attack or two_handed_sniper_active:
+                if back_attack:
+                    log.append("> [背击] 玩家获得任意选择权！请选择目标部位。")
+                else: # two_handed_sniper_active
+                    log.append("> [狙击效果] 玩家获得任意选择权！请选择目标部位。")
                 session['combat_log'] = log
                 return jsonify({'success': True, 'action_required': 'select_part'})
 
-            # 2. 检查AI招架
-            if attack_action.action_type == '近战':
+            # 2. 检查AI招架 (仅近战且非背击/非狙击时)
+            if attack_action.action_type == '近战': # 狙击必定是射击，所以不会触发这里
                 parry_parts = [(s, p) for s, p in game_state_obj.ai_mech.parts.items() if
                                p.parry > 0 and p.status != 'destroyed']
                 if parry_parts:
                     target_part_slot, best_parry_part = max(parry_parts, key=lambda item: item[1].parry)
                     log.append(f"> AI 决定用 [{best_parry_part.name}] 进行招架！")
 
-            # 3. 投掷黑骰子
-            if not target_part_slot:
+            # 3. [修正逻辑] 投掷黑骰子 (仅在没有招架发生时)
+            if not target_part_slot: # 只有在上面招架没发生时，才进入这里
                 hit_roll_result = roll_black_die()
                 log.append(f"> 玩家投掷部位骰结果: 【{hit_roll_result}】")
 
                 if hit_roll_result == 'any':
                     log.append("> 玩家获得任意选择权！请选择目标部位。")
                     session['combat_log'] = log
-                    return jsonify({'success': True, 'action_required': 'select_part'})
+                    # 这里之前错误地 return 了 jsonify，现在修正
+                    return jsonify({'success': True, 'action_required': 'select_part'}) # 让前端弹窗
 
                 elif game_state_obj.ai_mech.parts.get(hit_roll_result) and game_state_obj.ai_mech.parts[
                     hit_roll_result].status != 'destroyed':
                     target_part_slot = hit_roll_result
                 else:
-                    target_part_slot = 'core'
+                    target_part_slot = 'core' # 后备：命中核心
                     log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
+            # --- 黑骰子逻辑结束 ---
 
         # --- 所有检查通过，现在执行动作（消耗AP/TP） ---
         if not execute_main_action(game_state_obj, attack_action, action_name, part_slot):
@@ -537,6 +563,16 @@ def execute_attack():
             return jsonify({'success': False, 'message': 'Action cost validation failed.'})
 
         # --- 动作执行成功，开始结算 ---
+        # 此时 target_part_slot 必须有值 (来自玩家选择、AI招架或黑骰子)
+        if not target_part_slot:
+             log.append("> [严重错误] 未能确定目标部位！攻击中止。")
+             session['combat_log'] = log
+             # 撤销动作消耗 (可选，取决于你想如何处理这种错误)
+             # game_state_obj.player_ap += ...
+             # game_state_obj.player_tp += ...
+             # game_state_obj.player_actions_used_this_turn.remove(...)
+             return jsonify({'success': False, 'message': 'Internal error: Target part slot not determined.'})
+
 
         # 解析攻击
         attack_log, result = resolve_attack(
@@ -579,19 +615,24 @@ def get_move_range():
 
     action_name = data.get('action_name')
     action = None
+    is_flight_action = False # [新增] 标记是否为飞行
+
     if action_name == '调整移动':
-        pass
+        pass # 调整移动不是飞行
     else:
         part_slot = data.get('part_slot')
         if part_slot and part_slot in game_state_obj.player_mech.parts:
             part = game_state_obj.player_mech.parts[part_slot]
             if part.status != 'destroyed':
                 action = next((a for a in part.actions if a.name == action_name), None)
+                # [新增] 检查动作是否有飞行效果
+                if action and action.effects.get("flight_movement"):
+                    is_flight_action = True
 
     move_distance = 0
     if action and action.action_type == '移动':
         move_distance = action.range_val
-    elif data.get('action_name') == '调整移动':
+    elif action_name == '调整移动': # 注意调整移动不能飞行
         legs_part = game_state_obj.player_mech.parts.get('legs')
         if legs_part and legs_part.status != 'destroyed':
             move_distance = legs_part.adjust_move
@@ -601,7 +642,13 @@ def get_move_range():
             move_distance *= 2
 
     if move_distance > 0:
-        return jsonify({'valid_moves': game_state_obj.calculate_move_range(game_state_obj.player_pos, move_distance)})
+        # [修改] 调用 calculate_move_range 时传入 is_flight 参数
+        valid_moves = game_state_obj.calculate_move_range(
+            game_state_obj.player_pos,
+            move_distance,
+            is_flight=is_flight_action # 传入飞行标记
+        )
+        return jsonify({'valid_moves': valid_moves})
     return jsonify({'valid_moves': []})
 
 
@@ -633,4 +680,5 @@ def get_attack_range():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
