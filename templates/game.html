@@ -31,28 +31,42 @@
         .selector-group button.active { background-color: var(--primary-color); border-color: var(--primary-color); }
         .combat-log { background-color: var(--bg-color); padding: 1rem; border-radius: 0.25rem; height: 200px; overflow-y: auto; }
         .phase-indicator { text-align: center; font-size: 1.2rem; font-weight: bold; color: var(--phase-color); padding: 0.5rem; border: 1px solid var(--phase-color); border-radius: 0.5rem; margin-bottom: 1rem; }
-        #part-selector-modal, #game-over-modal { display:none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: var(--hover-bg-color); border: 2px solid var(--primary-color); border-radius: 0.5rem; padding: 2rem; z-index: 100; text-align: center; }
+        #part-selector-modal, #game-over-modal, #effect-selector-modal {
+            display:none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background-color: var(--hover-bg-color); border: 2px solid var(--primary-color);
+            border-radius: 0.5rem; padding: 2rem; z-index: 100; text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        #effect-buttons .btn { margin-bottom: 0.5rem; background-color: var(--primary-color); }
+        #effect-buttons .btn:hover { background-color: #2b6cb0; }
+        #effect-buttons .btn strong { font-size: 1.1rem; }
+        #effect-buttons .btn small { font-size: 0.85rem; color: var(--text-color); opacity: 0.9; }
+
         .status-ok { color: var(--status-ok); } .status-damaged { color: var(--status-damaged); } .status-destroyed { color: var(--status-destroyed); text-decoration: line-through; }
     </style>
 </head>
 <body>
+    <!-- [顶部栏] -->
     <div class="sidebar panel">
         <h4>玩家机甲</h4>
-
-        <!-- [新增] 仅在生存模式下显示击败数 -->
         {% if game_mode == 'horde' %}
         <div style="text-align: center; font-size: 1.5rem; color: var(--phase-color);">
             击败数: <span id="defeat-count">{{ ai_defeat_count }}</span>
         </div>
         {% endif %}
-
         <div class="phase-indicator">阶段: {{ {'timing': '1. 选择时机', 'stance': '2. 选择姿态', 'adjustment': '3. 调整阶段', 'main': '4. 执行动作'}[game.turn_phase] }}</div>
+
+        <!-- [修改] 增加 pending_effect_data 检查 -->
+        {% if game.pending_effect_data %}
+        <div id="pending-effect-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
+            待处理：请选择效果
+        </div>
+        {% endif %}
+
         <div style="display: flex; justify-content: space-around; text-align: center;">
             <div><div>行动时点 (AP)</div><div style="font-size: 2rem; font-weight: bold;">{{ game.player_ap }}</div></div>
             <div><div>调整时点 (TP)</div><div style="font-size: 2rem; font-weight: bold;">{{ game.player_tp }}</div></div>
         </div>
-
-        <!-- 玩家状态面板 -->
         <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
             <tbody>
                 {% for slot, part in game.player_mech.parts.items() %}
@@ -64,14 +78,11 @@
                 {% endfor %}
             </tbody>
         </table>
-
-        <!-- 控制器 -->
         <div id="phase-timing-controls"><h4>选择时机</h4><div class="selector-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"><button id="timing-近战" onclick="selectTiming('近战')">近战</button><button id="timing-射击" onclick="selectTiming('射击')">射击</button><button id="timing-移动" onclick="selectTiming('移动')">移动</button><button id="timing-战术" disabled>战术</button></div><button class="btn" style="margin-top: 1rem; background-color: var(--primary-color);" onclick="confirmTiming()">确认时机</button></div>
         <div id="phase-stance-controls"><h4>姿态选择</h4><div class="selector-group" style="display: flex;"><button id="stance-defense" class="{{ 'active' if game.player_mech.stance == 'defense' else '' }}" onclick="changeStance('defense')">防御</button><button id="stance-agile" class="{{ 'active' if game.player_mech.stance == 'agile' else '' }}" onclick="changeStance('agile')">机动</button><button id="stance-attack" class="{{ 'active' if game.player_mech.stance == 'attack' else '' }}" onclick="changeStance('attack')">攻击</button></div><button class="btn" style="margin-top: 1rem; background-color: var(--primary-color);" onclick="confirmStance()">确认姿态</button></div>
         <div id="phase-adjustment-controls"><h4>调整时点动作 (TP)</h4><div id="action-adjust-move" class="action-item" onclick="selectAction('调整移动', 0, 'TP', '', 'system')"><span>调整移动</span><span class="action-cost">1 TP</span></div><div id="action-change-orientation" class="action-item" onclick="selectAction('仅转向', 0, 'TP', '', 'system')"><span>仅转向</span><span class="action-cost">1 TP</span></div><button class="btn" style="margin-top: 1rem;" onclick="skipAdjustment()">跳过调整</button></div>
         <div id="phase-main-controls"><h4>行动时点动作 (AP)</h4>
             {% for action, part_slot in game.player_mech.get_all_actions() %}
-            <!-- [新增] 仅显示非被动动作 -->
             {% if action.action_type != '被动' %}
             {% set action_id = (part_slot, action.name) %}
             {% set is_used = action_id in player_actions_used %}
@@ -90,25 +101,31 @@
                     <span class="action-cost">{{ action.cost.count('M')*2 + action.cost.count('S')*1 }} AP</span>
                 {% endif %}
             </div>
-            {% endif %} <!-- [新增] 结束 if 语句 -->
+            {% endif %}
             {% endfor %}
         </div>
-
         <form id="end-turn-form" action="{{ url_for('end_turn') }}" method="POST" style="display: none;"><button type="submit"></button></form>
         <button id="end-turn-btn" class="btn" style="background-color: #c53030;" onclick="document.getElementById('end-turn-form').submit();">结束回合</button>
     </div>
+
+    <!-- [棋盘] -->
     <div class="game-board" id="game-board">
         {% for y in range(1, 11) %}{% for x in range(1, 11) %}
         <div class="grid-cell" id="cell-{{x}}-{{y}}" data-x="{{x}}" data-y="{{y}}">
             {% if game.player_pos[0] == x and game.player_pos[1] == y %}<div class="mech-icon player">🤖<span class="orientation-arrow" id="player-arrow"></span></div>{% endif %}
-            {% if game.ai_pos[0] == x and game.ai_pos[1] == y %}<div class="mech-icon ai">👾<span class="orientation-arrow" id="ai-arrow"></span></div>{% endif %}
+            <!-- [修改] 增加 game.ai_mech 存在性检查 -->
+            {% if game.ai_mech and game.ai_pos[0] == x and game.ai_pos[1] == y %}<div class="mech-icon ai">👾<span class="orientation-arrow" id="ai-arrow"></span></div>{% endif %}
         </div>{% endfor %}{% endfor %}
         <div id="orientation-selector" class="orientation-selector"><button class="orientation-button" onclick="setFinalOrientation('N')">⬆</button><button class="orientation-button" onclick="setFinalOrientation('E')">➡</button><button class="orientation-button" onclick="setFinalOrientation('S')">⬇</button><button class="orientation-button" onclick="setFinalOrientation('W')">⬅</button></div>
     </div>
+
+    <!-- [右侧栏] -->
     <div class="sidebar panel">
         <h4>AI机甲状态</h4>
         <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
             <tbody>
+                <!-- [修改] 增加 game.ai_mech 存在性检查 -->
+                {% if game.ai_mech %}
                 {% for slot, part in game.ai_mech.parts.items() %}
                 <tr>
                     <td>{{ slot }}</td>
@@ -116,23 +133,33 @@
                     <td class="status-{{ part.status }}">{{ part.status }}</td>
                 </tr>
                 {% endfor %}
+                {% else %}
+                <tr><td colspan="3" style="text-align: center;">AI已被击败</td></tr>
+                {% endif %}
             </tbody>
         </table>
         <h4>战斗日志</h4>
         <div class="combat-log">{% for entry in combat_log %}<div class="log-entry">{{ entry }}</div>{% else %}<div>暂无战斗记录。</div>{% endfor %}</div>
     </div>
 
-    <!-- 攻击部位选择弹窗 -->
+    <!-- [弹窗] -->
     <div id="part-selector-modal"><h4>选择攻击部位</h4><div id="part-buttons" style="display: flex; flex-direction: column; gap: 1rem;"></div><button class="btn" style="margin-top: 1rem; background-color: #c53030;" onclick="closePartSelector()">取消</button></div>
 
-    <!-- 游戏结束弹窗 -->
+    <!-- [修改] 弹窗 ID 修正 -->
+    <div id="effect-selector-modal">
+        <h4>选择触发效果</h4>
+        <div id="effect-buttons" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1.5rem;">
+            <!-- 按钮将由 JS 动态生成 -->
+        </div>
+    </div>
+
     <div id="game-over-modal">
-        <!-- [修改] 增加 white-space: pre-wrap; 以支持换行显示分数 -->
         <h2 id="game-over-title" style="font-size: 2rem; margin-bottom: 1.5rem; white-space: pre-wrap;"></h2>
         <form action="{{ url_for('reset_game') }}" method="POST">
             <button class="btn" style="background-color: var(--primary-color);" type="submit">返回机库</button>
         </form>
     </div>
+
 <script>
     let selectedAction = {};
     const gameState = {
@@ -140,61 +167,101 @@
         timing: '{{ game.timing or "" }}',
         openingMoveTaken: {{ 'true' if game.opening_move_taken else 'false' }},
         isPlayerLocked: {{ 'true' if is_player_locked else 'false' }},
-        gameOver: '{{ game.game_over or "" }}'
+        gameOver: '{{ game.game_over or "" }}',
+        // [修改] 增加 pending_effect_data 检查
+        pendingEffect: {{ 'true' if game.pending_effect_data else 'false' }}
     };
-    // [修改] 传递 game_mode 和 ai_defeat_count 到 JS
     const gameMode = '{{ game_mode }}';
     const defeatCount = {{ ai_defeat_count }};
     const orientationMap = {'N': '↑', 'S': '↓', 'E': '→', 'W': '←'};
 
+    // [修复] 这是错误的根源。'cleave' 的 title 被错误地写成了 '【霰射】'。
+    // 我将它修正为 '【顺劈】'。
+    const effectDescriptions = {
+        'devastating': {
+            title: '【毁伤】',
+            text: '对目标结构造成二次伤害',
+            style: 'background-color: var(--status-damaged);'
+        },
+        'scattershot': {
+            title: '【霰射】',
+            text: '对随机部件造成溢出伤害',
+            style: 'background-color: var(--status-destroyed);'
+        },
+        'cleave': {
+            title: '【顺劈】', // <-- [修复] BUG 在这里，之前这里是 '【霰射】'
+            text: '对随机部件造成溢出伤害',
+            style: 'background-color: #805ad5;' // 紫色
+        }
+    };
+
     document.addEventListener('DOMContentLoaded', () => {
         updateUIForPhase();
         document.getElementById('player-arrow').innerText = orientationMap['{{ game.player_mech.orientation }}'];
-        document.getElementById('ai-arrow').innerText = orientationMap['{{ game.ai_mech.orientation }}'];
+
+        // [修改] 增加 ai_arrow 存在性检查
+        const aiArrow = document.getElementById('ai-arrow');
+        if (aiArrow) {
+            aiArrow.innerText = mapOrientation('{{ game.ai_mech.orientation if game.ai_mech else "N" }}');
+        }
 
         if (gameState.gameOver) {
             showGameOverModal(gameState.gameOver);
+        }
+
+        // [修改] 增加 pending_effect_data 检查
+        if (gameState.pendingEffect) {
+            const pendingOptions = {{ game.pending_effect_data.options | tojson | safe if game.pending_effect_data else '[]' }};
+            showEffectSelector(pendingOptions);
         }
 
         const log = document.querySelector('.combat-log');
         log.scrollTop = log.scrollHeight;
     });
 
+    // [新增] 安全的朝向映射
+    function mapOrientation(o) {
+        return orientationMap[o] || '↑';
+    }
+
     function showGameOverModal(status) {
         const modal = document.getElementById('game-over-modal');
         const title = document.getElementById('game-over-title');
-
         if (status === 'player_win') {
             title.innerText = '胜利！';
             title.style.color = 'var(--status-ok)';
-        } else { // 'ai_win'
+        } else {
             title.innerText = '失败！';
-            // [新增] 如果是生存模式，则显示最终分数
             if (gameMode === 'horde') {
                 title.innerText = `结束\n最终击败数: ${defeatCount}`;
             }
             title.style.color = 'var(--status-destroyed)';
         }
-
         modal.style.display = 'block';
         document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
-            if (!el.closest('#game-over-modal')) {
-                el.disabled = true;
-            }
+            if (!el.closest('#game-over-modal')) { el.disabled = true; }
         });
     }
 
     function updateUIForPhase() {
         if (gameState.gameOver) return;
-
         ['timing', 'stance', 'adjustment', 'main'].forEach(phase => { document.getElementById(`phase-${phase}-controls`).style.display = gameState.turnPhase === phase ? 'block' : 'none'; });
         if (gameState.turnPhase === 'timing') document.querySelectorAll('#phase-timing-controls button').forEach(btn => { btn.classList.toggle('active', btn.innerText === gameState.timing); });
+
+        // [修改] 增加 pendingEffect 检查
+        if (gameState.pendingEffect) {
+            document.querySelectorAll('#phase-main-controls .action-item, #phase-adjustment-controls .action-item, #end-turn-btn').forEach(item => {
+                item.classList.add('disabled');
+                item.onclick = null;
+                item.title = '请先选择效果';
+            });
+            return; // 阻止后续的 UI 更新
+        }
 
         if (gameState.turnPhase === 'main') {
             document.querySelectorAll('#phase-main-controls .action-item').forEach(item => {
                 let isDisabled = false;
                 let title = '';
-
                 if (item.classList.contains('disabled') && item.title === '本回合已使用') {
                     isDisabled = true;
                     title = '本回合已使用';
@@ -208,7 +275,6 @@
                         title = '被近战锁定，无法射击';
                     }
                 }
-
                 if(isDisabled) {
                     item.classList.add('disabled');
                     item.onclick = null;
@@ -230,10 +296,10 @@
     function clearHighlights() { document.querySelectorAll('.grid-cell').forEach(c => { c.classList.remove('highlight-move', 'highlight-attack'); c.onclick = null; }); document.getElementById('orientation-selector').style.display = 'none'; }
 
     function selectAction(name, range, type, cost, partSlot) {
+        if (gameState.pendingEffect) return; // 阻止新动作
         clearHighlights();
         selectedAction = { name, range, type, cost, slot: partSlot };
         let url = '', body = {};
-
         if (type === '移动' || name === '调整移动') {
             url = '/get_move_range';
             body = { action_name: name, part_slot: partSlot };
@@ -246,7 +312,6 @@
             showOrientationSelector({{ game.player_pos[0] }}, {{ game.player_pos[1] }}, true);
             return;
         }
-
         if(url) fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) }).then(res => res.json()).then(data => {
             if(data.valid_moves) data.valid_moves.forEach(([x,y]) => { const c = document.getElementById(`cell-${x}-${y}`); c.classList.add('highlight-move'); c.onclick = () => showOrientationSelector(x,y); });
             if(data.valid_targets) data.valid_targets.forEach(t => { const [x,y] = t.pos; const c = document.getElementById(`cell-${x}-${y}`); c.classList.add('highlight-attack'); c.onclick = () => initiateAttack(x, y, t.is_back_attack); });
@@ -255,20 +320,17 @@
 
     function initiateAttack(x, y, isBackAttack) {
         selectedAction.targetPos = [x, y];
-        if (isBackAttack) {
-            // [修改] 背击时，总是显示部位选择器，让玩家选择
-            showPartSelector();
-        } else {
-            // 非背击，直接执行攻击（后端会投骰子）
-            executeAttack();
-        }
+        // [修改] 不再检查 isBackAttack，总是让后端决定
+        executeAttack();
     }
 
-D
     function showPartSelector() {
         const modal = document.getElementById('part-selector-modal'), buttons = document.getElementById('part-buttons'); buttons.innerHTML = '';
-        const aiParts = {{ game.ai_mech.to_dict()['parts'] | tojson }};
-        for (const slot in aiParts) { if (aiParts[slot].status !== 'destroyed') { const btn = document.createElement('button'); btn.className = 'btn'; btn.style.backgroundColor = 'var(--primary-color)'; btn.innerText = `${aiParts[slot].name} (${slot})`; btn.onclick = () => confirmPartSelection(slot); buttons.appendChild(btn); }}
+        // [修改] 增加 game.ai_mech 存在性检查
+        const aiParts = {{ game.ai_mech.to_dict()['parts'] | tojson if game.ai_mech else 'null' }};
+        if (!aiParts) return; // 如果 AI 死了，不显示
+
+        for (const slot in aiParts) { if (aiParts[slot] && aiParts[slot].status !== 'destroyed') { const btn = document.createElement('button'); btn.className = 'btn'; btn.style.backgroundColor = 'var(--primary-color)'; btn.innerText = `${aiParts[slot].name} (${slot})`; btn.onclick = () => confirmPartSelection(slot); buttons.appendChild(btn); }}
         modal.style.display = 'block';
     }
 
@@ -277,41 +339,71 @@ D
     function confirmPartSelection(partSlot) {
         selectedAction.targetPartName = partSlot;
         closePartSelector();
-        // [修改] 确认选择后，*总是*调用 executeAttack
-        // 无论是背击还是黑骰子 'any'，这都是下一步
         executeAttack();
+    }
+
+    // [修改] 动态生成按钮
+    function showEffectSelector(options) {
+        const buttonsDiv = document.getElementById('effect-buttons');
+        buttonsDiv.innerHTML = '';
+
+        if (!options || options.length === 0) {
+             console.error("showEffectSelector 被调用，但没有提供选项！");
+             return;
+        }
+
+        options.forEach(optionKey => {
+            const desc = effectDescriptions[optionKey];
+            if (desc) {
+                const btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.style.cssText = desc.style || 'background-color: var(--primary-color);';
+                btn.innerHTML = `<strong>${desc.title}</strong><br><small>${desc.text}</small>`;
+                btn.onclick = () => confirmEffectChoice(optionKey); // 传递正确的 key
+                buttonsDiv.appendChild(btn);
+            } else {
+                console.warn(`未知的效果键: ${optionKey}`);
+            }
+        });
+        document.getElementById('effect-selector-modal').style.display = 'block';
+    }
+
+    function confirmEffectChoice(choice) {
+        document.getElementById('effect-selector-modal').style.display = 'none';
+        postAndReload('/resolve_effect_choice', { choice: choice });
     }
 
     function showOrientationSelector(x, y, isRotationOnly = false) { const s = document.getElementById('orientation-selector'); document.getElementById(`cell-${x}-${y}`).appendChild(s); s.style.display = 'flex'; selectedAction.targetPos = [x, y]; selectedAction.isRotationOnly = isRotationOnly; }
     function setFinalOrientation(o) { selectedAction.finalOrientation = o; executeMove(); }
 
+    // [修改] 升级 postAndReload
     function postAndReload(url, body = {}) {
         fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
         .then(res => res.json())
         .then(data => {
             if(data.success) {
-                // [新增] 检查是否需要后续动作
                 if (data.action_required === 'select_part') {
-                    // 黑骰子掷出了 'any'，或者这是一个背击
-                    // 我们不需要重载，只需要打开弹窗
-                    console.log("服务器要求选择部位...");
+                    console.log("服务器要求：select_part");
                     showPartSelector();
+                } else if (data.action_required === 'select_effect') {
+                    console.log("服务器要求：select_effect", data.options);
+                    showEffectSelector(data.options); // 传递选项
                 } else {
-                    // 正常重载
-                    window.location.reload();
+                    window.location.reload(); // 默认重载
                 }
             } else if (data.message) {
                 console.error('Action failed:', data.message);
-                window.location.reload(); // [修改] 即使失败也重载，以同步服务器日志
+                window.location.reload();
             }
         });
     }
 
-    function selectTiming(t) { gameState.timing = t; postAndReload('/select_timing', { timing: t }); }
-    function confirmTiming() { postAndReload('/confirm_timing'); }
-    function changeStance(s) { postAndReload('/change_stance', { stance: s }); }
-    function confirmStance() { postAndReload('/confirm_stance'); }
-    function skipAdjustment() { postAndReload('/skip_adjustment'); }
+    // [修改] 增加 pendingEffect 检查
+    function selectTiming(t) { if (gameState.pendingEffect) return; gameState.timing = t; postAndReload('/select_timing', { timing: t }); }
+    function confirmTiming() { if (gameState.pendingEffect) return; postAndReload('/confirm_timing'); }
+    function changeStance(s) { if (gameState.pendingEffect) return; postAndReload('/change_stance', { stance: s }); }
+    function confirmStance() { if (gameState.pendingEffect) return; postAndReload('/confirm_stance'); }
+    function skipAdjustment() { if (gameState.pendingEffect) return; postAndReload('/skip_adjustment'); }
 
     function executeMove() {
         let url = selectedAction.isRotationOnly ? '/change_orientation' : (selectedAction.name === '调整移动' ? '/execute_adjust_move' : '/move_player');
@@ -324,28 +416,15 @@ D
     }
 
     function executeAttack() {
-        // [修改] 检查 selectedAction.targetPartName 是否已存在
-        // 如果存在 (来自 showPartSelector -> confirmPartSelection)，
-        // 这意味着这是背击或黑骰子掷出 'any' 后的第二次调用。
         let body = {
             action_name: selectedAction.name,
             target_pos: selectedAction.targetPos,
             part_slot: selectedAction.slot
         };
-
-        // 如果玩家已经通过弹窗选择了部位 (无论是背击还是黑骰子'any')
         if (selectedAction.targetPartName) {
             body.target_part_name = selectedAction.targetPartName;
-            // [重要] 执行后清除，以便下次攻击是新的
             delete selectedAction.targetPartName;
         }
-
-        // 无论如何都发送请求
-        // 1. 如果是背击 (第一次), body 没有 target_part_name -> 后端返回 'select_part'
-        // 2. 如果是正面/非招架, body 没有 target_part_name -> 后端投骰子:
-        //    a. 结果是 'core' 等 -> 后端直接结算并重载
-        //    b. 结果是 'any' -> 后端返回 'select_part'
-        // 3. 如果是背击/any 后的第二次调用, body 有 target_part_name -> 后端直接结算
         postAndReload('/execute_attack', body);
     }
 </script>

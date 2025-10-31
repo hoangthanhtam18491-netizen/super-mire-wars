@@ -7,7 +7,7 @@ from parts_database import (
     ACTION_BENPAO, ACTION_JINGJU, ACTION_JUJI, ACTION_PAOJI,
     ACTION_CIJI, ACTION_DIANSHE, ACTION_HUIZHAN, ACTION_TIAOYUE,
     ACTION_SUSHE, ACTION_DIANSHE_ZHAN, ACTION_DIANSHE_CI, ACTION_SUSHE_BIPAO,
-    ACTION_BENPAO_MA, # [修正] 导入漏掉的动作
+    ACTION_BENPAO_MA,  # [修正] 导入漏掉的动作
     # Ensure effects are imported if needed, although they are not used in this file directly
     # Example: EFFECT_FLIGHT_MOVEMENT
 )
@@ -55,17 +55,17 @@ def _is_tile_locked_by_opponent(game_state, tile_pos, a_mech, b_pos, b_mech):
     [修改] 移除朝向检查，现在锁定周围8格。
     """
     if not b_mech or b_mech.parts['core'].status == 'destroyed':
-        return False # 对手不存在或核心已毁，无法锁定
+        return False  # 对手不存在或核心已毁，无法锁定
     if not b_mech.has_melee_action():
-        return False # 对手没有近战能力，无法锁定
+        return False  # 对手没有近战能力，无法锁定
     if not _is_adjacent(tile_pos, b_pos):
-        return False # 必须相邻才能锁定
+        return False  # 必须相邻才能锁定
 
     # [移除] 不再检查朝向
     # if not is_in_forward_arc(b_pos, b_mech.orientation, tile_pos):
     #    return False
 
-    return True # 满足以上条件即可锁定
+    return True  # 满足以上条件即可锁定
 
 
 def get_player_lock_status(game_state):
@@ -164,6 +164,8 @@ AI_LOADOUTS = {
     "lighta": AI_LOADOUT_LIGHTA,
     "lightb": AI_LOADOUT_LIGHTB,
 }
+
+
 # --- AI 配置结束 ---
 
 
@@ -183,16 +185,16 @@ def create_ai_mech(ai_loadout_key=None):
     missing_parts = [part_name for part_name in selection.values() if part_name not in ALL_PARTS]
     if missing_parts:
         print(f"警告: AI配置 '{name}' 中的部件 {missing_parts} 在数据库中不存在。将使用 'standard' 后备AI。")
-        ai_loadout_key = "standard" # 重置key
-        chosen_loadout = AI_LOADOUTS[ai_loadout_key] # 重新获取标准配置
+        ai_loadout_key = "standard"  # 重置key
+        chosen_loadout = AI_LOADOUTS[ai_loadout_key]  # 重新获取标准配置
         selection = chosen_loadout['selection']
         name = chosen_loadout['name']
         # 再次验证标准配置是否存在 (理论上应该存在)
         missing_standard_parts = [part_name for part_name in selection.values() if part_name not in ALL_PARTS]
         if missing_standard_parts:
-             print(f"严重错误: 标准AI配置中的部件 {missing_standard_parts} 也不存在！请检查 parts_database.py。")
-             # 这里可能需要更健壮的错误处理，比如抛出异常或返回 None
-             return None # 无法创建AI机甲
+            print(f"严重错误: 标准AI配置中的部件 {missing_standard_parts} 也不存在！请检查 parts_database.py。")
+            # 这里可能需要更健壮的错误处理，比如抛出异常或返回 None
+            return None  # 无法创建AI机甲
 
     # 使用确认有效的配置创建机甲
     mech = create_mech_from_selection(name, selection)
@@ -244,32 +246,36 @@ class GameState:
         self.player_actions_used_this_turn = []
         self.ai_actions_used_this_turn = []
 
+        # [新增] 用于存储待处理的效果选择
+        self.pending_effect_data = None
+        # 结构: {'action_dict': ..., 'overflow_data': {'hits': X, 'crits': Y}, 'target_part_name': ...}
+
     def _spawn_horde_ai(self, ai_loadout_key):
         """[新增] 生存模式下，在底部两行随机生成一个AI。"""
         valid_spawn_points = []
-        for y in [self.board_height -1, self.board_height]: # 最后两行
-             for x in range(1, self.board_width + 1):
-                  pos = (x, y)
-                  if pos != self.player_pos: # 不能生成在玩家身上
-                       valid_spawn_points.append(pos)
+        for y in [self.board_height - 1, self.board_height]:  # 最后两行
+            for x in range(1, self.board_width + 1):
+                pos = (x, y)
+                if pos != self.player_pos:  # 不能生成在玩家身上
+                    valid_spawn_points.append(pos)
 
         if not valid_spawn_points:
-             print("错误：生存模式下没有有效的AI生成点！")
-             # 可能需要添加游戏结束逻辑或在其他位置生成
-             self.ai_pos = (1, self.board_height) # 随便选一个点
+            print("错误：生存模式下没有有效的AI生成点！")
+            # 可能需要添加游戏结束逻辑或在其他位置生成
+            self.ai_pos = (1, self.board_height)  # 随便选一个点
         else:
             self.ai_pos = random.choice(valid_spawn_points)
 
         # 随机选择一个AI配置 (除了第一个)
         if self.ai_defeat_count > 0:
             ai_loadout_key = random.choice(list(AI_LOADOUTS.keys()))
-        elif ai_loadout_key is None: # 第一个AI也随机（如果在机库没选）
-             ai_loadout_key = random.choice(list(AI_LOADOUTS.keys()))
+        elif ai_loadout_key is None:  # 第一个AI也随机（如果在机库没选）
+            ai_loadout_key = random.choice(list(AI_LOADOUTS.keys()))
 
         self.ai_mech = create_ai_mech(ai_loadout_key)
         if self.ai_mech:
-             self.ai_mech.orientation = 'N'  # 总是朝向玩家
-             self.ai_actions_used_this_turn = [] # 重置AI动作
+            self.ai_mech.orientation = 'N'  # 总是朝向玩家
+            self.ai_actions_used_this_turn = []  # 重置AI动作
 
     def check_game_over(self):
         """
@@ -278,9 +284,9 @@ class GameState:
         返回 True 表示游戏结束, False 表示游戏继续。
         """
         player_dead = not self.player_mech or self.player_mech.parts[
-                          'core'].status == 'destroyed' or self.player_mech.get_active_parts_count() < 3
+            'core'].status == 'destroyed' or self.player_mech.get_active_parts_count() < 3
         ai_dead = not self.ai_mech or self.ai_mech.parts[
-                      'core'].status == 'destroyed' or self.ai_mech.get_active_parts_count() < 3
+            'core'].status == 'destroyed' or self.ai_mech.get_active_parts_count() < 3
 
         if player_dead:
             self.game_over = 'ai_win'
@@ -290,10 +296,10 @@ class GameState:
             if self.game_mode == 'horde':
                 self.ai_defeat_count += 1
                 self._spawn_horde_ai(None)  # 传入 None 以触发随机生成
-                if not self.ai_mech: # 如果生成失败
-                     print("严重错误：无法生成新的AI，游戏可能无法继续。")
-                     self.game_over = 'error' # 或者其他状态
-                     return True
+                if not self.ai_mech:  # 如果生成失败
+                    print("严重错误：无法生成新的AI，游戏可能无法继续。")
+                    self.game_over = 'error'  # 或者其他状态
+                    return True
                 return False  # 游戏继续
             else:
                 self.game_over = 'player_win'
@@ -304,7 +310,7 @@ class GameState:
     def to_dict(self):
         return {
             'player_mech': self.player_mech.to_dict() if self.player_mech else None,
-            'ai_mech': self.ai_mech.to_dict() if self.ai_mech else None, # 处理AI可能为None的情况
+            'ai_mech': self.ai_mech.to_dict() if self.ai_mech else None,  # 处理AI可能为None的情况
             'player_pos': self.player_pos,
             'ai_pos': self.ai_pos,
             'current_turn': self.current_turn,
@@ -318,6 +324,7 @@ class GameState:
             'ai_actions_used_this_turn': self.ai_actions_used_this_turn,
             'game_mode': self.game_mode,
             'ai_defeat_count': self.ai_defeat_count,
+            'pending_effect_data': self.pending_effect_data,  # [新增]
         }
 
     @classmethod
@@ -327,7 +334,7 @@ class GameState:
         game_state.board_height = 10
 
         game_state.player_mech = Mech.from_dict(data['player_mech']) if data.get('player_mech') else None
-        game_state.ai_mech = Mech.from_dict(data['ai_mech']) if data.get('ai_mech') else None # 处理AI可能为None的情况
+        game_state.ai_mech = Mech.from_dict(data['ai_mech']) if data.get('ai_mech') else None  # 处理AI可能为None的情况
 
         game_state.player_pos = tuple(data.get('player_pos', (1, 1)))
         game_state.ai_pos = tuple(data.get('ai_pos', (1, 1)))
@@ -342,6 +349,7 @@ class GameState:
         game_state.ai_actions_used_this_turn = data.get('ai_actions_used_this_turn', [])
         game_state.game_mode = data.get('game_mode', 'duel')
         game_state.ai_defeat_count = data.get('ai_defeat_count', 0)
+        game_state.pending_effect_data = data.get('pending_effect_data', None)  # [新增]
         return game_state
 
     def calculate_move_range(self, start_pos, move_distance, is_flight=False):
@@ -360,7 +368,7 @@ class GameState:
                     # 检查曼哈顿距离
                     if abs(dx) + abs(dy) > move_distance:
                         continue
-                    if dx == 0 and dy == 0: # 不能停在原地
+                    if dx == 0 and dy == 0:  # 不能停在原地
                         continue
 
                     nx, ny = sx + dx, sy + dy
@@ -370,7 +378,7 @@ class GameState:
                     if not (1 <= nx <= self.board_width and 1 <= ny <= self.board_height):
                         continue
                     # 检查终点是否被对手占据
-                    if self.ai_mech and next_pos == self.ai_pos: # 检查 ai_mech 是否存在
+                    if self.ai_mech and next_pos == self.ai_pos:  # 检查 ai_mech 是否存在
                         continue
 
                     valid_moves.append(next_pos)
@@ -384,7 +392,8 @@ class GameState:
             locker_mech = self.ai_mech
             locker_pos = self.ai_pos
             # 检查 locker_mech 是否存在
-            locker_can_lock = locker_mech and locker_mech.has_melee_action() and locker_mech.parts['core'].status != 'destroyed'
+            locker_can_lock = locker_mech and locker_mech.has_melee_action() and locker_mech.parts[
+                'core'].status != 'destroyed'
 
             while pq:
                 cost, (x, y) = heapq.heappop(pq)
@@ -396,9 +405,8 @@ class GameState:
                 if cost > 0:
                     current_pos = (x, y)
                     # 检查落点是否被对手占据 (A* 可能探索到，但不能作为最终落点)
-                    if not self.ai_mech or current_pos != self.ai_pos: # 检查 ai_mech
+                    if not self.ai_mech or current_pos != self.ai_pos:  # 检查 ai_mech
                         valid_moves.append(current_pos)
-
 
                 current_is_locked = False
                 if locker_can_lock:
@@ -406,7 +414,7 @@ class GameState:
                         self, (x, y), self.player_mech, locker_pos, locker_mech
                     )
 
-                for dx_step, dy_step in [(0, 1), (0, -1), (1, 0), (-1, 0)]: # 只检查四向移动
+                for dx_step, dy_step in [(0, 1), (0, -1), (1, 0), (-1, 0)]:  # 只检查四向移动
                     nx, ny = x + dx_step, y + dy_step
                     next_pos = (nx, ny)
 
@@ -420,7 +428,7 @@ class GameState:
 
                     move_cost = 1
                     if current_is_locked:
-                        move_cost += 1 # 脱离锁定需要额外成本
+                        move_cost += 1  # 脱离锁定需要额外成本
                     new_cost = cost + move_cost
 
                     # 检查目标格子是否被占据 (如果被占据，路径成本可以计算，但不应加入 visited 或 pq)
@@ -428,16 +436,16 @@ class GameState:
                     if is_occupied_by_ai:
                         # 虽然不能停留，但可以计算经过这里的成本（如果规则允许穿过）
                         # 如果不允许穿过，这里应该 continue
-                        pass # 或者根据规则决定是否 continue
+                        pass  # 或者根据规则决定是否 continue
 
-                    if new_cost <= move_distance and (next_pos not in visited or new_cost < visited[next_pos]) and not is_occupied_by_ai:
+                    if new_cost <= move_distance and (
+                            next_pos not in visited or new_cost < visited[next_pos]) and not is_occupied_by_ai:
                         visited[next_pos] = new_cost
                         heapq.heappush(pq, (new_cost, next_pos))
 
         # 确保最终返回的列表不包含AI当前位置
         final_valid_moves = [move for move in set(valid_moves) if not self.ai_mech or move != self.ai_pos]
         return final_valid_moves
-
 
     def calculate_attack_range(self, attacker_mech, start_pos, action, current_tp=0):
         """
@@ -446,7 +454,7 @@ class GameState:
         """
         targets = []
         # 目标总是对手（如果存在）
-        if not self.ai_mech: return [] # 如果没有AI，不能攻击
+        if not self.ai_mech: return []  # 如果没有AI，不能攻击
         target_pos = self.ai_pos
 
         sx, sy = start_pos
@@ -458,10 +466,14 @@ class GameState:
         if action.action_type == '近战':
             # 近战范围检查
             valid_melee_targets = []
-            if orientation == 'N': valid_melee_targets = [(sx - 1, sy - 1), (sx, sy - 1), (sx + 1, sy - 1)]
-            elif orientation == 'S': valid_melee_targets = [(sx - 1, sy + 1), (sx, sy + 1), (sx + 1, sy + 1)]
-            elif orientation == 'E': valid_melee_targets = [(sx + 1, sy - 1), (sx + 1, sy), (sx + 1, sy + 1)]
-            elif orientation == 'W': valid_melee_targets = [(sx - 1, sy - 1), (sx - 1, sy), (sx - 1, sy + 1)]
+            if orientation == 'N':
+                valid_melee_targets = [(sx - 1, sy - 1), (sx, sy - 1), (sx + 1, sy - 1)]
+            elif orientation == 'S':
+                valid_melee_targets = [(sx - 1, sy + 1), (sx, sy + 1), (sx + 1, sy + 1)]
+            elif orientation == 'E':
+                valid_melee_targets = [(sx + 1, sy - 1), (sx + 1, sy), (sx + 1, sy + 1)]
+            elif orientation == 'W':
+                valid_melee_targets = [(sx - 1, sy - 1), (sx - 1, sy), (sx - 1, sy + 1)]
 
             if target_pos in valid_melee_targets:
                 is_valid_target = True
@@ -469,38 +481,37 @@ class GameState:
         elif action.action_type == '射击':
             # 检查视线
             if not is_in_forward_arc(start_pos, orientation, target_pos):
-                return [] # 不在视线内
+                return []  # 不在视线内
 
             # 计算最终射程
             final_range = action.range_val
             if action.effects:
                 # 检查【静止】效果
                 static_bonus = action.effects.get("static_range_bonus", 0)
-                if static_bonus > 0 and current_tp >= 1: # 检查TP是否>=1
+                if static_bonus > 0 and current_tp >= 1:  # 检查TP是否>=1
                     final_range += static_bonus
 
                 # 检查【双手】效果
                 two_handed_bonus = action.effects.get("two_handed_range_bonus", 0)
                 if two_handed_bonus > 0:
-                     # 确定持有武器的手臂 和 另一只手臂
-                     action_slot = None
-                     for slot, part in attacker_mech.parts.items():
-                         if part.status != 'destroyed':
-                              for act in part.actions:
-                                   if act.name == action.name: # 找到执行此动作的部件槽位
-                                       action_slot = slot
-                                       break
-                         if action_slot: break
+                    # 确定持有武器的手臂 和 另一只手臂
+                    action_slot = None
+                    for slot, part in attacker_mech.parts.items():
+                        if part.status != 'destroyed':
+                            for act in part.actions:
+                                if act.name == action.name:  # 找到执行此动作的部件槽位
+                                    action_slot = slot
+                                    break
+                        if action_slot: break
 
-                     if action_slot in ['left_arm', 'right_arm']:
-                          other_arm_slot = 'right_arm' if action_slot == 'left_arm' else 'left_arm'
-                          other_arm_part = attacker_mech.parts.get(other_arm_slot)
-                          if other_arm_part and other_arm_part.status != 'destroyed' and "【空手】" in other_arm_part.tags:
-                               final_range += two_handed_bonus
-                     else:
-                          # 如果动作不在手臂上（例如背包武器），则双手效果不适用
-                          pass
-
+                    if action_slot in ['left_arm', 'right_arm']:
+                        other_arm_slot = 'right_arm' if action_slot == 'left_arm' else 'left_arm'
+                        other_arm_part = attacker_mech.parts.get(other_arm_slot)
+                        if other_arm_part and other_arm_part.status != 'destroyed' and "【空手】" in other_arm_part.tags:
+                            final_range += two_handed_bonus
+                    else:
+                        # 如果动作不在手臂上（例如背包武器），则双手效果不适用
+                        pass
 
             # 检查距离
             dist = _get_distance(start_pos, target_pos)
@@ -512,4 +523,3 @@ class GameState:
             targets.append({'pos': target_pos, 'is_back_attack': back_attack})
 
         return targets
-

@@ -116,28 +116,30 @@ class Mech:
         return all_actions
 
     def get_part_by_name(self, name_or_slot):
+        # ... existing code ...
         """
         根据部件的显示名称或其槽位名（'core', 'legs'等）获取部件对象。
         优先匹配显示名称。
         """
-        for part in self.parts.values():
-            if part.name == name_or_slot:
-                return part
-        if name_or_slot in self.parts:
+        if name_or_slot in self.parts:  # [修复] 优先检查槽位名
             return self.parts[name_or_slot]
+        for part in self.parts.values():
+            if part and part.name == name_or_slot:  # [修复] 增加 part 存在性检查
+                return part
         return None
 
     def has_melee_action(self):
-        """检查机甲是否有可用的近战动作。"""
-        # [修改] 适配 get_all_actions 的新返回格式
-        for action, part_slot in self.get_all_actions():
-            if action.action_type == '近战':
-                return True
+        """[修复] 检查机甲是否有可用的近战动作。"""
+        for part_slot, part in self.parts.items():
+            if part and part.status != 'destroyed':
+                for action in part.actions:
+                    if action.action_type == '近战':
+                        return True
         return False
 
     def get_active_parts_count(self):
         """计算未被摧毁的部件数量。"""
-        return sum(1 for part in self.parts.values() if part.status != 'destroyed')
+        return sum(1 for part in self.parts.values() if part and part.status != 'destroyed') # [修复] 增加 part 存在性检查
 
     def get_passive_effects(self):
         """
@@ -146,7 +148,7 @@ class Mech:
         """
         passive_effects = []
         for part_slot, part in self.parts.items():
-            if part.status != 'destroyed':
+            if part and part.status != 'destroyed': # [修复] 增加 part 存在性检查
                 for action in part.actions:
                     if action.action_type == '被动' and action.effects:
                         passive_effects.append(action.effects)
@@ -156,7 +158,7 @@ class Mech:
         """将Mech对象序列化为字典。"""
         return {
             'name': self.name,
-            'parts': {name: part.to_dict() for name, part in self.parts.items()},
+            'parts': {name: part.to_dict() if part else None for name, part in self.parts.items()}, # [修复] 允许 part 为 None
             'stance': self.stance,
             'orientation': self.orientation
         }
@@ -165,15 +167,24 @@ class Mech:
     def from_dict(cls, data):
         """从字典创建Mech对象，并重建其所有Part。"""
         parts_data = data['parts']
+
+        # [修复] 安全地从字典加载部件，允许 None
+        def safe_part_load(slot_name):
+            part_data = parts_data.get(slot_name)
+            if part_data:
+                return Part.from_dict(part_data)
+            return None
+
         mech = cls(
             name=data.get('name', 'Unknown Mech'),
-            core=Part.from_dict(parts_data['core']),
-            legs=Part.from_dict(parts_data['legs']),
-            left_arm=Part.from_dict(parts_data['left_arm']),
-            right_arm=Part.from_dict(parts_data['right_arm']),
-            backpack=Part.from_dict(parts_data['backpack'])
+            core=safe_part_load('core'),
+            legs=safe_part_load('legs'),
+            left_arm=safe_part_load('left_arm'),
+            right_arm=safe_part_load('right_arm'),
+            backpack=safe_part_load('backpack')
         )
         mech.stance = data.get('stance', 'defense')
         mech.orientation = data.get('orientation', 'N')
         return mech
+
 
