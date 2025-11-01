@@ -1,10 +1,10 @@
 import os
 import random
-import tempfile  # [新增] 导入 tempfile
+import tempfile
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
-from flask_session import Session  # [新增] 导入 flask_session
+from flask_session import Session
 from data_models import Mech, Part, Action
-from combat_system import resolve_attack, _resolve_effect_logic  # [修改 v1.13] 导入新的辅助函数
+from combat_system import resolve_attack, _resolve_effect_logic
 from dice_roller import roll_black_die
 from game_logic import (
     GameState, is_back_attack, create_mech_from_selection, get_player_lock_status,
@@ -21,31 +21,13 @@ import bleach
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
-# --- [新增] 服务器端会话配置 ---
-# 1. 设置会话类型为 "filesystem"（存储在服务器硬盘上）
+# --- 服务器端会话配置 ---
 app.config["SESSION_TYPE"] = "filesystem"
-# 2. 为会话文件创建一个临时目录
 app.config["SESSION_FILE_DIR"] = tempfile.mkdtemp()
-# 3. 会话在浏览器关闭时失效
 app.config["SESSION_PERMANENT"] = False
-# 4. 初始化 Session 插件
 Session(app)
-# --- 会话配置结束 ---
 
-# [新增] 日志条目限制
 MAX_LOG_ENTRIES = 50
-
-
-# [新增] 用于清除一次性视觉效果的辅助函数
-def clear_visual_feedback():
-    """清除会话中的一次性事件。"""
-    session['visual_feedback_events'] = []
-    # 重置 last_pos，这样刷新页面时不会重复播放动画
-    if 'game_state' in session:
-        game = GameState.from_dict(session['game_state'])
-        game.last_player_pos = None
-        game.last_ai_pos = None
-        session['game_state'] = game.to_dict()
 
 
 # --- 核心路由 ---
@@ -54,10 +36,10 @@ def clear_visual_feedback():
 def index():
     """渲染游戏的主索引/开始页面。"""
     update_notes = [
-        "版本 v1.3:",
-        "- 增加了新的部件与效果",
-        "- 优化了AI逻辑",
-        "- [新增] 实现了移动和攻击的视觉反馈！"
+        "版本 v1.15:",
+        "- [新增] 战斗中增加骰子掷骰结果的视觉反馈。",
+        "- [新增] 机甲移动时增加平滑动画。",
+        "- [修复] 修正了v1.13中【顺劈】效果的结算Bug。"
     ]
     rules_html = ""
     try:
@@ -116,10 +98,10 @@ def start_game():
         log.append(f"> 遭遇敌机: {game.ai_mech.name}。")
     log.append("> 战斗开始！")
 
-    # [修改] 日志裁剪
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
-    session['visual_feedback_events'] = []  # [新增] 初始化视觉事件列表
+    # [新增 v1.14] 初始化视觉反馈列表
+    session['visual_feedback_events'] = []
     return redirect(url_for('game'))
 
 
@@ -134,8 +116,19 @@ def game():
     is_player_locked, locker_pos = get_player_lock_status(game_state_obj)
     log = session.get('combat_log', [])
 
-    # [新增] 获取并传递视觉事件
-    visual_events = session.get('visual_feedback_events', [])
+    # [新增 v1.14] 获取并清除视觉反馈事件
+    visual_events = session.pop('visual_feedback_events', [])
+
+    # [新增 v1.16 - Bug修复]
+    # 从 session 中 pop 仅清除了临时变量。
+    # [修改 v1.17]
+    # 修复了重复动画的bug。
+    # 我们必须在渲染后清除所有一次性事件 (视觉事件 *和* 上一位置)。
+    if game_state_obj.visual_events or game_state_obj.last_player_pos or game_state_obj.last_ai_pos:
+        game_state_obj.visual_events = []
+        game_state_obj.last_player_pos = None  # <-- [修复]
+        game_state_obj.last_ai_pos = None  # <-- [修复]
+        session['game_state'] = game_state_obj.to_dict()
 
     return render_template(
         'game.html',
@@ -145,7 +138,7 @@ def game():
         player_actions_used=game_state_obj.player_actions_used_this_turn,
         game_mode=game_state_obj.game_mode,
         ai_defeat_count=game_state_obj.ai_defeat_count,
-        visual_feedback_events=visual_events  # [新增]
+        visual_feedback_events=visual_events  # [新增 v1.14] 传递给模板
     )
 
 
@@ -154,14 +147,13 @@ def reset_game():
     """清除会话数据，重置游戏并返回机库。"""
     session.pop('game_state', None)
     session.pop('combat_log', None)
-    session.pop('visual_feedback_events', None)  # [新增]
+    session.pop('visual_feedback_events', None)  # [新增 v1.14]
     return redirect(url_for('hangar'))
 
 
 @app.route('/end_turn', methods=['POST'])
 def end_turn():
     """玩家结束回合，触发AI回合逻辑，并在AI行动后刷新游戏状态。"""
-    clear_visual_feedback()  # [新增] 清除玩家的旧事件
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over:
         return redirect(url_for('game'))
@@ -169,17 +161,21 @@ def end_turn():
     log = session.get('combat_log', [])
     if game_state_obj.pending_effect_data:
         log.append("> [错误] 必须先选择效果才能结束回合！")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
         return redirect(url_for('game'))
 
     log.append("-" * 20)
     log.append("> 玩家回合结束。")
+
+    # [新增 v1.14] AI 移动前记录位置
+    game_state_obj.last_ai_pos = game_state_obj.ai_pos
+
     ai_turn_log, attacks_to_resolve_list = run_ai_turn(game_state_obj)
     log.extend(ai_turn_log)
     if not attacks_to_resolve_list:
         log.append("> AI 未执行攻击。")
+
     for attack_action in attacks_to_resolve_list:
         log.append(f"--- AI 攻击结算 ({attack_action.name}) ---")
         back_attack = is_back_attack(game_state_obj.ai_pos, game_state_obj.player_pos,
@@ -187,7 +183,7 @@ def end_turn():
         target_part_slot = None
         if attack_action.action_type == '近战' and not back_attack:
             parry_parts = [(s, p) for s, p in game_state_obj.player_mech.parts.items() if
-                           p.parry > 0 and p.status != 'destroyed']
+                           p and p.parry > 0 and p.status != 'destroyed']  # [修复] 增加 p 存在性检查
             if parry_parts:
                 target_part_slot, best_parry_part = max(parry_parts, key=lambda item: item[1].parry)
                 log.append(f"> 玩家决定用 [{best_parry_part.name}] 进行招架！")
@@ -199,7 +195,8 @@ def end_turn():
                     log.append("> [背击] AI 获得任意选择权！")
                 else:
                     log.append("> AI 获得任意选择权！")
-                damaged_parts = [s for s, p in game_state_obj.player_mech.parts.items() if p.status == 'damaged']
+                damaged_parts = [s for s, p in game_state_obj.player_mech.parts.items() if
+                                 p and p.status == 'damaged']  # [修复] 增加 p 存在性检查
                 if damaged_parts:
                     target_part_slot = random.choice(damaged_parts)
                     log.append(f"> AI 优先攻击已受损部件: [{target_part_slot}]。")
@@ -207,7 +204,8 @@ def end_turn():
                     target_part_slot = 'core'
                     log.append("> AI 决定攻击 [核心]。")
                 else:
-                    valid_parts = [s for s, p in game_state_obj.player_mech.parts.items() if p.status != 'destroyed']
+                    valid_parts = [s for s, p in game_state_obj.player_mech.parts.items() if
+                                   p and p.status != 'destroyed']  # [修复] 增加 p 存在性检查
                     target_part_slot = random.choice(valid_parts) if valid_parts else 'core'
             elif game_state_obj.player_mech.parts.get(hit_roll_result) and game_state_obj.player_mech.parts[
                 hit_roll_result].status != 'destroyed':
@@ -216,26 +214,33 @@ def end_turn():
                 target_part_slot = 'core'
                 log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
 
-        # [修改 v1.13] resolve_attack 现在返回 overflow_data
-        attack_log, result, overflow_data = resolve_attack(
+        # [修改 v1.15] 捕获 dice_roll_details
+        attack_log, result, overflow_data, dice_roll_details = resolve_attack(
             attacker_mech=game_state_obj.ai_mech,
             defender_mech=game_state_obj.player_mech,
             action=attack_action,
             target_part_name=target_part_slot,
             is_back_attack=back_attack,
-            chosen_effect=None  # AI 会自动选择效果，不需要玩家介入
+            chosen_effect=None
         )
         log.extend(attack_log)
 
-        # [新增] 为AI攻击添加视觉反馈事件
-        session['visual_feedback_events'].append({
-            'type': 'attack_result',
-            'attacker_pos': game_state_obj.ai_pos,
-            'defender_pos': game_state_obj.player_pos,
-            'result_text': result  # '击穿' 或 '无效'
-        })
+        # [新增 v1.15] 添加骰子掷骰视觉事件
+        if dice_roll_details:
+            game_state_obj.add_visual_event(
+                'dice_roll',
+                attacker_name=game_state_obj.ai_mech.name,
+                defender_name=game_state_obj.player_mech.name,
+                action_name=attack_action.name,
+                details=dice_roll_details
+            )
 
-        # [修改 v1.13] AI 攻击不需要玩家选择，所以 effect_choice_required 逻辑已移除
+        # [新增 v1.14] 添加攻击结果视觉事件
+        game_state_obj.add_visual_event(
+            'attack_result',
+            defender_pos=game_state_obj.player_pos,
+            result_text=result  # '击穿' or '无效'
+        )
 
         game_is_over = game_state_obj.check_game_over()
         if game_is_over and game_state_obj.game_over == 'ai_win':
@@ -243,6 +248,7 @@ def end_turn():
             if game_state_obj.game_mode == 'horde':
                 log.append(f"> [生存模式] 最终击败数: {game_state_obj.ai_defeat_count}")
             break
+
     if not game_state_obj.game_over:
         log.append("> AI回合结束。请开始你的回合。")
         log.append("-" * 20)
@@ -254,17 +260,14 @@ def end_turn():
         game_state_obj.opening_move_taken = False
         game_state_obj.player_actions_used_this_turn = []
         game_state_obj.pending_effect_data = None
-
-        # [新增] 重置玩家和AI的上一个位置，为玩家回合做准备
-        game_state_obj.last_player_pos = None
-        game_state_obj.last_ai_pos = game_state_obj.ai_mech.last_pos  # 从机甲对象同步
-
+        game_state_obj.last_player_pos = None  # [新增 v1.14] 清除玩家上一回合位置
         game_state_obj.check_game_over()
 
     session['game_state'] = game_state_obj.to_dict()
-    # [修改] 日志裁剪
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
+    # [新增 v1.14] 保存视觉事件到会话
+    session['visual_feedback_events'] = game_state_obj.visual_events
     return redirect(url_for('game'))
 
 
@@ -272,69 +275,68 @@ def end_turn():
 
 @app.route('/select_timing', methods=['POST'])
 def select_timing():
-    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     timing = data.get('timing')
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'timing' and not game_state_obj.game_over:
         game_state_obj.timing = timing
         session['game_state'] = game_state_obj.to_dict()
+        session['visual_feedback_events'] = game_state_obj.visual_events  # [新增 v1.14] 传递事件
         return jsonify({'success': True})
     return jsonify({'success': False})
 
 
 @app.route('/confirm_timing', methods=['POST'])
 def confirm_timing():
-    clear_visual_feedback()  # [新增] 清除旧事件
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'timing' and game_state_obj.timing and not game_state_obj.game_over:
         game_state_obj.turn_phase = 'stance'
         session['game_state'] = game_state_obj.to_dict()
         log = session.get('combat_log', [])
         log.append(f"> 时机已确认为 [{game_state_obj.timing}]。进入姿态选择阶段。")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events  # [新增 v1.14] 传递事件
         return jsonify({'success': True})
     return jsonify({'success': False, 'message': 'Please select a timing first.'})
 
 
 @app.route('/change_stance', methods=['POST'])
 def change_stance():
-    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     new_stance = data.get('stance')
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'stance' and not game_state_obj.game_over:
         game_state_obj.player_mech.stance = new_stance
         session['game_state'] = game_state_obj.to_dict()
+        session['visual_feedback_events'] = game_state_obj.visual_events  # [新增 v1.14] 传递事件
         return jsonify({'success': True})
     return jsonify({'success': False, 'message': 'Not in stance phase.'})
 
 
 @app.route('/confirm_stance', methods=['POST'])
 def confirm_stance():
-    clear_visual_feedback()  # [新增] 清除旧事件
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'stance' and not game_state_obj.game_over:
         game_state_obj.turn_phase = 'adjustment'
         session['game_state'] = game_state_obj.to_dict()
         log = session.get('combat_log', [])
         log.append(f"> 姿态已确认为 [{game_state_obj.player_mech.stance}]。进入调整阶段。")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events  # [新增 v1.14] 传递事件
         return jsonify({'success': True})
     return jsonify({'success': False})
 
 
 @app.route('/execute_adjust_move', methods=['POST'])
 def execute_adjust_move():
-    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'adjustment' and game_state_obj.player_tp >= 1 and not game_state_obj.game_over:
-        game_state_obj.last_player_pos = game_state_obj.player_pos  # [新增] 记录移动前的位置
+        # [新增 v1.14] 移动前记录位置
+        game_state_obj.last_player_pos = game_state_obj.player_pos
+
         game_state_obj.player_pos = tuple(data.get('target_pos'))
         game_state_obj.player_mech.orientation = data.get('final_orientation')
         game_state_obj.player_tp -= 1
@@ -342,16 +344,15 @@ def execute_adjust_move():
         session['game_state'] = game_state_obj.to_dict()
         log = session.get('combat_log', [])
         log.append(f"> 玩家调整移动到 {game_state_obj.player_pos}。进入主动作阶段。")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events  # [新增 v1.14] 传递事件
         return jsonify({'success': True})
     return jsonify({'success': False})
 
 
 @app.route('/change_orientation', methods=['POST'])
 def change_orientation():
-    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'adjustment' and game_state_obj.player_tp >= 1 and not game_state_obj.game_over:
@@ -361,25 +362,24 @@ def change_orientation():
         session['game_state'] = game_state_obj.to_dict()
         log = session.get('combat_log', [])
         log.append(f"> 玩家仅转向。进入主动作阶段。")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events  # [新增 v1.14] 传递事件
         return jsonify({'success': True})
     return jsonify({'success': False})
 
 
 @app.route('/skip_adjustment', methods=['POST'])
 def skip_adjustment():
-    clear_visual_feedback()  # [新增] 清除旧事件
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'adjustment' and not game_state_obj.game_over:
         game_state_obj.turn_phase = 'main'
         session['game_state'] = game_state_obj.to_dict()
         log = session.get('combat_log', [])
         log.append(f"> 玩家跳过调整阶段。进入主动作阶段。")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events  # [新增 v1.14] 传递事件
         return jsonify({'success': True})
     return jsonify({'success': False})
 
@@ -390,7 +390,6 @@ def execute_main_action(game, action, action_name, part_slot):
     action_id = (part_slot, action_name)
     if action_id in game.player_actions_used_this_turn:
         log.append(f"> [错误] [{action_name}] (来自: {part_slot}) 本回合已使用过。")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
         return False
@@ -401,13 +400,11 @@ def execute_main_action(game, action, action_name, part_slot):
         tp_cost = 1
     if game.player_ap < ap_cost:
         log.append(f"> [错误] AP不足 (需要 {ap_cost})，无法执行 [{action.name}]。")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
         return False
     if game.player_tp < tp_cost:
         log.append(f"> [错误] TP不足 (需要 {tp_cost})，无法执行 [{action.name}]。")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
         return False
@@ -415,7 +412,6 @@ def execute_main_action(game, action, action_name, part_slot):
         if action.action_type != game.timing:
             log.append(
                 f"> [错误] 起手动作错误！当前时机为 [{game.timing}]，无法执行 [{action.action_type}] 动作。")
-            # [修改] 日志裁剪
             if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
             session['combat_log'] = log
             return False
@@ -429,7 +425,6 @@ def execute_main_action(game, action, action_name, part_slot):
 @app.route('/move_player', methods=['POST'])
 def move_player():
     """(AJAX) 处理玩家的“移动”类型动作（非调整移动）。"""
-    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over: return jsonify({'success': False})
@@ -439,6 +434,7 @@ def move_player():
         log.append("> [错误] 必须先解决待处理的效果选择！")
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events  # [新增 v1.14] 传递事件
         return jsonify({'success': False, 'message': '必须先选择效果！'})
 
     action_name = data.get('action_name')
@@ -446,18 +442,20 @@ def move_player():
     action = None
     if part_slot and part_slot in game_state_obj.player_mech.parts:
         part = game_state_obj.player_mech.parts[part_slot]
-        if part.status != 'destroyed':
+        if part and part.status != 'destroyed':  # [修复] 增加 p 存在性检查
             action = next((a for a in part.actions if a.name == action_name), None)
     if game_state_obj.turn_phase == 'main' and action and execute_main_action(game_state_obj, action, action_name,
                                                                               part_slot):
-        game_state_obj.last_player_pos = game_state_obj.player_pos  # [新增] 记录移动前的位置
+        # [新增 v1.14] 移动前记录位置
+        game_state_obj.last_player_pos = game_state_obj.player_pos
+
         game_state_obj.player_pos = tuple(data.get('target_pos'))
         game_state_obj.player_mech.orientation = data.get('final_orientation')
         session['game_state'] = game_state_obj.to_dict()
         log.append(f"> 玩家执行 [{action.name}]。")
-        # [修改] 日志裁剪
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events  # [新增 v1.14] 传递事件
         return jsonify({'success': True})
     return jsonify({'success': False})
 
@@ -465,7 +463,6 @@ def move_player():
 @app.route('/execute_attack', methods=['POST'])
 def execute_attack():
     """ (AJAX) 处理玩家的“攻击”动作（近战或射击）。 """
-    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     log = session.get('combat_log', [])
@@ -475,6 +472,7 @@ def execute_attack():
         log.append("> [错误] 必须先解决待处理的效果选择！")
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events
         return jsonify({'success': False, 'message': '必须先选择效果！'})
 
     action_name = data.get('action_name')
@@ -482,7 +480,7 @@ def execute_attack():
     attack_action = None
     if part_slot and part_slot in game_state_obj.player_mech.parts:
         part = game_state_obj.player_mech.parts[part_slot]
-        if part.status != 'destroyed':
+        if part and part.status != 'destroyed':  # [修复] 增加 p 存在性检查
             attack_action = next((a for a in part.actions if a.name == action_name), None)
 
     if game_state_obj.turn_phase == 'main' and attack_action:
@@ -506,12 +504,14 @@ def execute_attack():
                 log.append(f"> [错误] 目标超出有效射程 {effective_range} (距离 {dist})。")
                 if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
                 session['combat_log'] = log
+                session['visual_feedback_events'] = game_state_obj.visual_events
                 return jsonify({'success': False, 'message': 'Target out of range.'})
             if not is_in_forward_arc(game_state_obj.player_pos, game_state_obj.player_mech.orientation,
                                      target_pos_tuple):
                 log.append(f"> [错误] 目标不在前方视线内。")
                 if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
                 session['combat_log'] = log
+                session['visual_feedback_events'] = game_state_obj.visual_events
                 return jsonify({'success': False, 'message': 'Target not in forward arc.'})
         if attack_action.action_type == '近战':
             valid_targets = game_state_obj.calculate_attack_range(
@@ -521,12 +521,14 @@ def execute_attack():
                 log.append(f"> [错误] 目标不在近战攻击范围内。")
                 if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
                 session['combat_log'] = log
+                session['visual_feedback_events'] = game_state_obj.visual_events
                 return jsonify({'success': False, 'message': 'Target out of melee range.'})
         is_player_locked, _ = get_player_lock_status(game_state_obj)
         if is_player_locked and attack_action.action_type == '射击':
             log.append(f"> [错误] 你被近战锁定，无法执行 [{attack_action.name}]！")
             if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
             session['combat_log'] = log
+            session['visual_feedback_events'] = game_state_obj.visual_events
             return jsonify({'success': False, 'message': '被近战锁定，无法射击！'})
         back_attack = is_back_attack(game_state_obj.player_pos, game_state_obj.ai_pos,
                                      game_state_obj.ai_mech.orientation)
@@ -547,10 +549,11 @@ def execute_attack():
                     log.append("> [狙击效果] 玩家获得任意选择权！请选择目标部位。")
                 if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
                 session['combat_log'] = log
+                session['visual_feedback_events'] = game_state_obj.visual_events
                 return jsonify({'success': True, 'action_required': 'select_part'})
             if attack_action.action_type == '近战':
                 parry_parts = [(s, p) for s, p in game_state_obj.ai_mech.parts.items() if
-                               p.parry > 0 and p.status != 'destroyed']
+                               p and p.parry > 0 and p.status != 'destroyed']  # [修复] 增加 p 存在性检查
                 if parry_parts:
                     target_part_slot, best_parry_part = max(parry_parts, key=lambda item: item[1].parry)
                     log.append(f"> AI 决定用 [{best_parry_part.name}] 进行招架！")
@@ -561,6 +564,7 @@ def execute_attack():
                     log.append("> 玩家获得任意选择权！请选择目标部位。")
                     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
                     session['combat_log'] = log
+                    session['visual_feedback_events'] = game_state_obj.visual_events
                     return jsonify({'success': True, 'action_required': 'select_part'})
                 elif game_state_obj.ai_mech.parts.get(hit_roll_result) and game_state_obj.ai_mech.parts[
                     hit_roll_result].status != 'destroyed':
@@ -571,15 +575,18 @@ def execute_attack():
 
         if not execute_main_action(game_state_obj, attack_action, action_name, part_slot):
             # (execute_main_action 已经保存了日志)
+            session['visual_feedback_events'] = game_state_obj.visual_events
             return jsonify({'success': False, 'message': 'Action cost validation failed.'})
 
         if not target_part_slot:
             log.append("> [严重错误] 未能确定目标部位！攻击中止。")
             if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
             session['combat_log'] = log
+            session['visual_feedback_events'] = game_state_obj.visual_events
             return jsonify({'success': False, 'message': 'Internal error: Target part slot not determined.'})
 
-        attack_log, result, overflow_data = resolve_attack(
+        # [修改 v1.15] 捕获 dice_roll_details
+        attack_log, result, overflow_data, dice_roll_details = resolve_attack(
             attacker_mech=game_state_obj.player_mech,
             defender_mech=game_state_obj.ai_mech,
             action=attack_action,
@@ -588,13 +595,22 @@ def execute_attack():
             chosen_effect=None
         )
 
-        # [新增] 为玩家攻击添加视觉反馈事件
-        session['visual_feedback_events'].append({
-            'type': 'attack_result',
-            'attacker_pos': game_state_obj.player_pos,
-            'defender_pos': game_state_obj.ai_pos,
-            'result_text': result  # '击穿' 或 '无效'
-        })
+        # [新增 v1.15] 添加骰子掷骰视觉事件
+        if dice_roll_details:
+            game_state_obj.add_visual_event(
+                'dice_roll',
+                attacker_name=game_state_obj.player_mech.name,
+                defender_name=game_state_obj.ai_mech.name,
+                action_name=attack_action.name,
+                details=dice_roll_details
+            )
+
+        # [新增 v1.14] 添加攻击结果视觉事件
+        game_state_obj.add_visual_event(
+            'attack_result',
+            defender_pos=game_state_obj.ai_pos,
+            result_text=result  # '击穿' or '无效'
+        )
 
         if result == "effect_choice_required":
             log.extend(attack_log)
@@ -603,17 +619,19 @@ def execute_attack():
                 'overflow_data': {'hits': overflow_data['hits'], 'crits': overflow_data['crits']},
                 'options': overflow_data['options'],
                 'target_part_name': target_part_slot,
-                'is_back_attack': back_attack
+                'is_back_attack': back_attack,
+                'choice': None  # [新增 v1.15] 确保 choice 为 None
             }
             session['game_state'] = game_state_obj.to_dict()
             if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
             session['combat_log'] = log
+            session['visual_feedback_events'] = game_state_obj.visual_events
             return jsonify({'success': True, 'action_required': 'select_effect', 'options': overflow_data['options']})
 
         log.extend(attack_log)
         game_state_obj.pending_effect_data = None
-        ai_was_defeated = game_state_obj.ai_mech.parts[
-                              'core'].status == 'destroyed' or game_state_obj.ai_mech.get_active_parts_count() < 3
+        ai_was_defeated = not game_state_obj.ai_mech or game_state_obj.ai_mech.parts[
+            'core'].status == 'destroyed' or game_state_obj.ai_mech.get_active_parts_count() < 3
         game_is_over = game_state_obj.check_game_over()
         if game_state_obj.game_mode == 'horde' and ai_was_defeated and not game_is_over:
             log.append(f"> [生存模式] 击败了 {game_state_obj.ai_defeat_count} 台敌机！")
@@ -622,17 +640,18 @@ def execute_attack():
         session['game_state'] = game_state_obj.to_dict()
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events
         return jsonify({'success': True})
 
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
+    session['visual_feedback_events'] = game_state_obj.visual_events
     return jsonify({'success': False})
 
 
 @app.route('/resolve_effect_choice', methods=['POST'])
 def resolve_effect_choice():
     """ (AJAX) 接收玩家关于【毁伤】/【霰射】/【顺劈】的选择。 """
-    # 注意：这里 *不* 清除视觉反馈，因为这是攻击流程的一部分
     data = request.get_json()
     choice = data.get('choice')
 
@@ -644,17 +663,17 @@ def resolve_effect_choice():
         log.append("> [错误] 找不到待处理的效果数据！")
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events
         return jsonify({'success': False, 'message': 'No pending data.'})
 
     if choice not in pending_data.get('options', []):
         log.append(f"> [错误] 无效的选择: {choice}")
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events
         return jsonify({'success': False, 'message': 'Invalid choice.'})
 
     # [!!! BUG 修复 v1.13 开始 !!!]
-
-    # 1. 获取当前状态的部件（它现在应该是 'damaged' 状态）
     target_part_name = pending_data['target_part_name']
     target_part = game_state_obj.ai_mech.get_part_by_name(target_part_name)
 
@@ -662,33 +681,49 @@ def resolve_effect_choice():
         log.append(f"> [错误] 在解析效果时找不到目标部件: {target_part_name}")
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
+        session['visual_feedback_events'] = game_state_obj.visual_events
         return jsonify({'success': False, 'message': 'Target part not found.'})
 
-    # 2. 从挂起数据中获取原始的溢出伤害
     overflow_hits = pending_data['overflow_data']['hits']
     overflow_crits = pending_data['overflow_data']['crits']
 
     log.append(
         f"> 玩家选择了【{'毁伤' if choice == 'devastating' else ('霰射' if choice == 'scattershot' else '顺劈')}】！")
 
-    # 3. 调用新的辅助函数，它只处理溢出逻辑
-    #    不再调用 resolve_attack()
-    log = _resolve_effect_logic(
+    # [修改 v1.15] 捕获 secondary_roll_details
+    log_ext, secondary_roll_details = _resolve_effect_logic(
         log=log,
         defender_mech=game_state_obj.ai_mech,
-        target_part=target_part,  # 传递实际的部件对象
+        target_part=target_part,
         overflow_hits=overflow_hits,
         overflow_crits=overflow_crits,
         chosen_effect=choice
     )
-
+    log.extend(log_ext)
     # [!!! BUG 修复 v1.13 结束 !!!]
+
+    # [新增 v1.15] 为毁伤/顺劈/霰射添加骰子掷骰视觉事件
+    if secondary_roll_details:
+        game_state_obj.add_visual_event(
+            'dice_roll',
+            attacker_name=game_state_obj.player_mech.name,
+            defender_name=game_state_obj.ai_mech.name,
+            action_name=choice.capitalize(),  # "Devastating", "Cleave", etc.
+            details=secondary_roll_details  # Pass the secondary roll details
+        )
+
+    # [新增 v1.14] 为二次效果添加一个通用的 "击穿" 视觉事件
+    # (注意: _resolve_effect_logic 内部的日志会说明具体部件状态)
+    game_state_obj.add_visual_event(
+        'attack_result',
+        defender_pos=game_state_obj.ai_pos,
+        result_text='击穿'  # 假设效果总会造成某种击穿/状态改变
+    )
 
     game_state_obj.pending_effect_data = None  # 清除挂起数据
 
-    # 检查AI是否被效果摧毁
-    ai_was_defeated = game_state_obj.ai_mech.parts[
-                          'core'].status == 'destroyed' or game_state_obj.ai_mech.get_active_parts_count() < 3
+    ai_was_defeated = not game_state_obj.ai_mech or game_state_obj.ai_mech.parts[
+        'core'].status == 'destroyed' or game_state_obj.ai_mech.get_active_parts_count() < 3
     game_is_over = game_state_obj.check_game_over()
     if game_state_obj.game_mode == 'horde' and ai_was_defeated and not game_is_over:
         log.append(f"> [生存模式] 击败了 {game_state_obj.ai_defeat_count} 台敌机！")
@@ -697,13 +732,13 @@ def resolve_effect_choice():
     session['game_state'] = game_state_obj.to_dict()
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
+    session['visual_feedback_events'] = game_state_obj.visual_events
     return jsonify({'success': True})
 
 
 # --- 数据请求路由 ---
 @app.route('/get_move_range', methods=['POST'])
 def get_move_range():
-    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over: return jsonify({'valid_moves': []})
@@ -716,7 +751,7 @@ def get_move_range():
         part_slot = data.get('part_slot')
         if part_slot and part_slot in game_state_obj.player_mech.parts:
             part = game_state_obj.player_mech.parts[part_slot]
-            if part.status != 'destroyed':
+            if part and part.status != 'destroyed':  # [修复] 增加 p 存在性检查
                 action = next((a for a in part.actions if a.name == action_name), None)
                 if action and action.effects.get("flight_movement"):
                     is_flight_action = True
@@ -743,7 +778,6 @@ def get_move_range():
 
 @app.route('/get_attack_range', methods=['POST'])
 def get_attack_range():
-    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over: return jsonify({'valid_targets': []})
@@ -752,7 +786,7 @@ def get_attack_range():
     action = None
     if part_slot and part_slot in game_state_obj.player_mech.parts:
         part = game_state_obj.player_mech.parts[part_slot]
-        if part.status != 'destroyed':
+        if part and part.status != 'destroyed':  # [修复] 增加 p 存在性检查
             action = next((a for a in part.actions if a.name == action_name), None)
     if action:
         return jsonify({'valid_targets': game_state_obj.calculate_attack_range(
@@ -766,4 +800,6 @@ def get_attack_range():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+
 

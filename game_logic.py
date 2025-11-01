@@ -70,6 +70,9 @@ def _is_tile_locked_by_opponent(game_state, tile_pos, a_mech, b_pos, b_mech):
 
 def get_player_lock_status(game_state):
     """检查玩家是否被AI锁定。"""
+    # [修复] 增加对 game_state.ai_mech 的 None 检查
+    if not game_state.ai_mech:
+        return False, None
     is_locked = _is_tile_locked_by_opponent(
         game_state,
         game_state.player_pos, game_state.player_mech,
@@ -80,6 +83,9 @@ def get_player_lock_status(game_state):
 
 def get_ai_lock_status(game_state):
     """检查AI是否被玩家锁定。"""
+    # [修复] 增加对 game_state.player_mech 的 None 检查
+    if not game_state.player_mech:
+        return False, None
     is_locked = _is_tile_locked_by_opponent(
         game_state,
         game_state.ai_pos, game_state.ai_mech,
@@ -235,10 +241,6 @@ class GameState:
             self.ai_mech = create_ai_mech(ai_loadout_key)
             if self.ai_mech: self.ai_mech.orientation = 'S'
 
-        # [新增] 存储上一个位置以用于动画
-        self.last_player_pos = None
-        self.last_ai_pos = None
-
         self.current_turn = 'player'
         self.player_ap = 2
         self.player_tp = 1
@@ -253,6 +255,12 @@ class GameState:
         # [新增] 用于存储待处理的效果选择
         self.pending_effect_data = None
         # 结构: {'action_dict': ..., 'overflow_data': {'hits': X, 'crits': Y}, 'target_part_name': ...}
+
+        # [新增 v1.14] 视觉事件列表
+        self.visual_events = []
+        # [新增 v1.14] 用于跟踪移动动画
+        self.last_player_pos = None
+        self.last_ai_pos = None
 
     def _spawn_horde_ai(self, ai_loadout_key):
         """[新增] 生存模式下，在底部两行随机生成一个AI。"""
@@ -281,6 +289,18 @@ class GameState:
             self.ai_mech.orientation = 'N'  # 总是朝向玩家
             self.ai_actions_used_this_turn = []  # 重置AI动作
 
+    # [新增 v1.14] 添加视觉事件的辅助方法
+    def add_visual_event(self, event_type, **kwargs):
+        """
+        向当前状态添加一个视觉反馈事件。
+        event_type (str): 'attack_result', 'dice_roll', 'move' 等。
+        **kwargs: 事件的详细数据。
+        """
+        if not hasattr(self, 'visual_events'):
+            self.visual_events = []
+        event = {'type': event_type, **kwargs}
+        self.visual_events.append(event)
+
     def check_game_over(self):
         """
         检查游戏是否结束。
@@ -304,6 +324,8 @@ class GameState:
                     print("严重错误：无法生成新的AI，游戏可能无法继续。")
                     self.game_over = 'error'  # 或者其他状态
                     return True
+                # [新增 v1.14] AI 重生时清除上一位置
+                self.last_ai_pos = None
                 return False  # 游戏继续
             else:
                 self.game_over = 'player_win'
@@ -312,6 +334,10 @@ class GameState:
         return False  # 游戏继续
 
     def to_dict(self):
+        # [修复 v1.15] 确保 visual_events 总是存在
+        if not hasattr(self, 'visual_events'):
+            self.visual_events = []
+
         return {
             'player_mech': self.player_mech.to_dict() if self.player_mech else None,
             'ai_mech': self.ai_mech.to_dict() if self.ai_mech else None,  # 处理AI可能为None的情况
@@ -329,8 +355,9 @@ class GameState:
             'game_mode': self.game_mode,
             'ai_defeat_count': self.ai_defeat_count,
             'pending_effect_data': self.pending_effect_data,  # [新增]
-            'last_player_pos': self.last_player_pos, # [新增]
-            'last_ai_pos': self.last_ai_pos, # [新增]
+            'visual_events': self.visual_events,  # [新增 v1.14]
+            'last_player_pos': self.last_player_pos,  # [新增 v1.14]
+            'last_ai_pos': self.last_ai_pos,  # [新增 v1.14]
         }
 
     @classmethod
@@ -356,8 +383,9 @@ class GameState:
         game_state.game_mode = data.get('game_mode', 'duel')
         game_state.ai_defeat_count = data.get('ai_defeat_count', 0)
         game_state.pending_effect_data = data.get('pending_effect_data', None)  # [新增]
-        game_state.last_player_pos = data.get('last_player_pos', None)  # [新增]
-        game_state.last_ai_pos = data.get('last_ai_pos', None)  # [新增]
+        game_state.visual_events = data.get('visual_events', [])  # [新增 v1.14]
+        game_state.last_player_pos = data.get('last_player_pos', None)  # [新增 v1.14]
+        game_state.last_ai_pos = data.get('last_ai_pos', None)  # [新增 v1.14]
         return game_state
 
     def calculate_move_range(self, start_pos, move_distance, is_flight=False):
@@ -400,8 +428,10 @@ class GameState:
             locker_mech = self.ai_mech
             locker_pos = self.ai_pos
             # 检查 locker_mech 是否存在
-            locker_can_lock = locker_mech and locker_mech.has_melee_action() and locker_mech.parts[
-                'core'].status != 'destroyed'
+            locker_can_lock = (locker_mech and
+                               locker_mech.has_melee_action() and
+                               locker_mech.parts.get('core') and  # [修复] 检查 core 是否存在
+                               locker_mech.parts['core'].status != 'destroyed')
 
             while pq:
                 cost, (x, y) = heapq.heappop(pq)
@@ -429,22 +459,22 @@ class GameState:
                     # 检查边界
                     if not (1 <= nx <= self.board_width and 1 <= ny <= self.board_height):
                         continue
-                    # [修改] 检查是否碰到对手 (路径可以通过，但不能停下)
-                    # A* 算法本身会探索路径，但在添加 valid_moves 时检查了落点
-                    # if self.ai_mech and next_pos == self.ai_pos:
-                    #     continue
 
                     move_cost = 1
                     if current_is_locked:
-                        move_cost += 1  # 脱离锁定需要额外成本
+                        # [修复] 检查是否真的在“脱离”
+                        next_is_locked = False
+                        if locker_can_lock:
+                            next_is_locked = _is_tile_locked_by_opponent(
+                                self, next_pos, self.player_mech, locker_pos, locker_mech
+                            )
+                        if not next_is_locked:  # 从锁定格 移动到 非锁定格
+                            move_cost += 1  # 脱离锁定需要额外成本
+
                     new_cost = cost + move_cost
 
-                    # 检查目标格子是否被占据 (如果被占据，路径成本可以计算，但不应加入 visited 或 pq)
+                    # 检查目标格子是否被占据
                     is_occupied_by_ai = self.ai_mech and next_pos == self.ai_pos
-                    if is_occupied_by_ai:
-                        # 虽然不能停留，但可以计算经过这里的成本（如果规则允许穿过）
-                        # 如果不允许穿过，这里应该 continue
-                        pass  # 或者根据规则决定是否 continue
 
                     if new_cost <= move_distance and (
                             next_pos not in visited or new_cost < visited[next_pos]) and not is_occupied_by_ai:
@@ -505,7 +535,7 @@ class GameState:
                     # 确定持有武器的手臂 和 另一只手臂
                     action_slot = None
                     for slot, part in attacker_mech.parts.items():
-                        if part.status != 'destroyed':
+                        if part and part.status != 'destroyed':  # [修复] 增加 p 存在性检查
                             for act in part.actions:
                                 if act.name == action.name:  # 找到执行此动作的部件槽位
                                     action_slot = slot
@@ -531,3 +561,4 @@ class GameState:
             targets.append({'pos': target_pos, 'is_back_attack': back_attack})
 
         return targets
+

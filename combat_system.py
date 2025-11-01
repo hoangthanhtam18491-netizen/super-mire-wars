@@ -1,10 +1,12 @@
 import random
 from dice_roller import roll_dice
+import re  # [新增] 导入 re
 
 
 def parse_dice_string(dice_str):
-    # ... (此函数无变化) ...
-    import re
+    """
+    [修改] 使用正则表达式更准确地解析骰子字符串，例如 '1黄3红'。
+    """
     counts = {'yellow_count': 0, 'red_count': 0, 'white_count': 0, 'blue_count': 0}
     if not dice_str: return counts
     patterns = {'yellow_count': r'(\d+)\s*黄', 'red_count': r'(\d+)\s*红'}
@@ -19,7 +21,12 @@ def _resolve_effect_logic(log, defender_mech, target_part, overflow_hits, overfl
     [NEW HELPER v1.13]
     分离的逻辑，用于在做出选择后解析溢出效果（毁伤、霰射、顺劈）。
     假定 chosen_effect 是有效的并且条件已经满足。
+
+    [新增 v1.15] 此函数现在返回一个新的 dice_roll_details_2 字典，用于二次结算
     """
+
+    # [新增 v1.15] 用于存储二次结算（毁伤/霰射/顺劈）的骰子详情
+    dice_roll_details_2 = None
 
     # 5.2.A 【毁伤】
     if (chosen_effect == 'devastating'):
@@ -28,7 +35,18 @@ def _resolve_effect_logic(log, defender_mech, target_part, overflow_hits, overfl
         log.append(f"  > 计算对结构值的溢出伤害: {overflow_crits}重, {overflow_hits}轻。")
         white_dice_count_2 = target_part.structure
         blue_dice_count_2 = defender_mech.get_total_evasion() if defender_mech.stance == 'agile' else 0
+
+        # [新增 v1.15] 记录骰子输入
+        dice_roll_details_2 = {
+            'type': 'devastating_roll',
+            'defense_dice_input': {'white_count': white_dice_count_2, 'blue_count': blue_dice_count_2}
+        }
+
         defense_roll_2 = roll_dice(white_count=white_dice_count_2, blue_count=blue_dice_count_2)
+
+        # [新增 v1.15] 记录骰子结果
+        dice_roll_details_2['defense_dice_result'] = defense_roll_2
+
         log_msg_2 = f"  > [毁伤结算] 防御方 (基于结构值) 投掷 {white_dice_count_2}白"
         if blue_dice_count_2 > 0: log_msg_2 += f" {blue_dice_count_2}蓝 (机动姿态)"
         log_msg_2 += f", 结果: {defense_roll_2}"
@@ -63,7 +81,7 @@ def _resolve_effect_logic(log, defender_mech, target_part, overflow_hits, overfl
         # ... (此效果逻辑无变化) ...
         log.append(f"  > [效果：霰射] 触发！")
         other_parts = [p for p in defender_mech.parts.values() if
-                       p.status != 'destroyed' and p.name != target_part.name]
+                       p and p.status != 'destroyed' and p.name != target_part.name]  # [修复] 增加 p 存在性检查
         if not other_parts:
             log.append(f"  > [霰射] 没有其他有效部件可以作为目标。")
         else:
@@ -74,7 +92,18 @@ def _resolve_effect_logic(log, defender_mech, target_part, overflow_hits, overfl
             white_dice_2 = secondary_target.structure if secondary_status == 'damaged' else secondary_target.armor
             log_dice_source_2 = "结构值" if secondary_status == 'damaged' else "装甲值"
             blue_dice_2 = defender_mech.get_total_evasion() if defender_mech.stance == 'agile' else 0
+
+            # [新增 v1.15] 记录骰子输入
+            dice_roll_details_2 = {
+                'type': 'scattershot_roll',
+                'defense_dice_input': {'white_count': white_dice_2, 'blue_count': blue_dice_2}
+            }
+
             defense_roll_2 = roll_dice(white_count=white_dice_2, blue_count=blue_dice_2)
+
+            # [新增 v1.15] 记录骰子结果
+            dice_roll_details_2['defense_dice_result'] = defense_roll_2
+
             log_msg_2 = f"  > [霰射结算] 防御方 (基于{log_dice_source_2}) 投掷 {white_dice_2}白"
             if blue_dice_2 > 0: log_msg_2 += f" {blue_dice_2}蓝 (机动姿态)"
             log_msg_2 += f", 结果: {defense_roll_2}"
@@ -114,7 +143,7 @@ def _resolve_effect_logic(log, defender_mech, target_part, overflow_hits, overfl
         # ... (此效果逻辑无变化) ...
         log.append(f"  > [效果：顺劈] 触发！")
         other_parts = [p for p in defender_mech.parts.values() if
-                       p.status != 'destroyed' and p.name != target_part.name]
+                       p and p.status != 'destroyed' and p.name != target_part.name]  # [修复] 增加 p 存在性检查
         if not other_parts:
             log.append(f"  > [顺劈] 没有其他有效部件可以作为目标。")
         else:
@@ -127,7 +156,16 @@ def _resolve_effect_logic(log, defender_mech, target_part, overflow_hits, overfl
             log_dice_source_2 = "结构值" if secondary_status == 'damaged' else "装甲值"
             blue_dice_2 = defender_mech.get_total_evasion() if defender_mech.stance == 'agile' else 0
 
+            # [新增 v1.15] 记录骰子输入
+            dice_roll_details_2 = {
+                'type': 'cleave_roll',
+                'defense_dice_input': {'white_count': white_dice_2, 'blue_count': blue_dice_2}
+            }
+
             defense_roll_2 = roll_dice(white_count=white_dice_2, blue_count=blue_dice_2)
+
+            # [新增 v1.15] 记录骰子结果
+            dice_roll_details_2['defense_dice_result'] = defense_roll_2
 
             log_msg_2 = f"  > [顺劈结算] 防御方 (基于{log_dice_source_2}) 投掷 {white_dice_2}白"
             if blue_dice_2 > 0: log_msg_2 += f" {blue_dice_2}蓝 (机动姿态)"
@@ -171,24 +209,33 @@ def _resolve_effect_logic(log, defender_mech, target_part, overflow_hits, overfl
             else:
                 log.append(f"  > [顺劈结算] 第二个部件抵消了所有溢出伤害。")
 
-    return log
+    # [修改 v1.15] 返回日志 和 二次结算的骰子详情
+    return log, dice_roll_details_2
 
 
 def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_back_attack=False, chosen_effect=None):
     """
     处理一次完整的攻击结算流程。
-    [修改 v1.10] 动态检查【【双手】获得毁伤】。
-    [修复 v1.12] 修正【顺劈】逻辑，确保其攻击 secondary_target 而不是 target_part。
-    [修改 v1.13] 将效果选择逻辑分离到 _resolve_effect_logic
+    [修改 v1.15] 现在返回 (log, result, overflow_data, dice_roll_details)
     """
     log = [f"> {attacker_mech.name} 使用 [{action.name}] 攻击 {defender_mech.name}。"]
 
+    # [新增 v1.15] 初始化骰子详情字典
+    dice_roll_details = {
+        'type': 'attack_roll',
+        'attack_dice_input': {},
+        'attack_dice_result': {},
+        'defense_dice_input': {},
+        'defense_dice_result': {},
+        'secondary_roll': None  # 用于毁伤/顺劈/霰射
+    }
+
     # 1. 确定目标部件
-    # ... (此节无变化) ...
     target_part = defender_mech.get_part_by_name(target_part_name)
     if not target_part:
         log.append(f"  > [错误] 无法找到目标部件 '{target_part_name}'。攻击中止。")
-        return log, "无效", None
+        # [修改 v1.15] 返回 dice_roll_details
+        return log, "无效", None, dice_roll_details
     original_status = target_part.status
     if is_back_attack:
         log.append("  > 这是一次背击！防御方无法招架。")
@@ -199,7 +246,6 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
         log.append(f"  > 命中部位为: {target_part.name} ({target_part_name} 槽位)。")
 
     # 2. 投掷攻击骰
-    # ... (此节无变化) ...
     attack_dice_counts = parse_dice_string(action.dice)
     passive_effects = attacker_mech.get_passive_effects()
     for effect_dict in passive_effects:
@@ -217,7 +263,15 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
                         log.append(f"  > [被动效果: {effect_dict.get('display_effects', ['未知效果'])[0]}] 触发！")
                         log.append(f"  > 攻击姿态下的射击动作，黄骰 {base_count} -> {base_count + bonus_dice}。")
                         attack_dice_counts[dice_type_to_check] = base_count + bonus_dice
+
+    # [新增 v1.15] 记录攻击骰输入
+    dice_roll_details['attack_dice_input'] = attack_dice_counts.copy()  # 确保复制
+
     attack_roll = roll_dice(**attack_dice_counts)
+
+    # [新增 v1.15] 记录攻击骰结果
+    dice_roll_details['attack_dice_result'] = attack_roll.copy()  # 确保复制
+
     if action.effects:
         if action.effects.get("convert_lightning_to_crit") and '闪电' in attack_roll:
             lightning_count = attack_roll.pop('闪电')
@@ -230,12 +284,11 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
         if '空心重击' in attack_roll:
             attack_roll['重击'] = attack_roll.get('重击', 0) + attack_roll.pop('空心重击')
             log.append("  > [攻击姿态] 空心重击 变为 重击。")
-    log.append(f"  > 攻击方投掷结果: {attack_roll}")
+    log.append(f"  > 攻击方投掷结果 (处理后): {attack_roll}")
     hits = attack_roll.get('轻击', 0)
     crits = attack_roll.get('重击', 0)
 
     # 3. 投掷受击骰
-    # ... (此节无变化) ...
     white_dice_count = target_part.structure if original_status == 'damaged' else target_part.armor
     log_dice_source = "结构值" if original_status == 'damaged' else "装甲值"
     if action.effects:
@@ -251,15 +304,22 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
     if action.action_type == '近战' and target_part.parry > 0 and not is_back_attack:
         white_dice_count += target_part.parry
         log.append(f"  > [招架] 额外增加 {target_part.parry} 个白骰 (总计 {white_dice_count} 白)。")
+
+    # [新增 v1.15] 记录防御骰输入
+    dice_roll_details['defense_dice_input'] = {'white_count': white_dice_count, 'blue_count': blue_dice_count}
+
     defense_roll = roll_dice(white_count=white_dice_count, blue_count=blue_dice_count)
+
+    # [新增 v1.15] 记录防御骰结果
+    dice_roll_details['defense_dice_result'] = defense_roll.copy()  # 确保复制
+
     if defender_mech.stance == 'defense' and '空心防御' in defense_roll:
         defense_roll['防御'] = defense_roll.get('防御', 0) + defense_roll.pop('空心防御')
         log.append("  > [防御姿态] 空心防御 变为 防御。")
     log.append(
-        f"  > 防御方 (基于{log_dice_source}) 投掷 {white_dice_count}白 {blue_dice_count}蓝, 结果: {defense_roll}")
+        f"  > 防御方 (基于{log_dice_source}) 投掷 {white_dice_count}白 {blue_dice_count}蓝, 结果 (处理后): {defense_roll}")
 
     # 4. 结算伤害
-    # ... (此节无变化) ...
     defenses = defense_roll.get('防御', 0)
     dodges = defense_roll.get('闪避', 0)
     cancelled_hits = min(hits, defenses)
@@ -301,7 +361,7 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
             action_slot = None
             # (通过遍历找到动作来自哪个槽位)
             for slot, part in attacker_mech.parts.items():
-                if part.status != 'destroyed':
+                if part and part.status != 'destroyed':  # [修复] 增加 p 存在性检查
                     for act in part.actions:
                         if act.name == action.name:
                             action_slot = slot
@@ -355,7 +415,8 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
                     'crits': overflow_crits_for_effects,
                     'options': available_options
                 }
-                return log, "effect_choice_required", overflow_data
+                # [修改 v1.15] 返回 dice_roll_details
+                return log, "effect_choice_required", overflow_data, dice_roll_details
             else:
                 # AI 自动选择
                 if 'devastating' in available_options:
@@ -376,19 +437,34 @@ def resolve_attack(attacker_mech, defender_mech, action, target_part_name, is_ba
 
         # 检查 *已选择的* 效果的条件是否满足
         # (这是关键！`chosen_effect` 可能是 'cleave'，但 `cleave_conditions_met` 必须为 true)
-        if chosen_effect == 'devastating' and devastating_conditions_met:
-            log = _resolve_effect_logic(log, defender_mech, target_part, overflow_hits_for_effects,
-                                        overflow_crits_for_effects, 'devastating')
-        elif chosen_effect == 'scattershot' and scattershot_conditions_met:
-            log = _resolve_effect_logic(log, defender_mech, target_part, overflow_hits_for_effects,
-                                        overflow_crits_for_effects, 'scattershot')
-        elif chosen_effect == 'cleave' and cleave_conditions_met:
-            log = _resolve_effect_logic(log, defender_mech, target_part, overflow_hits_for_effects,
-                                        overflow_crits_for_effects, 'cleave')
 
-        return log, "击穿", None  # 正常击穿，没有待办事项
+        secondary_roll_details = None  # [新增 v1.15]
+
+        if chosen_effect == 'devastating' and devastating_conditions_met:
+            log_ext, secondary_roll_details = _resolve_effect_logic(log, defender_mech, target_part,
+                                                                    overflow_hits_for_effects,
+                                                                    overflow_crits_for_effects, 'devastating')
+            log.extend(log_ext)
+        elif chosen_effect == 'scattershot' and scattershot_conditions_met:
+            log_ext, secondary_roll_details = _resolve_effect_logic(log, defender_mech, target_part,
+                                                                    overflow_hits_for_effects,
+                                                                    overflow_crits_for_effects, 'scattershot')
+            log.extend(log_ext)
+        elif chosen_effect == 'cleave' and cleave_conditions_met:
+            log_ext, secondary_roll_details = _resolve_effect_logic(log, defender_mech, target_part,
+                                                                    overflow_hits_for_effects,
+                                                                    overflow_crits_for_effects, 'cleave')
+            log.extend(log_ext)
+
+        # [新增 v1.15] 将二次结算的骰子详情存入主详情
+        if secondary_roll_details:
+            dice_roll_details['secondary_roll'] = secondary_roll_details
+
+        # [修改 v1.15] 返回 dice_roll_details
+        return log, "击穿", None, dice_roll_details
 
     else:
         log.append("  > 所有伤害均被抵消，攻击无效。")
-        return log, "无效", None
+        # [修改 v1.15] 返回 dice_roll_details
+        return log, "无效", None, dice_roll_details
 

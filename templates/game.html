@@ -8,7 +8,9 @@
             --hover-bg-color: #2c3748; --disabled-color: #718096; --player-color: #3182ce; --ai-color: #c53030;
             --highlight-move: rgba(66, 153, 225, 0.3); --highlight-attack: rgba(197, 48, 48, 0.4); --phase-color: #f6ad55;
             --status-ok: #2ecc71; --status-damaged: #f39c12; --status-destroyed: #e74c3c;
-            --cell-size: 50px; /* [新增] 单元格大小变量 */
+            --cell-size: 50px;
+            /* [新增 v1.15] 骰子颜色 */
+            --dice-yellow: #f6e05e; --dice-red: #f56565; --dice-white: #e2e8f0; --dice-blue: #63b3ed;
         }
         body { font-family: sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: flex-start; padding: 2rem; gap: 2rem; }
         .panel { background-color: var(--hover-bg-color); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1.5rem; }
@@ -20,7 +22,7 @@
             border: 2px solid var(--border-color);
             gap: 1px;
             background-color: var(--border-color);
-            position: relative; /* [新增] 为伤害指示器定位 */
+            position: relative;
         }
         .grid-cell {
             width: var(--cell-size);
@@ -35,7 +37,6 @@
         .grid-cell.highlight-move { background-color: var(--highlight-move); }
         .grid-cell.highlight-attack { background-color: var(--highlight-attack); }
 
-        /* [修改] 机甲图标包裹器，用于动画 */
         .mech-icon-wrapper {
             position: absolute;
             width: var(--cell-size);
@@ -44,13 +45,12 @@
             justify-content: center;
             align-items: center;
             z-index: 5;
-            transition: transform 0.4s ease-out; /* [新增] 移动动画 */
+            transition: transform 0.4s ease-out;
         }
         .mech-icon {
             font-size: 36px;
             position: relative;
             filter: drop-shadow(0 0 5px);
-            /* [修改] 移除 position: relative，移到 wrapper */
         }
         .mech-icon.player { color: var(--player-color); }
         .mech-icon.ai { color: var(--ai-color); }
@@ -59,14 +59,13 @@
         .orientation-selector { position: absolute; z-index: 10; display: none; flex-direction: column; background-color: rgba(0,0,0,0.8); border-radius: 50%; }
         .orientation-button { background: none; border: none; color: white; font-size: 24px; cursor: pointer; width: 40px; height: 40px; }
 
-        /* [新增] 伤害指示器动画 */
         @keyframes damage-popup {
             0% { transform: translateY(0); opacity: 1; }
             100% { transform: translateY(-40px); opacity: 0; }
         }
         .damage-indicator {
             position: absolute;
-            top: -10px; /* 从机甲头顶弹出 */
+            top: -10px;
             left: 50%;
             transform: translateX(-50%);
             font-size: 1.2rem;
@@ -76,14 +75,101 @@
             color: white;
             z-index: 10;
             animation: damage-popup 1.2s ease-out forwards;
-            pointer-events: none; /* 防止遮挡 */
+            pointer-events: none;
         }
         .damage-indicator.hit {
-            background-color: rgba(197, 48, 48, 0.9); /* ai-color */
+            background-color: rgba(197, 48, 48, 0.9);
         }
         .damage-indicator.miss {
-            background-color: rgba(113, 128, 150, 0.9); /* disabled-color */
+            background-color: rgba(113, 128, 150, 0.9);
         }
+
+        /* [新增 v1.15] 骰子弹窗样式 */
+        #dice-roll-modal-backdrop {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 199;
+            justify-content: center;
+            align-items: center;
+        }
+        #dice-roll-modal {
+            background-color: var(--hover-bg-color);
+            border: 2px solid var(--primary-color);
+            border-radius: 0.5rem;
+            padding: 1.5rem 2rem;
+            z-index: 200;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        #dice-roll-modal h3 {
+            margin-top: 0;
+            text-align: center;
+            color: var(--phase-color);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+        }
+        .dice-roll-section {
+            margin-bottom: 1.5rem;
+        }
+        .dice-roll-section h4 {
+            font-size: 1.1rem;
+            color: var(--text-color);
+            margin-bottom: 0.75rem;
+            border-bottom: 1px dashed var(--border-color);
+        }
+        .dice-roll-section .dice-group {
+            min-height: 2.5rem;
+            background-color: var(--bg-color);
+            border-radius: 0.25rem;
+            padding: 0.5rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        .dice-roll-section span {
+            font-size: 0.9rem;
+            color: var(--disabled-color);
+            margin-right: 0.5rem;
+        }
+        .dice-icon {
+            display: inline-block;
+            width: 1.5rem;
+            height: 1.5rem;
+            line-height: 1.5rem;
+            border-radius: 0.25rem;
+            text-align: center;
+            font-weight: bold;
+            font-size: 0.85rem;
+            margin: 0.1rem;
+        }
+        /* 骰子输入颜色 */
+        .dice-input.yellow { background-color: var(--dice-yellow); color: #1a202c; }
+        .dice-input.red { background-color: var(--dice-red); color: white; }
+        .dice-input.white { background-color: var(--dice-white); color: #1a202c; }
+        .dice-input.blue { background-color: var(--dice-blue); color: white; }
+        /* 骰子结果颜色 */
+        .dice-result.重击 { background-color: var(--dice-red); color: white; }
+        .dice-result.轻击 { background-color: var(--dice-yellow); color: #1a202c; }
+        .dice-result.防御 { background-color: var(--dice-white); color: #1a202c; }
+        .dice-result.闪避 { background-color: var(--dice-blue); color: white; }
+        .dice-result.空心重击, .dice-result.空心轻击, .dice-result.空心防御 {
+            background-color: transparent; border: 2px solid var(--border-color); color: var(--text-color); opacity: 0.7;
+        }
+        .dice-result.闪电 { background-color: #f6ad55; color: #1a202c; }
+        .dice-result.眼睛 { background-color: #9f7aea; color: white; }
+        .dice-result.空白 { background-color: #2d3748; color: var(--disabled-color); }
+        #dice-roll-close {
+            width: auto; padding: 0.5rem 1rem; float: right; margin-top: 1rem;
+            background-color: var(--border-color);
+        }
+
 
         table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color); }
         h4 { margin-top: 0; border-bottom: 2px solid var(--primary-color); padding-bottom: 0.5rem; }
@@ -121,7 +207,6 @@
         {% endif %}
         <div class="phase-indicator">阶段: {{ {'timing': '1. 选择时机', 'stance': '2. 选择姿态', 'adjustment': '3. 调整阶段', 'main': '4. 执行动作'}[game.turn_phase] }}</div>
 
-        <!-- [修改] 增加 pending_effect_data 检查 -->
         {% if game.pending_effect_data %}
         <div id="pending-effect-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
             待处理：请选择效果
@@ -178,7 +263,6 @@
         {% for y in range(1, 11) %}{% for x in range(1, 11) %}
         <div class="grid-cell" id="cell-{{x}}-{{y}}" data-x="{{x}}" data-y="{{y}}">
 
-            <!-- [修改] 使用 wrapper 容器来渲染机甲，以便于动画 -->
             {% if game.player_pos[0] == x and game.player_pos[1] == y %}
             <div class="mech-icon-wrapper" id="player-mech-wrapper"
                  data-last-pos="{{ game.last_player_pos | tojson | safe }}"
@@ -204,7 +288,6 @@
         <h4>AI机甲状态</h4>
         <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
             <tbody>
-                <!-- [修改] 增加 game.ai_mech 存在性检查 -->
                 {% if game.ai_mech %}
                 {% for slot, part in game.ai_mech.parts.items() %}
                 <tr>
@@ -225,7 +308,6 @@
     <!-- [弹窗] -->
     <div id="part-selector-modal"><h4>选择攻击部位</h4><div id="part-buttons" style="display: flex; flex-direction: column; gap: 1rem;"></div><button class="btn" style="margin-top: 1rem; background-color: #c53030;" onclick="closePartSelector()">取消</button></div>
 
-    <!-- [修改] 弹窗 ID 修正 -->
     <div id="effect-selector-modal">
         <h4>选择触发效果</h4>
         <div id="effect-buttons" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1.5rem;">
@@ -240,9 +322,56 @@
         </form>
     </div>
 
+    <!-- [新增 v1.15] 骰子掷骰结果弹窗 -->
+    <div id="dice-roll-modal-backdrop">
+        <div id="dice-roll-modal">
+            <h3 id="dice-roll-title">掷骰结算</h3>
+
+            <!-- 攻击方 -->
+            <div class="dice-roll-section">
+                <h4 id="dice-roll-attacker-name">攻击方</h4>
+                <span>输入:</span>
+                <div class="dice-group" id="dice-roll-attacker-input">
+                    <!-- JS 动态填充 -->
+                </div>
+                <span>结果:</span>
+                <div class="dice-group" id="dice-roll-attacker-result">
+                    <!-- JS 动态填充 -->
+                </div>
+            </div>
+
+            <!-- 防御方 -->
+            <div class="dice-roll-section">
+                <h4 id="dice-roll-defender-name">防御方</h4>
+                <span>输入:</span>
+                <div class="dice-group" id="dice-roll-defender-input">
+                    <!-- JS 动态填充 -->
+                </div>
+                <span>结果:</span>
+                <div class="dice-group" id="dice-roll-defender-result">
+                    <!-- JS 动态填充 -->
+                </div>
+            </div>
+
+            <!-- [新增 v1.15] 第二轮结算 (用于毁伤等) -->
+            <div class="dice-roll-section" id="dice-roll-secondary-section" style="display:none;">
+                 <h4 id="dice-roll-secondary-title">效果结算</h4>
+                 <span>输入:</span>
+                 <div class="dice-group" id="dice-roll-secondary-input">
+                     <!-- JS 动态填充 -->
+                 </div>
+                 <span>结果:</span>
+                 <div class="dice-group" id="dice-roll-secondary-result">
+                     <!-- JS 动态填充 -->
+                 </div>
+            </div>
+
+            <button class="btn" id="dice-roll-close" onclick="closeDiceRollModal()">关闭</button>
+        </div>
+    </div>
+
 <script>
     let selectedAction = {};
-    // [修改] 增加 visual_feedback_events
     const gameState = {
         turnPhase: '{{ game.turn_phase }}',
         timing: '{{ game.timing or "" }}',
@@ -255,7 +384,7 @@
     const gameMode = '{{ game_mode }}';
     const defeatCount = {{ ai_defeat_count }};
     const orientationMap = {'N': '↑', 'S': '↓', 'E': '→', 'W': '←'};
-    const CELL_SIZE_PX = 51; // [新增] 50px + 1px gap
+    const CELL_SIZE_PX = 51; // 50px + 1px gap
 
     const effectDescriptions = {
         'devastating': {
@@ -273,6 +402,16 @@
             text: '对随机部件造成溢出伤害',
             style: 'background-color: #805ad5;' // 紫色
         }
+    };
+
+    // [新增 v1.15] 骰子图标映射
+    const diceIconMap = {
+        '重击': 'H', '轻击': 'L', '防御': 'D', '闪避': 'E',
+        '空心重击': 'h', '空心轻击': 'l', '空心防御': 'd',
+        '闪电': '⚡', '眼睛': '👁', '空白': ' '
+    };
+    const diceColorMap = {
+        'yellow_count': 'yellow', 'red_count': 'red', 'white_count': 'white', 'blue_count': 'blue'
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -299,100 +438,74 @@
         const log = document.querySelector('.combat-log');
         log.scrollTop = log.scrollHeight;
 
-        // [新增] 页面加载时执行动画
+        // [修改 v1.15] 动画序列
         handleMoveAnimations();
-        handleAttackAnimations();
+
+        const diceRollEvent = gameState.visualEvents.find(e => e.type === 'dice_roll');
+        const attackResultEvent = gameState.visualEvents.find(e => e.type === 'attack_result');
+
+        // [修改 v1.15] 确保只显示一次攻击结果，即使有多个事件
+        const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
+
+        if (diceRollEvent) {
+            // 1. 显示骰子掷骰
+            showDiceRollModal(diceRollEvent);
+            // 2. 2.5秒后关闭骰子，并显示攻击结果
+            setTimeout(() => {
+                closeDiceRollModal();
+                if (firstAttackResult) {
+                    showDamageIndicator(firstAttackResult.defender_pos, firstAttackResult.result_text);
+                }
+            }, 2500); // 骰子弹窗显示 2.5 秒
+        } else if (firstAttackResult) {
+            // 只有攻击结果，没有骰子 (例如效果结算失败?)
+            showDamageIndicator(firstAttackResult.defender_pos, firstAttackResult.result_text);
+        }
     });
 
-    // [新增] 处理移动动画
+    // ... (handleMoveAnimations, animateMech, showDamageIndicator, mapOrientation, showGameOverModal, updateUIForPhase, clearHighlights, selectAction, initiateAttack, showPartSelector, closePartSelector, confirmPartSelection, showEffectSelector, confirmEffectChoice, showOrientationSelector, setFinalOrientation, postAndReload, selectTiming, confirmTiming, changeStance, confirmStance, skipAdjustment, executeMove, executeAttack) ...
+    // [v1.14] 函数 (无修改)
     function handleMoveAnimations() {
         const playerMech = document.getElementById('player-mech-wrapper');
         const aiMech = document.getElementById('ai-mech-wrapper');
-
-        if (playerMech) {
-            animateMech(playerMech);
-        }
-        if (aiMech) {
-            animateMech(aiMech);
-        }
+        if (playerMech) { animateMech(playerMech); }
+        if (aiMech) { animateMech(aiMech); }
     }
 
-    // [新增] 单个机甲的移动动画逻辑
     function animateMech(mechWrapper) {
         try {
             const lastPos = JSON.parse(mechWrapper.dataset.lastPos);
             const currentPos = JSON.parse(mechWrapper.dataset.currentPos);
-
             if (lastPos && currentPos && (lastPos[0] !== currentPos[0] || lastPos[1] !== currentPos[1])) {
-                // 1. 计算像素差异
-                // (last_x - current_x) * CELL_SIZE_PX
                 const dx = (lastPos[0] - currentPos[0]) * CELL_SIZE_PX;
                 const dy = (lastPos[1] - currentPos[1]) * CELL_SIZE_PX;
-
-                // 2. 立即设置到旧位置 (无动画)
                 mechWrapper.style.transition = 'none';
                 mechWrapper.style.transform = `translate(${dx}px, ${dy}px)`;
-
-                // 3. 强制浏览器重绘
                 mechWrapper.offsetHeight;
-
-                // 4. 添加动画并移动到新位置 (0,0)
                 mechWrapper.style.transition = 'transform 0.4s ease-out';
                 mechWrapper.style.transform = 'translate(0, 0)';
             }
-        } catch (e) {
-            console.error("解析机甲位置时出错:", e);
-        }
+        } catch (e) { console.error("解析机甲位置时出错:", e); }
     }
 
-    // [新增] 处理攻击动画
-    function handleAttackAnimations() {
-        if (!gameState.visualEvents || gameState.visualEvents.length === 0) {
-            return;
-        }
-
-        gameState.visualEvents.forEach(event => {
-            if (event.type === 'attack_result') {
-                showDamageIndicator(event.defender_pos, event.result_text);
-            }
-        });
-    }
-
-    // [新增] 显示伤害指示器
     function showDamageIndicator(pos, text) {
         const [x, y] = pos;
         const cell = document.getElementById(`cell-${x}-${y}`);
         if (!cell) return;
-
         const indicator = document.createElement('div');
         indicator.className = 'damage-indicator';
-
         if (text === '击穿') {
             indicator.innerText = '击穿!';
             indicator.classList.add('hit');
         } else if (text === '无效') {
             indicator.innerText = '无效';
             indicator.classList.add('miss');
-        } else {
-            // 其他情况 (如图标或空)
-            return;
-        }
-
+        } else { return; }
         cell.appendChild(indicator);
-
-        // 动画结束后移除元素
-        setTimeout(() => {
-            if (indicator.parentNode) {
-                indicator.parentNode.removeChild(indicator);
-            }
-        }, 1200); // 匹配 CSS 动画时间
+        setTimeout(() => { if (indicator.parentNode) { indicator.parentNode.removeChild(indicator); } }, 1200);
     }
 
-
-    // [新增] 安全的朝向映射
-    function mapOrientation(o) {
-        return orientationMap[o] || '↑';
-    }
+    function mapOrientation(o) { return orientationMap[o] || '↑'; }
 
     function showGameOverModal(status) {
         const modal = document.getElementById('game-over-modal');
@@ -402,9 +515,7 @@
             title.style.color = 'var(--status-ok)';
         } else {
             title.innerText = '失败！';
-            if (gameMode === 'horde') {
-                title.innerText = `结束\n最终击败数: ${defeatCount}`;
-            }
+            if (gameMode === 'horde') { title.innerText = `结束\n最终击败数: ${defeatCount}`; }
             title.style.color = 'var(--status-destroyed)';
         }
         modal.style.display = 'block';
@@ -418,45 +529,35 @@
         ['timing', 'stance', 'adjustment', 'main'].forEach(phase => { document.getElementById(`phase-${phase}-controls`).style.display = gameState.turnPhase === phase ? 'block' : 'none'; });
         if (gameState.turnPhase === 'timing') document.querySelectorAll('#phase-timing-controls button').forEach(btn => { btn.classList.toggle('active', btn.innerText === gameState.timing); });
 
-        // [修改] 增加 pendingEffect 检查
         if (gameState.pendingEffect) {
             document.querySelectorAll('#phase-main-controls .action-item, #phase-adjustment-controls .action-item, #end-turn-btn').forEach(item => {
                 item.classList.add('disabled');
                 item.onclick = null;
                 item.title = '请先选择效果';
             });
-            return; // 阻止后续的 UI 更新
+            return;
         }
 
         if (gameState.turnPhase === 'main') {
             document.querySelectorAll('#phase-main-controls .action-item').forEach(item => {
-                let isDisabled = false;
-                let title = '';
+                let isDisabled = false; let title = '';
                 if (item.classList.contains('disabled') && item.title === '本回合已使用') {
-                    isDisabled = true;
-                    title = '本回合已使用';
+                    isDisabled = true; title = '本回合已使用';
                 } else {
                     if (!gameState.openingMoveTaken && item.dataset.actionType !== gameState.timing) {
-                        isDisabled = true;
-                        title = '非当前时机的起手动作';
+                        isDisabled = true; title = '非当前时机的起手动作';
                     }
                     if (gameState.isPlayerLocked && item.dataset.actionType === '射击') {
-                        isDisabled = true;
-                        title = '被近战锁定，无法射击';
+                        isDisabled = true; title = '被近战锁定，无法射击';
                     }
                 }
                 if(isDisabled) {
-                    item.classList.add('disabled');
-                    item.onclick = null;
-                    item.title = title;
+                    item.classList.add('disabled'); item.onclick = null; item.title = title;
                 } else {
                     if (item.title !== '本回合已使用') {
-                        item.classList.remove('disabled');
-                        item.title = '';
+                        item.classList.remove('disabled'); item.title = '';
                         const originalOnclick = item.getAttribute('data-original-onclick');
-                        if (originalOnclick) {
-                            item.onclick = () => eval(originalOnclick);
-                        }
+                        if (originalOnclick) { item.onclick = () => eval(originalOnclick); }
                     }
                 }
             });
@@ -466,21 +567,18 @@
     function clearHighlights() { document.querySelectorAll('.grid-cell').forEach(c => { c.classList.remove('highlight-move', 'highlight-attack'); c.onclick = null; }); document.getElementById('orientation-selector').style.display = 'none'; }
 
     function selectAction(name, range, type, cost, partSlot) {
-        if (gameState.pendingEffect) return; // 阻止新动作
+        if (gameState.pendingEffect) return;
         clearHighlights();
         selectedAction = { name, range, type, cost, slot: partSlot };
         let url = '', body = {};
         if (type === '移动' || name === '调整移动') {
-            url = '/get_move_range';
-            body = { action_name: name, part_slot: partSlot };
+            url = '/get_move_range'; body = { action_name: name, part_slot: partSlot };
         }
         else if (type === '近战' || type === '射击') {
-            url = '/get_attack_range';
-            body = { action_name: name, part_slot: partSlot };
+            url = '/get_attack_range'; body = { action_name: name, part_slot: partSlot };
         }
         else if (name === '仅转向') {
-            showOrientationSelector({{ game.player_pos[0] }}, {{ game.player_pos[1] }}, true);
-            return;
+            showOrientationSelector({{ game.player_pos[0] }}, {{ game.player_pos[1] }}, true); return;
         }
         if(url) fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) }).then(res => res.json()).then(data => {
             if(data.valid_moves) data.valid_moves.forEach(([x,y]) => { const c = document.getElementById(`cell-${x}-${y}`); c.classList.add('highlight-move'); c.onclick = () => showOrientationSelector(x,y); });
@@ -488,91 +586,56 @@
         });
     }
 
-    function initiateAttack(x, y, isBackAttack) {
-        selectedAction.targetPos = [x, y];
-        // [修改] 不再检查 isBackAttack，总是让后端决定
-        executeAttack();
-    }
+    function initiateAttack(x, y, isBackAttack) { selectedAction.targetPos = [x, y]; executeAttack(); }
 
     function showPartSelector() {
         const modal = document.getElementById('part-selector-modal'), buttons = document.getElementById('part-buttons'); buttons.innerHTML = '';
-        // [修改] 增加 game.ai_mech 存在性检查
         const aiParts = {{ game.ai_mech.to_dict()['parts'] | tojson if game.ai_mech else 'null' }};
-        if (!aiParts) return; // 如果 AI 死了，不显示
-
+        if (!aiParts) return;
         for (const slot in aiParts) { if (aiParts[slot] && aiParts[slot].status !== 'destroyed') { const btn = document.createElement('button'); btn.className = 'btn'; btn.style.backgroundColor = 'var(--primary-color)'; btn.innerText = `${aiParts[slot].name} (${slot})`; btn.onclick = () => confirmPartSelection(slot); buttons.appendChild(btn); }}
         modal.style.display = 'block';
     }
 
     function closePartSelector() { document.getElementById('part-selector-modal').style.display = 'none'; clearHighlights(); }
 
-    function confirmPartSelection(partSlot) {
-        selectedAction.targetPartName = partSlot;
-        closePartSelector();
-        executeAttack();
-    }
+    function confirmPartSelection(partSlot) { selectedAction.targetPartName = partSlot; closePartSelector(); executeAttack(); }
 
-    // [修改] 动态生成按钮
     function showEffectSelector(options) {
-        const buttonsDiv = document.getElementById('effect-buttons');
-        buttonsDiv.innerHTML = '';
-
-        if (!options || options.length === 0) {
-             console.error("showEffectSelector 被调用，但没有提供选项！");
-             return;
-        }
-
+        const buttonsDiv = document.getElementById('effect-buttons'); buttonsDiv.innerHTML = '';
+        if (!options || options.length === 0) { console.error("showEffectSelector 被调用，但没有提供选项！"); return; }
         options.forEach(optionKey => {
             const desc = effectDescriptions[optionKey];
             if (desc) {
-                const btn = document.createElement('button');
-                btn.className = 'btn';
-                btn.style.cssText = desc.style || 'background-color: var(--primary-color);';
+                const btn = document.createElement('button'); btn.className = 'btn'; btn.style.cssText = desc.style || 'background-color: var(--primary-color);';
                 btn.innerHTML = `<strong>${desc.title}</strong><br><small>${desc.text}</small>`;
-                btn.onclick = () => confirmEffectChoice(optionKey); // 传递正确的 key
+                btn.onclick = () => confirmEffectChoice(optionKey);
                 buttonsDiv.appendChild(btn);
-            } else {
-                console.warn(`未知的效果键: ${optionKey}`);
-            }
+            } else { console.warn(`未知的效果键: ${optionKey}`); }
         });
         document.getElementById('effect-selector-modal').style.display = 'block';
     }
 
-    function confirmEffectChoice(choice) {
-        document.getElementById('effect-selector-modal').style.display = 'none';
-        postAndReload('/resolve_effect_choice', { choice: choice });
-    }
+    function confirmEffectChoice(choice) { document.getElementById('effect-selector-modal').style.display = 'none'; postAndReload('/resolve_effect_choice', { choice: choice }); }
 
     function showOrientationSelector(x, y, isRotationOnly = false) { const s = document.getElementById('orientation-selector'); document.getElementById(`cell-${x}-${y}`).appendChild(s); s.style.display = 'flex'; selectedAction.targetPos = [x, y]; selectedAction.isRotationOnly = isRotationOnly; }
+
     function setFinalOrientation(o) { selectedAction.finalOrientation = o; executeMove(); }
 
-    // [修改] 升级 postAndReload
     function postAndReload(url, body = {}) {
         fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
         .then(res => res.json())
         .then(data => {
             if(data.success) {
-                if (data.action_required === 'select_part') {
-                    console.log("服务器要求：select_part");
-                    showPartSelector();
-                } else if (data.action_required === 'select_effect') {
-                    console.log("服务器要求：select_effect", data.options);
-                    showEffectSelector(data.options); // 传递选项
-                } else {
-                    window.location.reload(); // 默认重载
-                }
+                if (data.action_required === 'select_part') { showPartSelector(); }
+                else if (data.action_required === 'select_effect') { showEffectSelector(data.options); }
+                else { window.location.reload(); }
             } else if (data.message) {
-                console.error('Action failed:', data.message);
-                // [新增] 失败时也重载，以清除高亮和选择
-                // 使用自定义模态框或非阻塞通知会更好，但 alert 是最简单的实现
-                // alert("操作失败: " + data.message);
-                console.warn("操作失败: " + data.message); // 避免使用 alert
+                console.warn("操作失败: " + data.message);
                 window.location.reload();
             }
         });
     }
 
-    // [修改] 增加 pendingEffect 检查
     function selectTiming(t) { if (gameState.pendingEffect) return; gameState.timing = t; postAndReload('/select_timing', { timing: t }); }
     function confirmTiming() { if (gameState.pendingEffect) return; postAndReload('/confirm_timing'); }
     function changeStance(s) { if (gameState.pendingEffect) return; postAndReload('/change_stance', { stance: s }); }
@@ -582,25 +645,95 @@
     function executeMove() {
         let url = selectedAction.isRotationOnly ? '/change_orientation' : (selectedAction.name === '调整移动' ? '/execute_adjust_move' : '/move_player');
         postAndReload(url, {
-            action_name: selectedAction.name,
-            target_pos: selectedAction.targetPos,
-            final_orientation: selectedAction.finalOrientation,
-            part_slot: selectedAction.slot
+            action_name: selectedAction.name, target_pos: selectedAction.targetPos,
+            final_orientation: selectedAction.finalOrientation, part_slot: selectedAction.slot
         });
     }
 
     function executeAttack() {
         let body = {
-            action_name: selectedAction.name,
-            target_pos: selectedAction.targetPos,
-            part_slot: selectedAction.slot
+            action_name: selectedAction.name, target_pos: selectedAction.targetPos, part_slot: selectedAction.slot
         };
         if (selectedAction.targetPartName) {
-            body.target_part_name = selectedAction.targetPartName;
-            delete selectedAction.targetPartName;
+            body.target_part_name = selectedAction.targetPartName; delete selectedAction.targetPartName;
         }
         postAndReload('/execute_attack', body);
     }
+
+    // [新增 v1.15] 骰子弹窗相关函数
+
+    /** 生成骰子输入的HTML */
+    function formatDiceInput(input) {
+        let html = '';
+        if (!input) return '<span>无</span>';
+        for (const key in input) {
+            const color = diceColorMap[key];
+            const count = input[key];
+            if (count > 0 && color) {
+                for(let i=0; i < count; i++) {
+                    html += `<span class="dice-icon dice-input ${color}">${key.charAt(0).toUpperCase()}</span>`;
+                }
+            }
+        }
+        return html || '<span>无</span>';
+    }
+
+    /** 生成骰子结果的HTML */
+    function formatDiceResult(result) {
+        let html = '';
+        if (!result || Object.keys(result).length === 0) return '<span>无结果</span>';
+        for (const key in result) {
+            const count = result[key];
+            const icon = diceIconMap[key] || '?';
+            if (count > 0) {
+                for(let i=0; i < count; i++) {
+                    html += `<span class="dice-icon dice-result ${key}">${icon}</span>`;
+                }
+            }
+        }
+        return html || '<span>无结果</span>';
+    }
+
+    /** 显示骰子弹窗 */
+    function showDiceRollModal(eventData) {
+        const details = eventData.details;
+
+        // 填充主掷骰
+        document.getElementById('dice-roll-title').innerText = `掷骰结算: ${eventData.action_name}`;
+        document.getElementById('dice-roll-attacker-name').innerText = eventData.attacker_name;
+        document.getElementById('dice-roll-defender-name').innerText = eventData.defender_name;
+
+        document.getElementById('dice-roll-attacker-input').innerHTML = formatDiceInput(details.attack_dice_input);
+        document.getElementById('dice-roll-attacker-result').innerHTML = formatDiceResult(details.attack_dice_result);
+        document.getElementById('dice-roll-defender-input').innerHTML = formatDiceInput(details.defense_dice_input);
+        document.getElementById('dice-roll-defender-result').innerHTML = formatDiceResult(details.defense_dice_result);
+
+        // 检查是否有第二轮掷骰 (毁伤/顺劈/霰射)
+        const secondarySection = document.getElementById('dice-roll-secondary-section');
+        if (details.secondary_roll) {
+            const secondary = details.secondary_roll;
+            let title = "效果结算";
+            if (secondary.type === 'devastating_roll') title = "【毁伤】结算";
+            if (secondary.type === 'scattershot_roll') title = "【霰射】结算";
+            if (secondary.type === 'cleave_roll') title = "【顺劈】结算";
+
+            document.getElementById('dice-roll-secondary-title').innerText = title;
+            document.getElementById('dice-roll-secondary-input').innerHTML = formatDiceInput(secondary.defense_dice_input);
+            document.getElementById('dice-roll-secondary-result').innerHTML = formatDiceResult(secondary.defense_dice_result);
+            secondarySection.style.display = 'block';
+        } else {
+            secondarySection.style.display = 'none';
+        }
+
+        // 显示弹窗
+        document.getElementById('dice-roll-modal-backdrop').style.display = 'flex';
+    }
+
+    /** 关闭骰子弹窗 */
+    function closeDiceRollModal() {
+        document.getElementById('dice-roll-modal-backdrop').style.display = 'none';
+    }
+
 </script>
 </body>
 </html>
