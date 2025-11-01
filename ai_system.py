@@ -582,6 +582,7 @@ def run_ai_turn(game):
     if potential_adjust_move_pos and potential_adjust_move_pos != game.ai_pos:  # [BUG 修复] 增加检查，不要在原地"移动"
         log.append(f"> AI 决定执行调整移动！")
         game.ai_pos = potential_adjust_move_pos
+        game.last_ai_pos = game.ai_pos  # [新增] 记录移动前的位置
         tp -= 1
         # 如果调整移动是为了攻击，更新时机
         if timing != potential_attack_timing:
@@ -808,6 +809,7 @@ def run_ai_turn(game):
 
             # 执行移动
             if move_target_pos and move_target_pos != game.ai_pos:
+                game.last_ai_pos = game.ai_pos  # [新增] 记录移动前的位置
                 game.ai_pos = move_target_pos
                 log.append(f"> AI 移动到 {game.ai_pos}。")
                 # 移动后自动转向

@@ -8,18 +8,83 @@
             --hover-bg-color: #2c3748; --disabled-color: #718096; --player-color: #3182ce; --ai-color: #c53030;
             --highlight-move: rgba(66, 153, 225, 0.3); --highlight-attack: rgba(197, 48, 48, 0.4); --phase-color: #f6ad55;
             --status-ok: #2ecc71; --status-damaged: #f39c12; --status-destroyed: #e74c3c;
+            --cell-size: 50px; /* [新增] 单元格大小变量 */
         }
         body { font-family: sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: flex-start; padding: 2rem; gap: 2rem; }
         .panel { background-color: var(--hover-bg-color); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1.5rem; }
         .sidebar { width: 320px; display: flex; flex-direction: column; gap: 1.5rem; }
-        .game-board { display: grid; grid-template-columns: repeat(10, 50px); grid-template-rows: repeat(10, 50px); border: 2px solid var(--border-color); gap: 1px; background-color: var(--border-color); }
-        .grid-cell { width: 50px; height: 50px; background-color: var(--bg-color); position: relative; display: flex; justify-content: center; align-items: center; }
+        .game-board {
+            display: grid;
+            grid-template-columns: repeat(10, var(--cell-size));
+            grid-template-rows: repeat(10, var(--cell-size));
+            border: 2px solid var(--border-color);
+            gap: 1px;
+            background-color: var(--border-color);
+            position: relative; /* [新增] 为伤害指示器定位 */
+        }
+        .grid-cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            background-color: var(--bg-color);
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
         .grid-cell.highlight-move, .grid-cell.highlight-attack { cursor: pointer; }
-        .grid-cell.highlight-move { background-color: var(--highlight-move); } .grid-cell.highlight-attack { background-color: var(--highlight-attack); }
-        .mech-icon { font-size: 36px; position: relative; filter: drop-shadow(0 0 5px); } .mech-icon.player { color: var(--player-color); } .mech-icon.ai { color: var(--ai-color); }
+        .grid-cell.highlight-move { background-color: var(--highlight-move); }
+        .grid-cell.highlight-attack { background-color: var(--highlight-attack); }
+
+        /* [修改] 机甲图标包裹器，用于动画 */
+        .mech-icon-wrapper {
+            position: absolute;
+            width: var(--cell-size);
+            height: var(--cell-size);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 5;
+            transition: transform 0.4s ease-out; /* [新增] 移动动画 */
+        }
+        .mech-icon {
+            font-size: 36px;
+            position: relative;
+            filter: drop-shadow(0 0 5px);
+            /* [修改] 移除 position: relative，移到 wrapper */
+        }
+        .mech-icon.player { color: var(--player-color); }
+        .mech-icon.ai { color: var(--ai-color); }
+
         .orientation-arrow { position: absolute; font-size: 14px; color: white; top: 50%; left: 50%; transform: translate(-50%, -50%); }
         .orientation-selector { position: absolute; z-index: 10; display: none; flex-direction: column; background-color: rgba(0,0,0,0.8); border-radius: 50%; }
         .orientation-button { background: none; border: none; color: white; font-size: 24px; cursor: pointer; width: 40px; height: 40px; }
+
+        /* [新增] 伤害指示器动画 */
+        @keyframes damage-popup {
+            0% { transform: translateY(0); opacity: 1; }
+            100% { transform: translateY(-40px); opacity: 0; }
+        }
+        .damage-indicator {
+            position: absolute;
+            top: -10px; /* 从机甲头顶弹出 */
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 1.2rem;
+            font-weight: bold;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.25rem;
+            color: white;
+            z-index: 10;
+            animation: damage-popup 1.2s ease-out forwards;
+            pointer-events: none; /* 防止遮挡 */
+        }
+        .damage-indicator.hit {
+            background-color: rgba(197, 48, 48, 0.9); /* ai-color */
+        }
+        .damage-indicator.miss {
+            background-color: rgba(113, 128, 150, 0.9); /* disabled-color */
+        }
+
         table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color); }
         h4 { margin-top: 0; border-bottom: 2px solid var(--primary-color); padding-bottom: 0.5rem; }
         .action-item { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-radius: 0.25rem; margin-bottom: 0.5rem; cursor: pointer; transition: background-color 0.2s; }
@@ -112,9 +177,24 @@
     <div class="game-board" id="game-board">
         {% for y in range(1, 11) %}{% for x in range(1, 11) %}
         <div class="grid-cell" id="cell-{{x}}-{{y}}" data-x="{{x}}" data-y="{{y}}">
-            {% if game.player_pos[0] == x and game.player_pos[1] == y %}<div class="mech-icon player">🤖<span class="orientation-arrow" id="player-arrow"></span></div>{% endif %}
-            <!-- [修改] 增加 game.ai_mech 存在性检查 -->
-            {% if game.ai_mech and game.ai_pos[0] == x and game.ai_pos[1] == y %}<div class="mech-icon ai">👾<span class="orientation-arrow" id="ai-arrow"></span></div>{% endif %}
+
+            <!-- [修改] 使用 wrapper 容器来渲染机甲，以便于动画 -->
+            {% if game.player_pos[0] == x and game.player_pos[1] == y %}
+            <div class="mech-icon-wrapper" id="player-mech-wrapper"
+                 data-last-pos="{{ game.last_player_pos | tojson | safe }}"
+                 data-current-pos="{{ game.player_pos | tojson | safe }}">
+                <div class="mech-icon player">🤖<span class="orientation-arrow" id="player-arrow"></span></div>
+            </div>
+            {% endif %}
+
+            {% if game.ai_mech and game.ai_pos[0] == x and game.ai_pos[1] == y %}
+            <div class="mech-icon-wrapper" id="ai-mech-wrapper"
+                 data-last-pos="{{ game.last_ai_pos | tojson | safe }}"
+                 data-current-pos="{{ game.ai_pos | tojson | safe }}">
+                <div class="mech-icon ai">👾<span class="orientation-arrow" id="ai-arrow"></span></div>
+            </div>
+            {% endif %}
+
         </div>{% endfor %}{% endfor %}
         <div id="orientation-selector" class="orientation-selector"><button class="orientation-button" onclick="setFinalOrientation('N')">⬆</button><button class="orientation-button" onclick="setFinalOrientation('E')">➡</button><button class="orientation-button" onclick="setFinalOrientation('S')">⬇</button><button class="orientation-button" onclick="setFinalOrientation('W')">⬅</button></div>
     </div>
@@ -162,21 +242,21 @@
 
 <script>
     let selectedAction = {};
+    // [修改] 增加 visual_feedback_events
     const gameState = {
         turnPhase: '{{ game.turn_phase }}',
         timing: '{{ game.timing or "" }}',
         openingMoveTaken: {{ 'true' if game.opening_move_taken else 'false' }},
         isPlayerLocked: {{ 'true' if is_player_locked else 'false' }},
         gameOver: '{{ game.game_over or "" }}',
-        // [修改] 增加 pending_effect_data 检查
-        pendingEffect: {{ 'true' if game.pending_effect_data else 'false' }}
+        pendingEffect: {{ 'true' if game.pending_effect_data else 'false' }},
+        visualEvents: {{ visual_feedback_events | tojson | safe }}
     };
     const gameMode = '{{ game_mode }}';
     const defeatCount = {{ ai_defeat_count }};
     const orientationMap = {'N': '↑', 'S': '↓', 'E': '→', 'W': '←'};
+    const CELL_SIZE_PX = 51; // [新增] 50px + 1px gap
 
-    // [修复] 这是错误的根源。'cleave' 的 title 被错误地写成了 '【霰射】'。
-    // 我将它修正为 '【顺劈】'。
     const effectDescriptions = {
         'devastating': {
             title: '【毁伤】',
@@ -189,7 +269,7 @@
             style: 'background-color: var(--status-destroyed);'
         },
         'cleave': {
-            title: '【顺劈】', // <-- [修复] BUG 在这里，之前这里是 '【霰射】'
+            title: '【顺劈】',
             text: '对随机部件造成溢出伤害',
             style: 'background-color: #805ad5;' // 紫色
         }
@@ -197,9 +277,11 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         updateUIForPhase();
-        document.getElementById('player-arrow').innerText = orientationMap['{{ game.player_mech.orientation }}'];
+        const playerArrow = document.getElementById('player-arrow');
+        if (playerArrow) {
+             playerArrow.innerText = orientationMap['{{ game.player_mech.orientation }}'];
+        }
 
-        // [修改] 增加 ai_arrow 存在性检查
         const aiArrow = document.getElementById('ai-arrow');
         if (aiArrow) {
             aiArrow.innerText = mapOrientation('{{ game.ai_mech.orientation if game.ai_mech else "N" }}');
@@ -209,7 +291,6 @@
             showGameOverModal(gameState.gameOver);
         }
 
-        // [修改] 增加 pending_effect_data 检查
         if (gameState.pendingEffect) {
             const pendingOptions = {{ game.pending_effect_data.options | tojson | safe if game.pending_effect_data else '[]' }};
             showEffectSelector(pendingOptions);
@@ -217,7 +298,96 @@
 
         const log = document.querySelector('.combat-log');
         log.scrollTop = log.scrollHeight;
+
+        // [新增] 页面加载时执行动画
+        handleMoveAnimations();
+        handleAttackAnimations();
     });
+
+    // [新增] 处理移动动画
+    function handleMoveAnimations() {
+        const playerMech = document.getElementById('player-mech-wrapper');
+        const aiMech = document.getElementById('ai-mech-wrapper');
+
+        if (playerMech) {
+            animateMech(playerMech);
+        }
+        if (aiMech) {
+            animateMech(aiMech);
+        }
+    }
+
+    // [新增] 单个机甲的移动动画逻辑
+    function animateMech(mechWrapper) {
+        try {
+            const lastPos = JSON.parse(mechWrapper.dataset.lastPos);
+            const currentPos = JSON.parse(mechWrapper.dataset.currentPos);
+
+            if (lastPos && currentPos && (lastPos[0] !== currentPos[0] || lastPos[1] !== currentPos[1])) {
+                // 1. 计算像素差异
+                // (last_x - current_x) * CELL_SIZE_PX
+                const dx = (lastPos[0] - currentPos[0]) * CELL_SIZE_PX;
+                const dy = (lastPos[1] - currentPos[1]) * CELL_SIZE_PX;
+
+                // 2. 立即设置到旧位置 (无动画)
+                mechWrapper.style.transition = 'none';
+                mechWrapper.style.transform = `translate(${dx}px, ${dy}px)`;
+
+                // 3. 强制浏览器重绘
+                mechWrapper.offsetHeight;
+
+                // 4. 添加动画并移动到新位置 (0,0)
+                mechWrapper.style.transition = 'transform 0.4s ease-out';
+                mechWrapper.style.transform = 'translate(0, 0)';
+            }
+        } catch (e) {
+            console.error("解析机甲位置时出错:", e);
+        }
+    }
+
+    // [新增] 处理攻击动画
+    function handleAttackAnimations() {
+        if (!gameState.visualEvents || gameState.visualEvents.length === 0) {
+            return;
+        }
+
+        gameState.visualEvents.forEach(event => {
+            if (event.type === 'attack_result') {
+                showDamageIndicator(event.defender_pos, event.result_text);
+            }
+        });
+    }
+
+    // [新增] 显示伤害指示器
+    function showDamageIndicator(pos, text) {
+        const [x, y] = pos;
+        const cell = document.getElementById(`cell-${x}-${y}`);
+        if (!cell) return;
+
+        const indicator = document.createElement('div');
+        indicator.className = 'damage-indicator';
+
+        if (text === '击穿') {
+            indicator.innerText = '击穿!';
+            indicator.classList.add('hit');
+        } else if (text === '无效') {
+            indicator.innerText = '无效';
+            indicator.classList.add('miss');
+        } else {
+            // 其他情况 (如图标或空)
+            return;
+        }
+
+        cell.appendChild(indicator);
+
+        // 动画结束后移除元素
+        setTimeout(() => {
+            if (indicator.parentNode) {
+                indicator.parentNode.removeChild(indicator);
+            }
+        }, 1200); // 匹配 CSS 动画时间
+    }
+
 
     // [新增] 安全的朝向映射
     function mapOrientation(o) {
@@ -393,6 +563,10 @@
                 }
             } else if (data.message) {
                 console.error('Action failed:', data.message);
+                // [新增] 失败时也重载，以清除高亮和选择
+                // 使用自定义模态框或非阻塞通知会更好，但 alert 是最简单的实现
+                // alert("操作失败: " + data.message);
+                console.warn("操作失败: " + data.message); // 避免使用 alert
                 window.location.reload();
             }
         });

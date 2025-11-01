@@ -37,7 +37,7 @@ class Part:
     """定义一个机甲部件。"""
 
     def __init__(self, name, armor, structure, parry=0, evasion=0, electronics=0, adjust_move=0, actions=None,
-                 status='ok', tags=None): # [新增] tags 属性
+                 status='ok', tags=None, image_url=None): # [新增] image_url
         self.name = name
         self.armor = armor
         self.structure = structure
@@ -48,6 +48,7 @@ class Part:
         self.actions = actions if actions is not None else []
         self.status = status  # 'ok', 'damaged', 'destroyed'
         self.tags = tags if tags is not None else [] # [新增] tags 列表
+        self.image_url = image_url # [新增]
 
     def to_dict(self):
         """将Part对象序列化为字典。"""
@@ -62,6 +63,7 @@ class Part:
             'actions': [action.to_dict() for action in self.actions],
             'status': self.status,
             'tags': self.tags,  # [新增]
+            'image_url': self.image_url, # [新增]
         }
 
     @classmethod
@@ -80,7 +82,8 @@ class Part:
             adjust_move=data.get('adjust_move', 0),
             actions=actions,
             status=data.get('status', 'ok'),
-            tags=data.get('tags', []) # [新增]
+            tags=data.get('tags', []), # [新增]
+            image_url=data.get('image_url', None) # [新增]
         )
 
 
@@ -98,10 +101,11 @@ class Mech:
         }
         self.stance = 'defense'  # 'defense', 'agile', 'attack'
         self.orientation = 'N'  # 'N', 'E', 'S', 'W'
+        self.last_pos = None  # [新增] 用于跟踪上一个位置，实现动画
 
     def get_total_evasion(self):
         """计算机甲的总回避值。"""
-        return sum(part.evasion for part in self.parts.values() if part.status != 'destroyed')
+        return sum(part.evasion for part in self.parts.values() if part and part.status != 'destroyed') # [修复] 增加 part 存在性检查
 
     def get_all_actions(self):
         """
@@ -110,22 +114,23 @@ class Mech:
         """
         all_actions = []
         for part_slot, part in self.parts.items():
-            if part.status != 'destroyed':
+            if part and part.status != 'destroyed': # [修复] 增加 part 存在性检查
                 for action in part.actions:
                     all_actions.append((action, part_slot))
         return all_actions
 
     def get_part_by_name(self, name_or_slot):
-        # ... existing code ...
         """
-        根据部件的显示名称或其槽位名（'core', 'legs'等）获取部件对象。
-        优先匹配显示名称。
+        [修复] 根据部件的显示名称或其槽位名（'core', 'legs'等）获取部件对象。
+        优先匹配显示名称，其次匹配槽位名。
         """
-        if name_or_slot in self.parts:  # [修复] 优先检查槽位名
-            return self.parts[name_or_slot]
+        # 优先匹配显示名称
         for part in self.parts.values():
-            if part and part.name == name_or_slot:  # [修复] 增加 part 存在性检查
+            if part and part.name == name_or_slot:
                 return part
+        # 其次匹配槽位名
+        if name_or_slot in self.parts:
+            return self.parts[name_or_slot]
         return None
 
     def has_melee_action(self):
@@ -160,7 +165,8 @@ class Mech:
             'name': self.name,
             'parts': {name: part.to_dict() if part else None for name, part in self.parts.items()}, # [修复] 允许 part 为 None
             'stance': self.stance,
-            'orientation': self.orientation
+            'orientation': self.orientation,
+            'last_pos': self.last_pos  # [新增]
         }
 
     @classmethod
@@ -185,6 +191,6 @@ class Mech:
         )
         mech.stance = data.get('stance', 'defense')
         mech.orientation = data.get('orientation', 'N')
+        mech.last_pos = data.get('last_pos', None)  # [新增]
         return mech
-
 

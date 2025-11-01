@@ -235,6 +235,10 @@ class GameState:
             self.ai_mech = create_ai_mech(ai_loadout_key)
             if self.ai_mech: self.ai_mech.orientation = 'S'
 
+        # [新增] 存储上一个位置以用于动画
+        self.last_player_pos = None
+        self.last_ai_pos = None
+
         self.current_turn = 'player'
         self.player_ap = 2
         self.player_tp = 1
@@ -325,6 +329,8 @@ class GameState:
             'game_mode': self.game_mode,
             'ai_defeat_count': self.ai_defeat_count,
             'pending_effect_data': self.pending_effect_data,  # [新增]
+            'last_player_pos': self.last_player_pos, # [新增]
+            'last_ai_pos': self.last_ai_pos, # [新增]
         }
 
     @classmethod
@@ -350,6 +356,8 @@ class GameState:
         game_state.game_mode = data.get('game_mode', 'duel')
         game_state.ai_defeat_count = data.get('ai_defeat_count', 0)
         game_state.pending_effect_data = data.get('pending_effect_data', None)  # [新增]
+        game_state.last_player_pos = data.get('last_player_pos', None)  # [新增]
+        game_state.last_ai_pos = data.get('last_ai_pos', None)  # [新增]
         return game_state
 
     def calculate_move_range(self, start_pos, move_distance, is_flight=False):

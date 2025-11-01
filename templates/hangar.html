@@ -9,6 +9,81 @@
         .part-card { transition: all 0.2s ease-in-out; }
         .part-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
         input[type="radio"]:checked + label { border-color: #3b82f6; background-color: #2563eb20; }
+
+        /* 示意图和总览样式 */
+        .overview-box {
+            height: 100%;
+            min-height: 4rem; /* 确保最小高度 */
+            background-color: #374151; /* gray-700 */
+            border: 2px solid transparent;
+            border-radius: 0.5rem;
+            /* [修改] 移除 padding, flex, 让图片填充 */
+            text-align: center;
+            font-size: 0.875rem; /* text-sm */
+            transition: all 0.2s ease-in-out;
+            color: #9ca3af; /* gray-400 */
+            overflow: hidden; /* 隐藏溢出的图片 */
+            position: relative; /* 用于定位回退文本 */
+        }
+        .overview-box.active {
+            border-color: #3b82f6; /* blue-500 */
+            background-color: #4b5563; /* gray-600 */
+            color: #e5e7eb; /* gray-200 */
+            font-weight: 600; /* font-semibold */
+        }
+        /* [新增] 示意图中的图片样式 */
+        .overview-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* 裁剪并填充 */
+        }
+        /* [新增] 示意图中的回退文本样式 */
+        .overview-box span {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            padding: 0.5rem;
+            box-sizing: border-box; /* 确保 padding 不会撑破容器 */
+        }
+
+        /* 图像卡片样式 */
+        .part-card-image {
+            position: relative;
+            overflow: hidden;
+            height: 20rem; /* h-80 (320px), [修改] 缩小了高度 */
+        }
+        .part-card-image img {
+            display: block;
+            width: 100%;
+            height: 100%; /* 填满父容器高度 */
+            object-fit: cover;
+        }
+        .part-card-image .part-info-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(0deg, rgba(31, 41, 55, 1) 0%, rgba(31, 41, 55, 0.95) 50%, rgba(31, 41, 55, 0) 100%);
+            padding: 2.5rem 1rem 1rem 1rem; /* 更高的 padding */
+            transition: all 0.2s ease-in-out;
+        }
+        .part-card-image .part-actions {
+             font-size: 0.75rem; /* text-xs */
+             line-height: 1.5;
+        }
+
+        /* 文本卡片样式 (用于没有图片的部件) */
+        .part-card-text {
+            display: flex;
+            flex-direction: column;
+            height: 100%; /* 确保 h-full 生效 */
+            min-height: 20rem; /* [修改] 统一高度 */
+        }
+        .part-card-text .part-info-text {
+            flex-grow: 1; /* 让文本内容占据空间 */
+        }
     </style>
 </head>
 <body class="bg-gray-800 text-gray-200 font-mono">
@@ -17,86 +92,377 @@
         <p class="text-center text-gray-400 mb-8">为你的机甲选择装备，然后进入战场。</p>
 
         <form action="{{ url_for('start_game') }}" method="POST">
+
+            <!-- [修改] 机甲总览与示意图 -->
+            <div class="mb-10 p-4 md:p-6 bg-gray-900 rounded-lg shadow-inner grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                <!-- 1. 示意图 (左侧, 占2列) -->
+                <div class="md:col-span-2 bg-gray-800 p-4 rounded-lg flex justify-center items-center">
+                    <!-- [修改] 布局改为 5 列, 从左到右排列 -->
+                    <div class="grid grid-cols-5 gap-2 w-full max-w-2xl text-center text-sm"> <!-- [修改] max-w-2xl -->
+
+                        <div id="overview-core" class="overview-box col-span-1 min-h-[8rem] cursor-pointer" onclick="showPartCategory('core')">
+                            <span>核心</span>
+                        </div>
+                        <div id="overview-legs" class="overview-box col-span-1 min-h-[8rem] cursor-pointer" onclick="showPartCategory('legs')">
+                            <span>下肢</span>
+                        </div>
+                        <div id="overview-left_arm" class="overview-box col-span-1 min-h-[8rem] cursor-pointer" onclick="showPartCategory('left_arm')">
+                            <span>左臂</span>
+                        </div>
+                        <div id="overview-right_arm" class="overview-box col-span-1 min-h-[8rem] cursor-pointer" onclick="showPartCategory('right_arm')">
+                            <span>右臂</span>
+                        </div>
+                        <div id="overview-backpack" class="overview-box col-span-1 min-h-[8rem] cursor-pointer" onclick="showPartCategory('backpack')">
+                            <span>背包</span>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- 2. 统计数据 (右侧, 占1列) -->
+                <div class="md:col-span-1">
+                    <h3 class="text-2xl font-bold mb-4 text-blue-300">机甲总览</h3>
+                    <!-- [修改] 垂直堆叠 -->
+                    <div class="space-y-4">
+                        <div class="bg-gray-700 p-4 rounded-lg flex justify-between items-center">
+                            <div class="text-gray-400">总闪避</div>
+                            <div id="total-evasion" class="text-3xl font-bold text-blue-400">0</div>
+                        </div>
+                        <div class="bg-gray-700 p-4 rounded-lg flex justify-between items-center">
+                            <div class="text-gray-400">总电子</div>
+                            <div id="total-electronics" class="text-3xl font-bold text-blue-400">0</div>
+                        </div>
+                        <div class="bg-gray-700 p-4 rounded-lg flex justify-between items-center">
+                            <div class="text-gray-400">调整移动</div>
+                            <div id="total-adjust-move" class="text-3xl font-bold text-blue-400">0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- [总览结束] -->
+
             <!-- 机甲部件选择 -->
             <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">1. 选择你的机甲部件</h2>
-            <div class="grid grid-cols-1 md:grid-cols-5 gap-6">
+            <div class="part-selection-container mt-6">
 
                 <!-- 核心 -->
-                <div class="col-span-1">
+                <div class="part-selection-column" data-part-type="core" style="display: none;">
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">核心</h3>
+                    <div class="flex flex-wrap justify-center gap-4">
                     {% for name, part in cores.items() %}
-                    <div class="mb-4">
-                        <input type="radio" id="core_{{ name }}" name="core" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
-                        <label for="core_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
-                            <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
-                            <p class="text-sm">装甲: {{ part.armor }}, 结构: {{ part.structure }}, 闪避: {{ part.evasion }}, 电子: {{ part.electronics }}</p>
+                    <div class="mb-4 w-56"> <!-- [修改] 缩小了宽度 -->
+                        <input type="radio" id="core_{{ name }}" name="core" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
+                               data-part-type="core"
+                               data-evasion="{{ part.evasion|default(0) }}"
+                               data-electronics="{{ part.electronics|default(0) }}"
+                               data-parry="0"
+                               data-adjust-move="0"
+                               data-image-url="{{ part.image_url|default('') }}"
+                        >
+                        <label for="core_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
+                            {% if part.image_url %}
+                            <!-- 图像卡片 -->
+                            <div class="part-card-image">
+                                <img src="{{ part.image_url }}" alt="{{ name }}"
+                                     onerror="this.onerror=null; this.src='https://placehold.co/256x384/374151/E5E7EB?text=IMAGE+NOT+FOUND';">
+                                <div class="part-info-overlay">
+                                    <h4 class="font-bold text-lg text-blue-300 truncate">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 结构: {{ part.structure }}</p>
+                                    <p class="text-sm">闪避: {{ part.evasion }}, 电子: {{ part.electronics }}</p>
+                                    <div class="part-actions mt-2">
+                                        <p class="text-sm font-semibold">动作:</p>
+                                        {% if part.actions %}
+                                            {% for action in part.actions %}
+                                                <span class="block text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                                {% if action.dice %}, {{ action.dice }}{% endif %}
+                                                {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                            {% endfor %}
+                                        {% else %}
+                                            <span class="block">无</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <!-- 文本卡片 -->
+                            <div class="part-card-text p-4">
+                                <div class="part-info-text">
+                                    <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 结构: {{ part.structure }}</p>
+                                    <p class="text-sm">闪避: {{ part.evasion }}, 电子: {{ part.electronics }}</p>
+                                </div>
+                                <p class="text-sm mt-1 font-semibold">动作:</p>
+                                {% if part.actions %}
+                                    {% for action in part.actions %}
+                                        <span class="block text-xs text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                        {% if action.dice %}, {{ action.dice }}{% endif %}
+                                        {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="block text-xs">无</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
                         </label>
                     </div>
                     {% endfor %}
+                    </div>
                 </div>
 
                 <!-- 下肢 -->
-                <div class="col-span-1">
+                <div class="part-selection-column" data-part-type="legs" style="display: none;">
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">下肢</h3>
+                    <div class="flex flex-wrap justify-center gap-4">
                     {% for name, part in legs.items() %}
-                    <div class="mb-4">
-                        <input type="radio" id="legs_{{ name }}" name="legs" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
-                        <label for="legs_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
-                             <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
-                            <p class="text-sm">装甲: {{ part.armor }}, 结构: {{ part.structure }}, 闪避: {{ part.evasion }}</p>
-                            <p class="text-sm">调整移动: {{ part.adjust_move }}</p>
+                    <div class="mb-4 w-56"> <!-- [修改] 缩小了宽度 -->
+                        <input type="radio" id="legs_{{ name }}" name="legs" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
+                               data-part-type="legs"
+                               data-evasion="{{ part.evasion|default(0) }}"
+                               data-electronics="{{ part.electronics|default(0) }}"
+                               data-parry="0"
+                               data-adjust-move="{{ part.adjust_move|default(0) }}"
+                               data-image-url="{{ part.image_url|default('') }}"
+                        >
+                        <label for="legs_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
+                            {% if part.image_url %}
+                            <!-- 图像卡片 -->
+                            <div class="part-card-image">
+                                <img src="{{ part.image_url }}" alt="{{ name }}"
+                                     onerror="this.onerror=null; this.src='https://placehold.co/256x384/374151/E5E7EB?text=IMAGE+NOT+FOUND';">
+                                <div class="part-info-overlay">
+                                    <h4 class="font-bold text-lg text-blue-300 truncate">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 结构: {{ part.structure }}, 闪避: {{ part.evasion }}</p>
+                                    <p class="text-sm">调整移动: {{ part.adjust_move }}</p>
+                                    <div class="part-actions mt-2">
+                                        <p class="text-sm font-semibold">动作:</p>
+                                        {% if part.actions %}
+                                            {% for action in part.actions %}
+                                                <span class="block text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                                {% if action.dice %}, {{ action.dice }}{% endif %}
+                                                {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                            {% endfor %}
+                                        {% else %}
+                                            <span class="block">无</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <!-- 文本卡片 -->
+                            <div class="part-card-text p-4">
+                                <div class="part-info-text">
+                                    <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 结构: {{ part.structure }}, 闪避: {{ part.evasion }}</p>
+                                    <p class="text-sm">调整移动: {{ part.adjust_move }}</p>
+                                </div>
+                                <p class="text-sm mt-1 font-semibold">动作:</p>
+                                {% if part.actions %}
+                                    {% for action in part.actions %}
+                                        <span class="block text-xs text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                        {% if action.dice %}, {{ action.dice }}{% endif %}
+                                        {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="block text-xs">无</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
                         </label>
                     </div>
                     {% endfor %}
+                    </div>
                 </div>
 
                 <!-- 左臂 -->
-                <div class="col-span-1">
+                <div class="part-selection-column" data-part-type="left_arm" style="display: none;">
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">左臂</h3>
+                    <div class="flex flex-wrap justify-center gap-4">
                     {% for name, part in left_arms.items() %}
-                    <div class="mb-4">
-                        <input type="radio" id="left_arm_{{ name }}" name="left_arm" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
-                        <label for="left_arm_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
-                             <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
-                            <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
-                            <p class="text-sm">动作: {{ part.actions | map(attribute='name') | join(', ') if part.actions else '无' }}</p>
+                    <div class="mb-4 w-56"> <!-- [修改] 缩小了宽度 -->
+                        <input type="radio" id="left_arm_{{ name }}" name="left_arm" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
+                               data-part-type="left_arm"
+                               data-evasion="{{ part.evasion|default(0) }}"
+                               data-electronics="{{ part.electronics|default(0) }}"
+                               data-parry="{{ part.parry|default(0) }}"
+                               data-adjust-move="0"
+                               data-image-url="{{ part.image_url|default('') }}"
+                        >
+                        <label for="left_arm_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
+                            {% if part.image_url %}
+                            <!-- 图像卡片 -->
+                            <div class="part-card-image">
+                                <img src="{{ part.image_url }}" alt="{{ name }}"
+                                     onerror="this.onerror=null; this.src='https://placehold.co/256x384/374151/E5E7EB?text=IMAGE+NOT+FOUND';">
+                                <div class="part-info-overlay">
+                                    <h4 class="font-bold text-lg text-blue-300 truncate">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
+                                    <div class="part-actions mt-2">
+                                        <p class="text-sm font-semibold">动作:</p>
+                                        {% if part.actions %}
+                                            {% for action in part.actions %}
+                                                <span class="block text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                                {% if action.dice %}, {{ action.dice }}{% endif %}
+                                                {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                            {% endfor %}
+                                        {% else %}
+                                            <span class="block">无</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <!-- 文本卡片 -->
+                            <div class="part-card-text p-4">
+                                <div class="part-info-text">
+                                    <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
+                                </div>
+                                <p class="text-sm mt-1 font-semibold">动作:</p>
+                                {% if part.actions %}
+                                    {% for action in part.actions %}
+                                        <span class="block text-xs text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                        {% if action.dice %}, {{ action.dice }}{% endif %}
+                                        {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="block text-xs">无</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
                         </label>
                     </div>
                     {% endfor %}
+                    </div>
                 </div>
 
                 <!-- 右臂 -->
-                <div class="col-span-1">
+                <div class="part-selection-column" data-part-type="right_arm" style="display: none;">
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">右臂</h3>
+                    <div class="flex flex-wrap justify-center gap-4">
                      {% for name, part in right_arms.items() %}
-                    <div class="mb-4">
-                        <input type="radio" id="right_arm_{{ name }}" name="right_arm" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
-                        <label for="right_arm_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
-                            <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
-                            <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
-                            <p class="text-sm">动作: {{ part.actions | map(attribute='name') | join(', ') if part.actions else '无' }}</p>
+                    <div class="mb-4 w-56"> <!-- [修改] 缩小了宽度 -->
+                        <input type="radio" id="right_arm_{{ name }}" name="right_arm" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
+                               data-part-type="right_arm"
+                               data-evasion="{{ part.evasion|default(0) }}"
+                               data-electronics="{{ part.electronics|default(0) }}"
+                               data-parry="{{ part.parry|default(0) }}"
+                               data-adjust-move="0"
+                               data-image-url="{{ part.image_url|default('') }}"
+                        >
+                        <label for="right_arm_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
+                            {% if part.image_url %}
+                            <!-- 图像卡片 -->
+                            <div class="part-card-image">
+                                <img src="{{ part.image_url }}" alt="{{ name }}"
+                                     onerror="this.onerror=null; this.src='https://placehold.co/256x384/374151/E5E7EB?text=IMAGE+NOT+FOUND';">
+                                <div class="part-info-overlay">
+                                    <h4 class="font-bold text-lg text-blue-300 truncate">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
+                                    <div class="part-actions mt-2">
+                                        <p class="text-sm font-semibold">动作:</p>
+                                        {% if part.actions %}
+                                            {% for action in part.actions %}
+                                                <span class="block text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                                {% if action.dice %}, {{ action.dice }}{% endif %}
+                                                {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                            {% endfor %}
+                                        {% else %}
+                                            <span class="block">无</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <!-- 文本卡片 -->
+                            <div class="part-card-text p-4">
+                                <div class="part-info-text">
+                                    <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 招架: {{ part.parry }}</p>
+                                </div>
+                                <p class="text-sm mt-1 font-semibold">动作:</p>
+                                {% if part.actions %}
+                                    {% for action in part.actions %}
+                                        <span class="block text-xs text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                        {% if action.dice %}, {{ action.dice }}{% endif %}
+                                        {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="block text-xs">无</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
                         </label>
                     </div>
                     {% endfor %}
+                    </div>
                 </div>
 
                 <!-- 背包 -->
-                <div class="col-span-1">
+                <div class="part-selection-column" data-part-type="backpack" style="display: none;">
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">背包</h3>
+                    <div class="flex flex-wrap justify-center gap-4">
                     {% for name, part in backpacks.items() %}
-                    <div class="mb-4">
-                        <input type="radio" id="backpack_{{ name }}" name="backpack" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
-                        <label for="backpack_{{ name }}" class="part-card block bg-gray-700 p-4 rounded-lg border-2 border-gray-600 cursor-pointer">
-                            <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
-                            <p class="text-sm">装甲: {{ part.armor }}, 闪避: {{ part.evasion }}, 电子: {{ part.electronics }}</p>
+                    <div class="mb-4 w-56"> <!-- [修改] 缩小了宽度 -->
+                        <input type="radio" id="backpack_{{ name }}" name="backpack" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
+                               data-part-type="backpack"
+                               data-evasion="{{ part.evasion|default(0) }}"
+                               data-electronics="{{ part.electronics|default(0) }}"
+                               data-parry="0"
+                               data-adjust-move="0"
+                               data-image-url="{{ part.image_url|default('') }}"
+                        >
+                        <label for="backpack_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
+                            {% if part.image_url %}
+                            <!-- 图像卡片 -->
+                            <div class="part-card-image">
+                                <img src="{{ part.image_url }}" alt="{{ name }}"
+                                     onerror="this.onerror=null; this.src='https://placehold.co/256x384/374151/E5E7EB?text=IMAGE+NOT+FOUND';">
+                                <div class="part-info-overlay">
+                                    <h4 class="font-bold text-lg text-blue-300 truncate">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 闪避: {{ part.evasion }}, 电子: {{ part.electronics }}</p>
+                                    <div class="part-actions mt-2">
+                                        <p class="text-sm font-semibold">动作:</p>
+                                        {% if part.actions %}
+                                            {% for action in part.actions %}
+                                                <span class="block text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                                {% if action.dice %}, {{ action.dice }}{% endif %}
+                                                {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                            {% endfor %}
+                                        {% else %}
+                                            <span class="block">无</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <!-- 文本卡片 -->
+                            <div class="part-card-text p-4">
+                                <div class="part-info-text">
+                                    <h4 class="font-bold text-lg text-blue-300">{{ name }}</h4>
+                                    <p class="text-sm">装甲: {{ part.armor }}, 闪避: {{ part.evasion }}, 电子: {{ part.electronics }}</p>
+                                </div>
+                                <p class="text-sm mt-1 font-semibold">动作:</p>
+                                {% if part.actions %}
+                                    {% for action in part.actions %}
+                                        <span class="block text-xs text-blue-300">&ndash; {{ action.name }} ({{action.cost}}
+                                        {% if action.dice %}, {{ action.dice }}{% endif %}
+                                        {% if action.range_val %}, R: {{ action.range_val }}{% endif %})</span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="block text-xs">无</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
                         </label>
                     </div>
                     {% endfor %}
+                    </div>
                 </div>
 
             </div>
 
-            <!-- [修改] AI 对手选择 -->
+            <!-- AI 对手选择 -->
             <div class="mt-10">
                 <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">2. 选择初始对手</h2>
                 <div class="flex justify-center flex-wrap gap-6">
@@ -113,7 +479,7 @@
                 </div>
             </div>
 
-            <!-- [新增] 游戏模式选择 -->
+            <!-- 游戏模式选择 -->
             <div class="mt-10">
                 <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">3. 选择游戏模式</h2>
                 <div class="flex justify-center flex-wrap gap-6">
@@ -144,5 +510,104 @@
             </div>
         </form>
     </div>
+
+    <!-- [修改] 实时统计和示意图脚本 -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const allRadioInputs = document.querySelectorAll('input[type="radio"]');
+
+            // 默认的回退文本
+            const defaultTexts = {
+                core: '核心',
+                legs: '下肢',
+                left_arm: '左臂',
+                right_arm: '右臂',
+                backpack: '背包'
+            };
+
+            function updateOverview() {
+                let totalEvasion = 0;
+                let totalElectronics = 0;
+                let totalAdjustMove = 0;
+
+                // 遍历所有选中的输入
+                const checkedInputs = document.querySelectorAll('input[type="radio"]:checked');
+
+                checkedInputs.forEach(input => {
+                    // 1. 累加总属性
+                    totalEvasion += parseFloat(input.dataset.evasion || 0);
+                    totalElectronics += parseFloat(input.dataset.electronics || 0);
+                    totalAdjustMove += parseFloat(input.dataset.adjustMove || 0);
+
+                    // 2. 更新示意图 (仅处理机甲部件)
+                    const partType = input.dataset.partType;
+                    if (partType) {
+                        const partName = input.value;
+                        const imageUrl = input.dataset.imageUrl;
+                        const overviewBox = document.getElementById(`overview-${partType}`);
+
+                        if (overviewBox) {
+                            // 清空方框
+                            overviewBox.innerHTML = '';
+
+                            if (imageUrl) {
+                                // 如果有图片, 创建 img 标签
+                                const img = document.createElement('img');
+                                img.src = imageUrl;
+                                img.alt = partName;
+                                img.onerror = function() {
+                                    // 图片加载失败, 显示回退文本
+                                    overviewBox.innerHTML = `<span>${partName.split(' ')[0] || defaultTexts[partType]}</span>`;
+                                };
+                                overviewBox.appendChild(img);
+                            } else {
+                                // 没有图片, 显示回退文本
+                                overviewBox.innerHTML = `<span>${partName.split(' ')[0] || defaultTexts[partType]}</span>`;
+                            }
+                        }
+                    }
+                });
+
+                // 3. 更新总览面板的数字
+                document.getElementById('total-evasion').innerText = totalEvasion;
+                document.getElementById('total-electronics').innerText = totalElectronics;
+                document.getElementById('total-adjust-move').innerText = totalAdjustMove;
+            }
+
+            // 切换部件选择列表的函数
+            window.showPartCategory = function(partTypeToShow) {
+                // 1. 隐藏所有部件选择列
+                document.querySelectorAll('.part-selection-column').forEach(col => {
+                    col.style.display = 'none';
+                });
+
+                // 2. 显示被点击的部件列
+                const columnToShow = document.querySelector(`.part-selection-column[data-part-type="${partTypeToShow}"]`);
+                if (columnToShow) {
+                    columnToShow.style.display = 'block';
+                }
+
+                // 3. 更新示意图上的 'active' 状态
+                document.querySelectorAll('.overview-box').forEach(box => {
+                    box.classList.remove('active');
+                });
+                const activeBox = document.getElementById(`overview-${partTypeToShow}`);
+                if (activeBox) {
+                    activeBox.classList.add('active');
+                }
+            }
+
+            // 为所有单选按钮添加 'change' 事件监听
+            allRadioInputs.forEach(input => input.addEventListener('change', updateOverview));
+
+            // 页面加载时立即执行一次，以显示默认选中项的统计数据
+            updateOverview();
+
+            // 页面加载时默认显示 'core' (核心) 部件列表
+            showPartCategory('core');
+        });
+    </script>
 </body>
 </html>
+
+

@@ -36,6 +36,18 @@ Session(app)
 MAX_LOG_ENTRIES = 50
 
 
+# [新增] 用于清除一次性视觉效果的辅助函数
+def clear_visual_feedback():
+    """清除会话中的一次性事件。"""
+    session['visual_feedback_events'] = []
+    # 重置 last_pos，这样刷新页面时不会重复播放动画
+    if 'game_state' in session:
+        game = GameState.from_dict(session['game_state'])
+        game.last_player_pos = None
+        game.last_ai_pos = None
+        session['game_state'] = game.to_dict()
+
+
 # --- 核心路由 ---
 
 @app.route('/')
@@ -44,7 +56,8 @@ def index():
     update_notes = [
         "版本 v1.3:",
         "- 增加了新的部件与效果",
-        "- 优化了AI逻辑"
+        "- 优化了AI逻辑",
+        "- [新增] 实现了移动和攻击的视觉反馈！"
     ]
     rules_html = ""
     try:
@@ -106,6 +119,7 @@ def start_game():
     # [修改] 日志裁剪
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
+    session['visual_feedback_events'] = []  # [新增] 初始化视觉事件列表
     return redirect(url_for('game'))
 
 
@@ -119,6 +133,10 @@ def game():
         return redirect(url_for('hangar'))
     is_player_locked, locker_pos = get_player_lock_status(game_state_obj)
     log = session.get('combat_log', [])
+
+    # [新增] 获取并传递视觉事件
+    visual_events = session.get('visual_feedback_events', [])
+
     return render_template(
         'game.html',
         game=game_state_obj,
@@ -126,7 +144,8 @@ def game():
         is_player_locked=is_player_locked,
         player_actions_used=game_state_obj.player_actions_used_this_turn,
         game_mode=game_state_obj.game_mode,
-        ai_defeat_count=game_state_obj.ai_defeat_count
+        ai_defeat_count=game_state_obj.ai_defeat_count,
+        visual_feedback_events=visual_events  # [新增]
     )
 
 
@@ -135,12 +154,14 @@ def reset_game():
     """清除会话数据，重置游戏并返回机库。"""
     session.pop('game_state', None)
     session.pop('combat_log', None)
+    session.pop('visual_feedback_events', None)  # [新增]
     return redirect(url_for('hangar'))
 
 
 @app.route('/end_turn', methods=['POST'])
 def end_turn():
     """玩家结束回合，触发AI回合逻辑，并在AI行动后刷新游戏状态。"""
+    clear_visual_feedback()  # [新增] 清除玩家的旧事件
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over:
         return redirect(url_for('game'))
@@ -206,6 +227,14 @@ def end_turn():
         )
         log.extend(attack_log)
 
+        # [新增] 为AI攻击添加视觉反馈事件
+        session['visual_feedback_events'].append({
+            'type': 'attack_result',
+            'attacker_pos': game_state_obj.ai_pos,
+            'defender_pos': game_state_obj.player_pos,
+            'result_text': result  # '击穿' 或 '无效'
+        })
+
         # [修改 v1.13] AI 攻击不需要玩家选择，所以 effect_choice_required 逻辑已移除
 
         game_is_over = game_state_obj.check_game_over()
@@ -225,6 +254,11 @@ def end_turn():
         game_state_obj.opening_move_taken = False
         game_state_obj.player_actions_used_this_turn = []
         game_state_obj.pending_effect_data = None
+
+        # [新增] 重置玩家和AI的上一个位置，为玩家回合做准备
+        game_state_obj.last_player_pos = None
+        game_state_obj.last_ai_pos = game_state_obj.ai_mech.last_pos  # 从机甲对象同步
+
         game_state_obj.check_game_over()
 
     session['game_state'] = game_state_obj.to_dict()
@@ -238,6 +272,7 @@ def end_turn():
 
 @app.route('/select_timing', methods=['POST'])
 def select_timing():
+    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     timing = data.get('timing')
     game_state_obj = GameState.from_dict(session.get('game_state'))
@@ -250,6 +285,7 @@ def select_timing():
 
 @app.route('/confirm_timing', methods=['POST'])
 def confirm_timing():
+    clear_visual_feedback()  # [新增] 清除旧事件
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'timing' and game_state_obj.timing and not game_state_obj.game_over:
         game_state_obj.turn_phase = 'stance'
@@ -265,6 +301,7 @@ def confirm_timing():
 
 @app.route('/change_stance', methods=['POST'])
 def change_stance():
+    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     new_stance = data.get('stance')
     game_state_obj = GameState.from_dict(session.get('game_state'))
@@ -277,6 +314,7 @@ def change_stance():
 
 @app.route('/confirm_stance', methods=['POST'])
 def confirm_stance():
+    clear_visual_feedback()  # [新增] 清除旧事件
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'stance' and not game_state_obj.game_over:
         game_state_obj.turn_phase = 'adjustment'
@@ -292,9 +330,11 @@ def confirm_stance():
 
 @app.route('/execute_adjust_move', methods=['POST'])
 def execute_adjust_move():
+    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'adjustment' and game_state_obj.player_tp >= 1 and not game_state_obj.game_over:
+        game_state_obj.last_player_pos = game_state_obj.player_pos  # [新增] 记录移动前的位置
         game_state_obj.player_pos = tuple(data.get('target_pos'))
         game_state_obj.player_mech.orientation = data.get('final_orientation')
         game_state_obj.player_tp -= 1
@@ -311,6 +351,7 @@ def execute_adjust_move():
 
 @app.route('/change_orientation', methods=['POST'])
 def change_orientation():
+    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'adjustment' and game_state_obj.player_tp >= 1 and not game_state_obj.game_over:
@@ -329,6 +370,7 @@ def change_orientation():
 
 @app.route('/skip_adjustment', methods=['POST'])
 def skip_adjustment():
+    clear_visual_feedback()  # [新增] 清除旧事件
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.turn_phase == 'adjustment' and not game_state_obj.game_over:
         game_state_obj.turn_phase = 'main'
@@ -387,6 +429,7 @@ def execute_main_action(game, action, action_name, part_slot):
 @app.route('/move_player', methods=['POST'])
 def move_player():
     """(AJAX) 处理玩家的“移动”类型动作（非调整移动）。"""
+    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over: return jsonify({'success': False})
@@ -407,6 +450,7 @@ def move_player():
             action = next((a for a in part.actions if a.name == action_name), None)
     if game_state_obj.turn_phase == 'main' and action and execute_main_action(game_state_obj, action, action_name,
                                                                               part_slot):
+        game_state_obj.last_player_pos = game_state_obj.player_pos  # [新增] 记录移动前的位置
         game_state_obj.player_pos = tuple(data.get('target_pos'))
         game_state_obj.player_mech.orientation = data.get('final_orientation')
         session['game_state'] = game_state_obj.to_dict()
@@ -421,6 +465,7 @@ def move_player():
 @app.route('/execute_attack', methods=['POST'])
 def execute_attack():
     """ (AJAX) 处理玩家的“攻击”动作（近战或射击）。 """
+    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     log = session.get('combat_log', [])
@@ -543,6 +588,14 @@ def execute_attack():
             chosen_effect=None
         )
 
+        # [新增] 为玩家攻击添加视觉反馈事件
+        session['visual_feedback_events'].append({
+            'type': 'attack_result',
+            'attacker_pos': game_state_obj.player_pos,
+            'defender_pos': game_state_obj.ai_pos,
+            'result_text': result  # '击穿' 或 '无效'
+        })
+
         if result == "effect_choice_required":
             log.extend(attack_log)
             game_state_obj.pending_effect_data = {
@@ -579,6 +632,7 @@ def execute_attack():
 @app.route('/resolve_effect_choice', methods=['POST'])
 def resolve_effect_choice():
     """ (AJAX) 接收玩家关于【毁伤】/【霰射】/【顺劈】的选择。 """
+    # 注意：这里 *不* 清除视觉反馈，因为这是攻击流程的一部分
     data = request.get_json()
     choice = data.get('choice')
 
@@ -649,6 +703,7 @@ def resolve_effect_choice():
 # --- 数据请求路由 ---
 @app.route('/get_move_range', methods=['POST'])
 def get_move_range():
+    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over: return jsonify({'valid_moves': []})
@@ -688,6 +743,7 @@ def get_move_range():
 
 @app.route('/get_attack_range', methods=['POST'])
 def get_attack_range():
+    clear_visual_feedback()  # [新增] 清除旧事件
     data = request.get_json()
     game_state_obj = GameState.from_dict(session.get('game_state'))
     if game_state_obj.game_over: return jsonify({'valid_targets': []})
