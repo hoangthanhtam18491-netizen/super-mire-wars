@@ -1,22 +1,21 @@
 import math
 import heapq
-from data_models import Mech, Part, Action
-# [修正] 导入所有部件和动作，以及 AI_LOADOUTS
+import random
+from data_models import (
+    Mech, Part, Action, GameEntity, Projectile, Drone
+)
 from parts_database import (
     ALL_PARTS, CORES, LEGS, LEFT_ARMS, RIGHT_ARMS, BACKPACKS,
-    ACTION_BENPAO, ACTION_JINGJU, ACTION_JUJI, ACTION_PAOJI,
-    ACTION_CIJI, ACTION_DIANSHE, ACTION_HUIZHAN, ACTION_TIAOYUE,
-    ACTION_SUSHE, ACTION_DIANSHE_ZHAN, ACTION_DIANSHE_CI, ACTION_SUSHE_BIPAO,
-    ACTION_BENPAO_MA,  # [修正] 导入漏掉的动作
-    # Ensure effects are imported if needed, although they are not used in this file directly
-    # Example: EFFECT_FLIGHT_MOVEMENT
+    PROJECTILE_TEMPLATES,  # [v1.17] 导入抛射物模板
+    AI_LOADOUTS  # [v1.22] 从 parts_database 导入
 )
-import random  # 导入 random
 
 
-# [新增] 辅助函数，也供 AI 使用
+# --- [v1.17] 辅助函数 ---
+
 def _get_distance(pos1, pos2):
     """计算两个位置的曼哈顿距离。"""
+    if not pos1 or not pos2: return 999
     return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
 
@@ -50,133 +49,276 @@ def _is_adjacent(pos1, pos2):
 def _is_tile_locked_by_opponent(game_state, tile_pos, a_mech, b_pos, b_mech):
     """
     检查 tile_pos 上的单位是否被对手近战锁定。
-    a_mech 是在 tile_pos 上的单位（即移动者）。
-    b_mech 是对手。
-    [修改] 移除朝向检查，现在锁定周围8格。
+    [v1.17] 更新为使用实体。
     """
-    if not b_mech or b_mech.parts['core'].status == 'destroyed':
-        return False  # 对手不存在或核心已毁，无法锁定
+    if not b_mech or b_mech.status == 'destroyed':
+        return False
     if not b_mech.has_melee_action():
-        return False  # 对手没有近战能力，无法锁定
+        return False
     if not _is_adjacent(tile_pos, b_pos):
-        return False  # 必须相邻才能锁定
-
-    # [移除] 不再检查朝向
-    # if not is_in_forward_arc(b_pos, b_mech.orientation, tile_pos):
-    #    return False
-
-    return True  # 满足以上条件即可锁定
+        return False
+    # 规则：锁定周围8格
+    return True
 
 
-def get_player_lock_status(game_state):
-    """检查玩家是否被AI锁定。"""
-    # [修复] 增加对 game_state.ai_mech 的 None 检查
-    if not game_state.ai_mech:
-        return False, None
-    is_locked = _is_tile_locked_by_opponent(
-        game_state,
-        game_state.player_pos, game_state.player_mech,
-        game_state.ai_pos, game_state.ai_mech
-    )
-    return is_locked, game_state.ai_pos if is_locked else None
+def get_player_lock_status(game_state, player_mech):
+    """[v1.17] 检查玩家是否被任何AI机甲锁定。"""
+    if not player_mech: return False, None
+    for entity in game_state.entities.values():
+        if entity.controller == 'ai' and entity.entity_type == 'mech' and entity.status != 'destroyed':
+            is_locked = _is_tile_locked_by_opponent(
+                game_state,
+                player_mech.pos, player_mech,
+                entity.pos, entity
+            )
+            if is_locked:
+                return True, entity.pos
+    return False, None
 
 
-def get_ai_lock_status(game_state):
-    """检查AI是否被玩家锁定。"""
-    # [修复] 增加对 game_state.player_mech 的 None 检查
-    if not game_state.player_mech:
-        return False, None
-    is_locked = _is_tile_locked_by_opponent(
-        game_state,
-        game_state.ai_pos, game_state.ai_mech,
-        game_state.player_pos, game_state.player_mech
-    )
-    return is_locked, game_state.player_pos if is_locked else None
+def get_ai_lock_status(game_state, ai_mech):
+    """[v1.17] 检查AI是否被任何玩家机甲锁定。"""
+    if not ai_mech: return False, None
+    for entity in game_state.entities.values():
+        if entity.controller == 'player' and entity.entity_type == 'mech' and entity.status != 'destroyed':
+            is_locked = _is_tile_locked_by_opponent(
+                game_state,
+                ai_mech.pos, ai_mech,
+                entity.pos, entity
+            )
+            if is_locked:
+                return True, entity.pos
+    return False, None
 
 
-def create_mech_from_selection(name, selection):
+# --- [v_MODIFIED] 逻辑从 ai_system.py 移动到这里 ---
+
+# [v1.32 新增] 拦截检查辅助函数
+# [v1.33 修复] 重命名为 public (移除 _)，以便 app.py 和 ai_system.py 可以导入
+def check_interception(projectile, game_state):
     """
+    检查是否有任何敌方单位可以拦截此抛射物（在它当前的位置）。
+    返回 (log_list, attacks_to_resolve_list)
+    """
+    log = []
+    attacks_to_resolve = []
+    landing_pos = projectile.pos
+
+    # 遍历所有实体，寻找拦截者
+    for entity in game_state.entities.values():
+        # 拦截者必须： 1. 是抛射物的敌人  2. 是机甲  3. 存活
+        if entity.controller != projectile.controller and entity.entity_type == 'mech' and entity.status != 'destroyed':
+
+            interceptor_actions = entity.get_interceptor_actions()
+            if not interceptor_actions:
+                continue  # 这个机甲没有拦截系统
+
+            # 遍历该机甲的所有拦截动作 (例如，如果它有2个AMS背包)
+            for intercept_action, part_slot in interceptor_actions:
+                # 检查射程
+                intercept_range = intercept_action.range_val
+                dist_to_landing = _get_distance(entity.pos, landing_pos)
+
+                if dist_to_landing <= intercept_range:
+                    # 检查弹药
+                    ammo_key = (entity.id, part_slot, intercept_action.name)
+                    current_ammo = game_state.ammo_counts.get(ammo_key, 0)
+
+                    if current_ammo > 0:
+                        log.append(
+                            f"> [拦截] {entity.name} 的 [{intercept_action.name}] 侦测到 {projectile.name} (在 {landing_pos})！")
+                        log.append(f"> [拦截] 距离 {dist_to_landing}格 (范围 {intercept_range}格)。")
+
+                        # 消耗弹药
+                        game_state.ammo_counts[ammo_key] -= 1
+                        log.append(f"> [拦截] 消耗 1 弹药 (剩余 {game_state.ammo_counts[ammo_key]})。")
+
+                        # [关键] 将拦截攻击添加到待处理队列
+                        attacks_to_resolve.append({
+                            'attacker': entity,  # 拦截者是攻击方
+                            'defender': projectile,  # 抛射物是防御方
+                            'action': intercept_action
+                        })
+                        log.append(f"> [拦截] {entity.name} 立即对 {projectile.name} 发动拦截攻击！")
+
+                        # [v1.32 修复] 移除 break。
+                        # 允许一个机甲使用多个拦截系统 (如果装备了多个) 拦截同一个抛射物。
+                        # break # 机甲只拦截一次 (已移除)
+                    else:
+                        log.append(
+                            f"> [拦截] {entity.name} 侦测到 {projectile.name}，但 [{intercept_action.name}] 弹药耗尽。")
+    return log, attacks_to_resolve
+
+
+def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
+    """
+    [v_MODIFIED v1.32]
+    为单个抛射物实体运行其AI逻辑。
+    现在在 '立即' 和 '延迟' 阶段都会检查拦截。
+    """
+    log = []
+    attacks_to_resolve = []
+
+    # 1. 检查是否匹配请求的
+    action_tuple = projectile.get_action_by_timing(timing_to_run)
+    if not action_tuple or not action_tuple[0]:
+        # log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 没有找到时机为 '{timing_to_run}' 的动作。")
+        return log, attacks_to_resolve
+
+    action_obj, part_slot = action_tuple
+
+    if timing_to_run == '立即':
+        log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 立即执行 [{action_obj.name}]！")
+
+        # [v1.32] 立即检查拦截 (例如，火箭弹发射时)
+        # [v1.33 修复] 调用重命名后的函数
+        intercept_log, intercept_attacks = check_interception(projectile, game_state)
+        log.extend(intercept_log)
+        attacks_to_resolve.extend(intercept_attacks)
+
+        # 查找目标：在抛射物 *自己* 格子上的所有 *敌方* 单位
+        targets = game_state.get_entities_at_pos(projectile.pos, exclude_id=projectile.id)
+        for target_entity in targets:
+            if target_entity.controller != projectile.controller:
+                log.append(f"> [抛射物] 瞄准了同一格子上的 {target_entity.name}！")
+                attacks_to_resolve.append({
+                    'attacker': projectile,
+                    'defender': target_entity,
+                    'action': action_obj
+                })
+        # '立即' 动作执行后，抛射物被摧毁
+        projectile.status = 'destroyed'
+        log.append(f"> [抛射物] {projectile.name} 已引爆并被移除。")
+
+    elif timing_to_run == '延迟':
+        log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 激活【延迟】动作 [{action_obj.name}]！")
+
+        # 1. 查找最近的敌人
+        closest_enemy = None
+        min_dist = 999
+        for entity in game_state.entities.values():
+            if entity.controller != projectile.controller and entity.status != 'destroyed':
+                dist = _get_distance(projectile.pos, entity.pos)
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_enemy = entity
+
+        if not closest_enemy:
+            log.append(f"> [抛射物] {projectile.name} 未找到敌方目标，自我销毁。")
+            projectile.status = 'destroyed'
+            return log, attacks_to_resolve
+
+        log.append(f"> [抛射物] 锁定最近的目标: {closest_enemy.name} (在 {closest_enemy.pos})。")
+
+        # 2. 计算【空中移动】路径
+        move_range = projectile.move_range
+        possible_moves = game_state.calculate_move_range(
+            projectile,
+            move_range,
+            is_flight=True  # 【空中移动】
+        )
+
+        # 3. 寻找最佳移动位置
+        # 目标：移动后距离敌人为0 (同一格) 或尽可能近
+        best_pos = projectile.pos
+        min_dist_after_move = min_dist
+
+        if min_dist > 0:  # 只有在没有命中时才需要移动
+            best_landing_spot = None
+            for pos in possible_moves:
+                dist_to_target = _get_distance(pos, closest_enemy.pos)
+                if dist_to_target < min_dist_after_move:
+                    min_dist_after_move = dist_to_target
+                    best_landing_spot = pos
+
+                # 如果能直接命中（距离为0），就采用
+                if min_dist_after_move == 0:
+                    break
+
+            if best_landing_spot:
+                best_pos = best_landing_spot
+                projectile.last_pos = projectile.pos
+                projectile.pos = best_pos
+                log.append(
+                    f"> [抛射物] {projectile.name} 【空中移动】 {move_range} 格到 {best_pos} (距离目标 {min_dist_after_move} 格)。")
+            else:
+                log.append(f"> [抛射物] {projectile.name} 无法找到更近的位置，停留在 {projectile.pos}。")
+
+        # 4. [v1.32] 检查拦截 (例如，导弹飞行后)
+        # [v1.33 修复] 调用重命名后的函数
+        intercept_log, intercept_attacks = check_interception(projectile, game_state)
+        log.extend(intercept_log)
+        attacks_to_resolve.extend(intercept_attacks)
+
+        # 5. 在最终位置引爆 (如果自己还活着)
+        # 查找目标：在抛射物 *自己* 格子上的所有 *敌方* 单位
+        targets_at_destination = game_state.get_entities_at_pos(projectile.pos, exclude_id=projectile.id)
+        for target_entity in targets_at_destination:
+            if target_entity.controller != projectile.controller:
+                log.append(f"> [抛射物] 在 {projectile.pos} 尝试命中目标 {target_entity.name}！")
+                attacks_to_resolve.append({
+                    'attacker': projectile,
+                    'defender': target_entity,
+                    'action': action_obj
+                })
+
+        # [v1.29 BUG 修复] 移除此行！攻击结算系统 (combat_system.py) 将在攻击后处理此问题。
+        # projectile.status = 'destroyed'
+        # log.append(f"> [抛射物] {projectile.name} 已完成机动并移除。") # <--- [v1.29 BUG 修复] 移除此日志。
+
+    return log, attacks_to_resolve
+
+
+def run_drone_logic(drone, game_state):
+    """
+    (骨架) 为单个无人机实体运行其AI逻辑。
+    """
+    log = []
+    attacks_to_resolve = []
+    log.append(f"> [无人机] {drone.name} 逻辑（未实现）。")
+    return log, attacks_to_resolve
+
+
+# --- [v1.17] 实体创建函数 ---
+
+def create_mech_from_selection(name, selection, entity_id, controller):
+    """
+    [v1.23]
     根据机库页面的部件名称选择，从数据库动态创建一台机甲。
+    现在需要 entity_id 和 controller。
     """
     try:
-        # 从数据库字典创建部件实例的副本，防止修改原始数据
         core_part = Part.from_dict(CORES[selection['core']].to_dict())
         legs_part = Part.from_dict(LEGS[selection['legs']].to_dict())
         left_arm_part = Part.from_dict(LEFT_ARMS[selection['left_arm']].to_dict())
         right_arm_part = Part.from_dict(RIGHT_ARMS[selection['right_arm']].to_dict())
         backpack_part = Part.from_dict(BACKPACKS[selection['backpack']].to_dict())
-
     except KeyError as e:
         print(f"创建机甲时出错：找不到部件 {e}。使用默认部件。")
-        # 使用列表中的第一个作为后备，确保创建副本
         core_part = Part.from_dict(list(CORES.values())[0].to_dict())
         legs_part = Part.from_dict(list(LEGS.values())[0].to_dict())
         left_arm_part = Part.from_dict(list(LEFT_ARMS.values())[0].to_dict())
         right_arm_part = Part.from_dict(list(RIGHT_ARMS.values())[0].to_dict())
         backpack_part = Part.from_dict(list(BACKPACKS.values())[0].to_dict())
 
-    return Mech(name=name, core=core_part, legs=legs_part, left_arm=left_arm_part, right_arm=right_arm_part,
-                backpack=backpack_part)
+    # [v1.23 修复] 传递所有 GameEntity 所需的参数
+    return Mech(
+        id=entity_id,
+        controller=controller,
+        pos=(1, 1),  # 默认位置, 将在 GameState 中被覆盖
+        orientation='N',  # 默认朝向, 将在 GameState 中被覆盖
+        name=name,
+        core=core_part,
+        legs=legs_part,
+        left_arm=left_arm_part,
+        right_arm=right_arm_part,
+        backpack=backpack_part
+    )
 
 
-# --- AI 配置 ---
-AI_LOADOUT_HEAVY = {
-    'name': "AI机甲 (重火炮型)",
-    'selection': {
-        'core': 'GK-09 "壁垒"核心',
-        'legs': 'TK-05 坦克履带',
-        'left_arm': 'LH-8 早期型霰弹破片炮',
-        'right_arm': 'LGP-80 长程火炮',
-        'backpack': 'EB-03 扩容电池'
-    }
-}
-
-AI_LOADOUT_STANDARD = {
-    'name': "AI机甲 (标准泥沼型)",
-    'selection': {
-        'core': 'RT-06 "泥沼"核心',
-        'legs': 'RL-06 标准下肢',
-        'left_arm': 'CC-3 格斗刀',
-        'right_arm': 'AC-32 自动步枪',
-        'backpack': 'AMS-190 主动防御'
-    }
-}
-
-AI_LOADOUT_LIGHTA = {
-    'name': "AI机甲 (高速射手型)",
-    'selection': {
-        'core': 'GK-08 "哨兵"核心',
-        'legs': 'RL-03D “快马”高速下肢',
-        'left_arm': 'R-20 肩置磁轨炮（左）',
-        'right_arm': 'R-20 肩置磁轨炮（右）',
-        'backpack': 'TB-600 跳跃背包'
-    }
-}
-
-AI_LOADOUT_LIGHTB = {
-    'name': "AI机甲 (高速近战型)",
-    'selection': {
-        'core': 'GK-08 "哨兵"核心',
-        'legs': 'RL-03D “快马”高速下肢',
-        'left_arm': '62型 臂盾 + CC-20 单手剑（左）',
-        'right_arm': '63型 臂炮 + CC-20 单手剑（右）',
-        'backpack': 'TB-600 跳跃背包'
-    }
-}
-
-AI_LOADOUTS = {
-    "heavy": AI_LOADOUT_HEAVY,
-    "standard": AI_LOADOUT_STANDARD,
-    "lighta": AI_LOADOUT_LIGHTA,
-    "lightb": AI_LOADOUT_LIGHTB,
-}
-
-
-# --- AI 配置结束 ---
-
-
-def create_ai_mech(ai_loadout_key=None):
+def create_ai_mech(ai_loadout_key=None, entity_id="ai_1"):
     """
+    [v1.17]
     创建一个AI机甲。
     """
     if ai_loadout_key not in AI_LOADOUTS:
@@ -187,378 +329,530 @@ def create_ai_mech(ai_loadout_key=None):
     selection = chosen_loadout['selection']
     name = chosen_loadout['name']
 
-    # 验证所选部件是否存在于数据库中
     missing_parts = [part_name for part_name in selection.values() if part_name not in ALL_PARTS]
     if missing_parts:
         print(f"警告: AI配置 '{name}' 中的部件 {missing_parts} 在数据库中不存在。将使用 'standard' 后备AI。")
-        ai_loadout_key = "standard"  # 重置key
-        chosen_loadout = AI_LOADOUTS[ai_loadout_key]  # 重新获取标准配置
+        chosen_loadout = AI_LOADOUTS["standard"]
         selection = chosen_loadout['selection']
         name = chosen_loadout['name']
-        # 再次验证标准配置是否存在 (理论上应该存在)
         missing_standard_parts = [part_name for part_name in selection.values() if part_name not in ALL_PARTS]
         if missing_standard_parts:
             print(f"严重错误: 标准AI配置中的部件 {missing_standard_parts} 也不存在！请检查 parts_database.py。")
-            # 这里可能需要更健壮的错误处理，比如抛出异常或返回 None
-            return None  # 无法创建AI机甲
+            return None
 
-    # 使用确认有效的配置创建机甲
-    mech = create_mech_from_selection(name, selection)
+    mech = create_mech_from_selection(name, selection, entity_id=entity_id, controller='ai')
     return mech
 
 
 class GameState:
-    """管理整个游戏的状态"""
+    """
+    [v1.26]
+    管理整个游戏的状态，现在基于实体字典。
+    """
 
-    def __init__(self, player_mech=None, ai_loadout_key=None, game_mode='duel'):
+    def __init__(self, player_mech_selection=None, ai_loadout_key=None, game_mode='duel'):
         self.board_width = 10
         self.board_height = 10
-        self.player_mech = player_mech
-        self.ai_mech = None  # 将在下面根据模式初始化
-        self.player_pos = (1, 1)  # 默认
-        self.ai_pos = (1, 1)  # 默认
+        self.entities = {}  # [v1.17] 核心状态：{ 'player_1': <Mech>, 'ai_1': <Mech>, 'proj_123': <Projectile> }
 
         self.game_mode = game_mode
         self.ai_defeat_count = 0
+        self.game_over = None
 
-        # [新增] 根据游戏模式设置起始位置和朝向
-        if self.game_mode == 'horde':
-            self.player_pos = (5, 2)
-            if self.player_mech: self.player_mech.orientation = 'N'
-            self._spawn_horde_ai(ai_loadout_key)  # 生成第一个AI
-        elif self.game_mode == 'duel':
-            # 决斗模式：(1,5) vs (10,5) 相对
-            self.player_pos = (1, 5)
-            if self.player_mech: self.player_mech.orientation = 'E'
-            self.ai_pos = (10, 5)
-            self.ai_mech = create_ai_mech(ai_loadout_key)
-            if self.ai_mech: self.ai_mech.orientation = 'W'
-        else:  # 'standard' 或其他后备
-            # 原始模式：(5,2) vs (5,8)
-            self.player_pos = (5, 2)
-            if self.player_mech: self.player_mech.orientation = 'N'
-            self.ai_pos = (5, 8)
-            self.ai_mech = create_ai_mech(ai_loadout_key)
-            if self.ai_mech: self.ai_mech.orientation = 'S'
+        # [v1.17] 弹药追踪
+        self.ammo_counts = {}  # { ('player_1', 'left_arm', '火箭弹'): 2 }
 
-        self.current_turn = 'player'
-        self.player_ap = 2
-        self.player_tp = 1
-        self.turn_phase = 'timing'
-        self.timing = None
-        self.opening_move_taken = False
-        self.game_over = None  # 'player_win', 'ai_win'
-
-        self.player_actions_used_this_turn = []
-        self.ai_actions_used_this_turn = []
-
-        # [新增] 用于存储待处理的效果选择
-        self.pending_effect_data = None
-        # 结构: {'action_dict': ..., 'overflow_data': {'hits': X, 'crits': Y}, 'target_part_name': ...}
-
-        # [新增 v1.14] 视觉事件列表
+        # [v1.26] 视觉事件
         self.visual_events = []
-        # [新增 v1.14] 用于跟踪移动动画
-        self.last_player_pos = None
-        self.last_ai_pos = None
+
+        # --- 初始化玩家机甲 ---
+        if player_mech_selection:
+            player_mech = create_mech_from_selection(
+                "玩家机甲", player_mech_selection, entity_id='player_1', controller='player'
+            )
+            # [v1.17] 初始化玩家机甲的弹药
+            for part_slot, part in player_mech.parts.items():
+                if part:
+                    for action in part.actions:
+                        if action.ammo > 0:
+                            ammo_key = ('player_1', part_slot, action.name)
+                            self.ammo_counts[ammo_key] = action.ammo
+            self.entities['player_1'] = player_mech
+
+        # --- 初始化AI机甲并设置位置 ---
+        ai_mech = create_ai_mech(ai_loadout_key, entity_id='ai_1')
+        if ai_mech:
+            # [BUG 修复 v1.30] 初始化 AI 机甲的弹药
+            for part_slot, part in ai_mech.parts.items():
+                if part:
+                    for action in part.actions:
+                        if action.ammo > 0:
+                            # [BUG 修复] 使用 ai_mech.id (e.g., 'ai_1')
+                            ammo_key = (ai_mech.id, part_slot, action.name)
+                            self.ammo_counts[ammo_key] = action.ammo
+            self.entities[ai_mech.id] = ai_mech
+            # [BUG 修复 v1.30] ai_mech 变量现在可能为 None，移动到 if 块内
+            player_mech = self.get_player_mech()  # 获取实例
+
+            if self.game_mode == 'horde':
+                if player_mech: player_mech.pos, player_mech.orientation = (5, 2), 'N'
+                self._spawn_horde_ai(ai_loadout_key)
+            elif self.game_mode == 'duel':
+                if player_mech: player_mech.pos, player_mech.orientation = (1, 5), 'E'
+                if ai_mech: ai_mech.pos, ai_mech.orientation = (10, 5), 'W'
+            elif self.game_mode == 'range':
+                if player_mech: player_mech.pos, player_mech.orientation = (5, 3), 'S'
+                if ai_mech: ai_mech.pos, ai_mech.orientation = (5, 8), 'N'
+            else:  # 'standard'
+                if player_mech: player_mech.pos, player_mech.orientation = (5, 2), 'N'
+                if ai_mech: ai_mech.pos, ai_mech.orientation = (5, 8), 'S'
+
+        # [BUG 修复 v1.30] 如果 ai_mech 为 None (例如创建失败)，player_mech 仍需被设置
+        elif player_mech_selection:
+            player_mech = self.get_player_mech()
+            if player_mech: player_mech.pos, player_mech.orientation = (5, 2), 'N'
 
     def _spawn_horde_ai(self, ai_loadout_key):
-        """[新增] 生存模式下，在底部两行随机生成一个AI。"""
+        """[v1.17] 生存模式下，在底部两行随机生成一个AI。"""
+        player_pos = self.get_player_mech().pos if self.get_player_mech() else None
         valid_spawn_points = []
-        for y in [self.board_height - 1, self.board_height]:  # 最后两行
+        for y in [self.board_height - 1, self.board_height]:
             for x in range(1, self.board_width + 1):
                 pos = (x, y)
-                if pos != self.player_pos:  # 不能生成在玩家身上
+                if pos != player_pos:
                     valid_spawn_points.append(pos)
 
-        if not valid_spawn_points:
-            print("错误：生存模式下没有有效的AI生成点！")
-            # 可能需要添加游戏结束逻辑或在其他位置生成
-            self.ai_pos = (1, self.board_height)  # 随便选一个点
-        else:
-            self.ai_pos = random.choice(valid_spawn_points)
+        spawn_pos = random.choice(valid_spawn_points) if valid_spawn_points else (1, self.board_height)
 
-        # 随机选择一个AI配置 (除了第一个)
         if self.ai_defeat_count > 0:
             ai_loadout_key = random.choice(list(AI_LOADOUTS.keys()))
-        elif ai_loadout_key is None:  # 第一个AI也随机（如果在机库没选）
+        elif ai_loadout_key is None:
             ai_loadout_key = random.choice(list(AI_LOADOUTS.keys()))
 
-        self.ai_mech = create_ai_mech(ai_loadout_key)
-        if self.ai_mech:
-            self.ai_mech.orientation = 'N'  # 总是朝向玩家
-            self.ai_actions_used_this_turn = []  # 重置AI动作
+        ai_id = f"ai_{self.ai_defeat_count + 1}"
+        ai_mech = create_ai_mech(ai_loadout_key, entity_id=ai_id)
+        if ai_mech:
+            ai_mech.pos = spawn_pos
+            ai_mech.orientation = 'N'
 
-    # [新增 v1.14] 添加视觉事件的辅助方法
+            # [BUG 修复 v1.30] 为新生成的 AI 初始化弹药
+            for part_slot, part in ai_mech.parts.items():
+                if part:
+                    for action in part.actions:
+                        if action.ammo > 0:
+                            ammo_key = (ai_mech.id, part_slot, action.name)
+                            self.ammo_counts[ammo_key] = action.ammo
+
+            self.entities[ai_id] = ai_mech
+
+    def _spawn_range_ai(self):
+        """[v1.17] 靶场模式下，在 (5, 8) 重新生成一个AI。"""
+        # 移除所有旧的AI和抛射物
+        ids_to_remove = [eid for eid, e in self.entities.items() if e.controller == 'ai']
+        for eid in ids_to_remove:
+            del self.entities[eid]
+
+        ai_loadout_key = random.choice(list(AI_LOADOUTS.keys()))
+        ai_id = f"ai_range_{self.ai_defeat_count + 1}"
+        ai_mech = create_ai_mech(ai_loadout_key, entity_id=ai_id)
+        if ai_mech:
+            ai_mech.pos = (5, 8)
+            ai_mech.orientation = 'N'
+
+            # [BUG 修复 v1.30] 为新生成的 AI 初始化弹药
+            for part_slot, part in ai_mech.parts.items():
+                if part:
+                    for action in part.actions:
+                        if action.ammo > 0:
+                            ammo_key = (ai_mech.id, part_slot, action.name)
+                            self.ammo_counts[ammo_key] = action.ammo
+
+            self.entities[ai_id] = ai_mech
+
+        # 重置玩家状态
+        player_mech = self.get_player_mech()
+        if player_mech:
+            player_mech.player_ap = 2
+            player_mech.player_tp = 1
+            player_mech.turn_phase = 'timing'
+            player_mech.timing = None
+            player_mech.opening_move_taken = False
+            player_mech.actions_used_this_turn = []
+            player_mech.pending_effect_data = None
+            player_mech.last_pos = None
+
+            # [BUG 修复 v1.30] 重置玩家弹药
+            for part_slot, part in player_mech.parts.items():
+                if part:
+                    for action in part.actions:
+                        if action.ammo > 0:
+                            ammo_key = (player_mech.id, part_slot, action.name)
+                            self.ammo_counts[ammo_key] = action.ammo
+
+        self.game_over = None
+        self.visual_events = []  # [v1.26] 重置事件
+
+    # [v1.26] 添加视觉事件的辅助方法
     def add_visual_event(self, event_type, **kwargs):
         """
         向当前状态添加一个视觉反馈事件。
-        event_type (str): 'attack_result', 'dice_roll', 'move' 等。
-        **kwargs: 事件的详细数据。
         """
         if not hasattr(self, 'visual_events'):
             self.visual_events = []
         event = {'type': event_type, **kwargs}
         self.visual_events.append(event)
 
+    # [v1.17] 新增：生成抛射物
+    def spawn_projectile(self, launcher_entity, target_pos, projectile_key):
+        """
+        [v1.27]
+        在目标位置生成一个抛射物实体。
+        """
+        if projectile_key not in PROJECTILE_TEMPLATES:
+            print(f"错误: 找不到抛射物模板 '{projectile_key}'")
+            return None, None
+
+        template = PROJECTILE_TEMPLATES[projectile_key]
+
+        # [v1.25 修复] 'a' 已经是一个字典了，不需要 a.to_dict()
+        actions = [Action.from_dict(a) for a in template.get('actions', [])]
+
+        new_id = f"proj_{random.randint(10000, 99999)}"
+
+        # [v1.27 修复] 移除 'orientation'，因为它在 Projectile.__init__ 中是硬编码的
+        # [v_MODIFIED] 添加新属性
+        new_projectile = Projectile(
+            id=new_id,
+            controller=launcher_entity.controller,  # 抛射物的控制权归发射者
+            pos=target_pos,
+            name=template.get('name', '抛射物'),
+            evasion=template.get('evasion', 0),
+            stance=template.get('stance', 'agile'),
+            actions=actions,
+            life_span=template.get('life_span', 1),
+            electronics=template.get('electronics', 0),  # [新增]
+            move_range=template.get('move_range', 0)  # [新增]
+        )
+
+        self.entities[new_id] = new_projectile
+        print(f"生成了实体: {new_id} at {target_pos}")
+        return new_id, new_projectile
+
     def check_game_over(self):
         """
-        检查游戏是否结束。
-        在 'horde' 模式下，AI被击败会重生。
-        返回 True 表示游戏结束, False 表示游戏继续。
+        [v1.17]
+        检查游戏是否结束。现在基于实体列表。
         """
-        player_dead = not self.player_mech or self.player_mech.parts[
-            'core'].status == 'destroyed' or self.player_mech.get_active_parts_count() < 3
-        ai_dead = not self.ai_mech or self.ai_mech.parts[
-            'core'].status == 'destroyed' or self.ai_mech.get_active_parts_count() < 3
+        player_mech = self.get_player_mech()
+        ai_mech = self.get_ai_mech()  # 假设是1v1
+
+        player_dead = not player_mech or player_mech.status == 'destroyed' or player_mech.get_active_parts_count() < 3
+        ai_dead = not ai_mech or ai_mech.status == 'destroyed' or ai_mech.get_active_parts_count() < 3
 
         if player_dead:
             self.game_over = 'ai_win'
-            return True  # 游戏结束
+            return True
 
         if ai_dead:
             if self.game_mode == 'horde':
                 self.ai_defeat_count += 1
-                self._spawn_horde_ai(None)  # 传入 None 以触发随机生成
-                if not self.ai_mech:  # 如果生成失败
-                    print("严重错误：无法生成新的AI，游戏可能无法继续。")
-                    self.game_over = 'error'  # 或者其他状态
-                    return True
-                # [新增 v1.14] AI 重生时清除上一位置
-                self.last_ai_pos = None
+                self.entities[ai_mech.id].status = 'destroyed'  # 标记旧AI为已摧毁
+                self._spawn_horde_ai(None)
+                if self.get_ai_mech():  # 检查新AI是否生成成功
+                    self.get_ai_mech().last_ai_pos = None
                 return False  # 游戏继续
+            elif self.game_mode == 'range':
+                self.game_over = 'ai_defeated_in_range'
+                return True  # 游戏暂停
             else:
                 self.game_over = 'player_win'
-                return True  # 游戏结束
+                return True
 
-        return False  # 游戏继续
+        return False
+
+    # --- [v1.17] 实体辅助函数 ---
+
+    def get_player_mech(self):
+        """获取 'player_1' 机甲实体。"""
+        return self.entities.get('player_1')
+
+    def get_ai_mech(self):
+        """获取第一个 'ai' 控制的机甲实体。"""
+        # [v1.17] 假设在 duel/range 模式下只有一个 'ai_1' 或 'ai_range_X'
+        # 在 horde 模式下, 它会找到当前的 'ai_X'
+        for entity in self.entities.values():
+            if entity.controller == 'ai' and entity.entity_type == 'mech' and entity.status != 'destroyed':
+                return entity
+        return None  # 如果所有AI都被击败（例如在 horde 模式的间隙）
+
+    # [v1.24] 新增
+    def get_entity_by_id(self, entity_id):
+        """通过 ID 获取任何实体。"""
+        return self.entities.get(entity_id)
+
+    def get_all_renderable_entities(self):
+        """[v1.17] 返回所有未被摧毁的实体的列表，用于Jinja渲染。"""
+        return [e for e in self.entities.values() if e.status != 'destroyed']
+
+    def get_all_entities_as_dict(self):
+        """[v1.20] 返回所有未被摧毁的实体的 *可序列化字典* 列表。"""
+        return [e.to_dict() for e in self.entities.values() if e.status != 'destroyed']
+
+    def get_entities_at_pos(self, pos, exclude_id=None):
+        """[v1.17] 获取特定坐标上的所有实体列表。"""
+        entities_found = []
+        for entity in self.entities.values():
+            if entity.pos == pos and entity.status != 'destroyed':
+                if exclude_id and entity.id == exclude_id:
+                    continue
+                entities_found.append(entity)
+        return entities_found
+
+    def get_occupied_tiles(self, exclude_id=None):
+        """[v1.17] 获取所有被实体占据的格子。"""
+        occupied = set()
+        for entity in self.entities.values():
+            if entity.status != 'destroyed':
+                if exclude_id and entity.id == exclude_id:
+                    continue
+                occupied.add(entity.pos)
+        return occupied
 
     def to_dict(self):
-        # [修复 v1.15] 确保 visual_events 总是存在
-        if not hasattr(self, 'visual_events'):
-            self.visual_events = []
-
+        """[v1.26] 序列化整个游戏状态，包括所有实体。"""
         return {
-            'player_mech': self.player_mech.to_dict() if self.player_mech else None,
-            'ai_mech': self.ai_mech.to_dict() if self.ai_mech else None,  # 处理AI可能为None的情况
-            'player_pos': self.player_pos,
-            'ai_pos': self.ai_pos,
-            'current_turn': self.current_turn,
-            'player_ap': self.player_ap,
-            'player_tp': self.player_tp,
-            'turn_phase': self.turn_phase,
-            'timing': self.timing,
-            'opening_move_taken': self.opening_move_taken,
-            'game_over': self.game_over,
-            'player_actions_used_this_turn': self.player_actions_used_this_turn,
-            'ai_actions_used_this_turn': self.ai_actions_used_this_turn,
+            'entities': {eid: entity.to_dict() for eid, entity in self.entities.items()},
             'game_mode': self.game_mode,
             'ai_defeat_count': self.ai_defeat_count,
-            'pending_effect_data': self.pending_effect_data,  # [新增]
-            'visual_events': self.visual_events,  # [新增 v1.14]
-            'last_player_pos': self.last_player_pos,  # [新增 v1.14]
-            'last_ai_pos': self.last_ai_pos,  # [新增 v1.14]
+            'game_over': self.game_over,
+            'ammo_counts': self.ammo_counts,
+            'visual_events': self.visual_events,  # [v1.26]
         }
 
     @classmethod
     def from_dict(cls, data):
+        """[v1.26] 从字典重建游戏状态，包括所有实体。"""
         game_state = cls.__new__(cls)
         game_state.board_width = 10
         game_state.board_height = 10
 
-        game_state.player_mech = Mech.from_dict(data['player_mech']) if data.get('player_mech') else None
-        game_state.ai_mech = Mech.from_dict(data['ai_mech']) if data.get('ai_mech') else None  # 处理AI可能为None的情况
+        game_state.entities = {}
+        entities_data = data.get('entities', {})
+        for eid, entity_data in entities_data.items():
+            if entity_data:
+                # [v1.19 修复] 使用 GameEntity.from_dict 进行智能重建
+                game_state.entities[eid] = GameEntity.from_dict(entity_data)
 
-        game_state.player_pos = tuple(data.get('player_pos', (1, 1)))
-        game_state.ai_pos = tuple(data.get('ai_pos', (1, 1)))
-        game_state.current_turn = data.get('current_turn', 'player')
-        game_state.player_ap = data.get('player_ap', 2)
-        game_state.player_tp = data.get('player_tp', 1)
-        game_state.turn_phase = data.get('turn_phase', 'timing')
-        game_state.timing = data.get('timing', None)
-        game_state.opening_move_taken = data.get('opening_move_taken', False)
-        game_state.game_over = data.get('game_over', None)
-        game_state.player_actions_used_this_turn = data.get('player_actions_used_this_turn', [])
-        game_state.ai_actions_used_this_turn = data.get('ai_actions_used_this_turn', [])
         game_state.game_mode = data.get('game_mode', 'duel')
         game_state.ai_defeat_count = data.get('ai_defeat_count', 0)
-        game_state.pending_effect_data = data.get('pending_effect_data', None)  # [新增]
-        game_state.visual_events = data.get('visual_events', [])  # [新增 v1.14]
-        game_state.last_player_pos = data.get('last_player_pos', None)  # [新增 v1.14]
-        game_state.last_ai_pos = data.get('last_ai_pos', None)  # [新增 v1.14]
+        game_state.game_over = data.get('game_over', None)
+        game_state.ammo_counts = data.get('ammo_counts', {})
+        game_state.visual_events = data.get('visual_events', [])  # [v1.26]
         return game_state
 
-    def calculate_move_range(self, start_pos, move_distance, is_flight=False):
+    def calculate_move_range(self, entity, move_distance, is_flight=False):
         """
+         [v_MODIFIED]
          计算从 'start_pos' 出发在 'move_distance' 内所有可达的格子。
-         [修改] 增加 is_flight 参数以处理空中移动逻辑。
-         空中移动无视地形、单位和近战锁定成本。
+         现在基于实体。
+         新增: is_flight (空中移动) 逻辑。
         """
         valid_moves = []
+        start_pos = entity.pos
         sx, sy = start_pos
 
-        if is_flight:
-            # --- 空中移动逻辑 ---
-            for dx in range(-move_distance, move_distance + 1):
-                for dy in range(-move_distance, move_distance + 1):
-                    # 检查曼哈顿距离
-                    if abs(dx) + abs(dy) > move_distance:
-                        continue
-                    if dx == 0 and dy == 0:  # 不能停在原地
-                        continue
+        # [v1.17] 获取所有被占据的格子，排除移动者自己
+        occupied_tiles = self.get_occupied_tiles(exclude_id=entity.id)
 
-                    nx, ny = sx + dx, sy + dy
+        # [v1.17] 确定锁定者 (所有与移动者敌对的单位)
+        lockers = []
+        for e in self.entities.values():
+            if e.controller != entity.controller and e.entity_type == 'mech' and e.status != 'destroyed':
+                if e.has_melee_action():
+                    lockers.append(e)
+
+        if is_flight:
+            # --- [新增] 空中移动逻辑 (无视锁定，可穿过单位) ---
+            pq = [(0, start_pos)]  # (cost, pos)
+            visited = {start_pos: 0}
+
+            while pq:
+                cost, (x, y) = heapq.heappop(pq)
+                current_pos = (x, y)
+
+                if cost > move_distance:
+                    continue
+
+                if cost > 0:
+                    valid_moves.append(current_pos)
+
+                for dx_step, dy_step in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                    nx, ny = x + dx_step, y + dy_step
                     next_pos = (nx, ny)
 
-                    # 检查边界
-                    if not (1 <= nx <= self.board_width and 1 <= ny <= self.board_height):
-                        continue
-                    # 检查终点是否被对手占据
-                    if self.ai_mech and next_pos == self.ai_pos:  # 检查 ai_mech 是否存在
-                        continue
+                    if not (1 <= nx <= self.board_width and 1 <= ny <= self.board_height): continue
 
-                    valid_moves.append(next_pos)
+                    # [空中移动] 飞行单位 *可以* 降落在被占据的格子上
+                    # 但它们不能在起始格降落
+                    if next_pos == start_pos: continue
 
+                    new_cost = cost + 1
+
+                    if new_cost <= move_distance and (next_pos not in visited or new_cost < visited[next_pos]):
+                        visited[next_pos] = new_cost
+                        heapq.heappush(pq, (new_cost, next_pos))
         else:
             # --- 地面移动逻辑 (A*) ---
             pq = [(0, start_pos)]  # (cost, pos)
             visited = {start_pos: 0}
 
-            # 确定锁定者 (AI)
-            locker_mech = self.ai_mech
-            locker_pos = self.ai_pos
-            # 检查 locker_mech 是否存在
-            locker_can_lock = (locker_mech and
-                               locker_mech.has_melee_action() and
-                               locker_mech.parts.get('core') and  # [修复] 检查 core 是否存在
-                               locker_mech.parts['core'].status != 'destroyed')
-
             while pq:
                 cost, (x, y) = heapq.heappop(pq)
+                current_pos = (x, y)
 
                 if cost > move_distance:
                     continue
 
-                # 只有移动了才算有效落点
                 if cost > 0:
-                    current_pos = (x, y)
-                    # 检查落点是否被对手占据 (A* 可能探索到，但不能作为最终落点)
-                    if not self.ai_mech or current_pos != self.ai_pos:  # 检查 ai_mech
-                        valid_moves.append(current_pos)
+                    valid_moves.append(current_pos)
 
+                # 检查当前格子是否被锁定
                 current_is_locked = False
-                if locker_can_lock:
-                    current_is_locked = _is_tile_locked_by_opponent(
-                        self, (x, y), self.player_mech, locker_pos, locker_mech
-                    )
+                for locker_mech in lockers:
+                    if _is_tile_locked_by_opponent(self, current_pos, entity, locker_mech.pos, locker_mech):
+                        current_is_locked = True
+                        break
 
-                for dx_step, dy_step in [(0, 1), (0, -1), (1, 0), (-1, 0)]:  # 只检查四向移动
+                for dx_step, dy_step in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
                     nx, ny = x + dx_step, y + dy_step
                     next_pos = (nx, ny)
 
-                    # 检查边界
-                    if not (1 <= nx <= self.board_width and 1 <= ny <= self.board_height):
-                        continue
+                    if not (1 <= nx <= self.board_width and 1 <= ny <= self.board_height): continue
+                    if next_pos in occupied_tiles: continue  # 路径不能穿过其他单位
 
                     move_cost = 1
                     if current_is_locked:
-                        # [修复] 检查是否真的在“脱离”
+                        # 检查新格子是否仍然被锁定
                         next_is_locked = False
-                        if locker_can_lock:
-                            next_is_locked = _is_tile_locked_by_opponent(
-                                self, next_pos, self.player_mech, locker_pos, locker_mech
-                            )
-                        if not next_is_locked:  # 从锁定格 移动到 非锁定格
+                        for locker_mech in lockers:
+                            if _is_tile_locked_by_opponent(self, next_pos, entity, locker_mech.pos, locker_mech):
+                                next_is_locked = True
+                                break
+                        if not next_is_locked:
                             move_cost += 1  # 脱离锁定需要额外成本
 
                     new_cost = cost + move_cost
 
-                    # 检查目标格子是否被占据
-                    is_occupied_by_ai = self.ai_mech and next_pos == self.ai_pos
-
-                    if new_cost <= move_distance and (
-                            next_pos not in visited or new_cost < visited[next_pos]) and not is_occupied_by_ai:
+                    if new_cost <= move_distance and (next_pos not in visited or new_cost < visited[next_pos]):
                         visited[next_pos] = new_cost
                         heapq.heappush(pq, (new_cost, next_pos))
 
-        # 确保最终返回的列表不包含AI当前位置
-        final_valid_moves = [move for move in set(valid_moves) if not self.ai_mech or move != self.ai_pos]
-        return final_valid_moves
+        return list(set(valid_moves))  # 去重
 
-    def calculate_attack_range(self, attacker_mech, start_pos, action, current_tp=0):
+    def calculate_attack_range(self, attacker_entity, action):
         """
-        计算一个攻击动作（近战或射击）的有效目标。
-        处理近战朝向、射击视线和动态射程（如【静止】、【双手】效果）。
+        [v1.28]
+        计算一个攻击动作（近战、射击、抛射）的有效目标。
+        返回 (valid_targets, valid_launch_cells)
+        valid_targets: [ {'pos': (x,y), 'entity': <Entity>, 'is_back_attack': bool}, ... ]
+        valid_launch_cells: [ (x,y), ... ] (仅用于抛射)
         """
-        targets = []
-        # 目标总是对手（如果存在）
-        if not self.ai_mech: return []  # 如果没有AI，不能攻击
-        target_pos = self.ai_pos
+        valid_targets = []
+        valid_launch_cells = []  # 用于抛射
 
-        sx, sy = start_pos
-        tx, ty = target_pos
-        orientation = attacker_mech.orientation
+        start_pos = attacker_entity.pos
+        orientation = attacker_entity.orientation
 
-        is_valid_target = False
+        # [v1.21 修复] 从攻击者实体获取TP
+        current_tp = 0
+        if isinstance(attacker_entity, Mech):
+            current_tp = attacker_entity.player_tp
 
-        if action.action_type == '近战':
-            # 近战范围检查
-            valid_melee_targets = []
-            if orientation == 'N':
-                valid_melee_targets = [(sx - 1, sy - 1), (sx, sy - 1), (sx + 1, sy - 1)]
-            elif orientation == 'S':
-                valid_melee_targets = [(sx - 1, sy + 1), (sx, sy + 1), (sx + 1, sy + 1)]
-            elif orientation == 'E':
-                valid_melee_targets = [(sx + 1, sy - 1), (sx + 1, sy), (sx + 1, sy + 1)]
-            elif orientation == 'W':
-                valid_melee_targets = [(sx - 1, sy - 1), (sx - 1, sy), (sx - 1, sy + 1)]
+        # 1. 确定射程和风格
+        final_range = action.range_val
+        # [v_MODIFIED] 修复 'curved_fire' 为 'curved'
+        is_curved = (action.action_style == 'curved')
 
-            if target_pos in valid_melee_targets:
-                is_valid_target = True
+        if action.effects:
+            static_bonus = action.effects.get("static_range_bonus", 0)
+            if static_bonus > 0 and current_tp >= 1:
+                final_range += static_bonus
 
-        elif action.action_type == '射击':
-            # 检查视线
-            if not is_in_forward_arc(start_pos, orientation, target_pos):
-                return []  # 不在视线内
-
-            # 计算最终射程
-            final_range = action.range_val
-            if action.effects:
-                # 检查【静止】效果
-                static_bonus = action.effects.get("static_range_bonus", 0)
-                if static_bonus > 0 and current_tp >= 1:  # 检查TP是否>=1
-                    final_range += static_bonus
-
-                # 检查【双手】效果
+            if isinstance(attacker_entity, Mech):  # 只有机甲能用双手
                 two_handed_bonus = action.effects.get("two_handed_range_bonus", 0)
                 if two_handed_bonus > 0:
-                    # 确定持有武器的手臂 和 另一只手臂
                     action_slot = None
-                    for slot, part in attacker_mech.parts.items():
-                        if part and part.status != 'destroyed':  # [修复] 增加 p 存在性检查
-                            for act in part.actions:
-                                if act.name == action.name:  # 找到执行此动作的部件槽位
-                                    action_slot = slot
-                                    break
-                        if action_slot: break
-
+                    for slot, part in attacker_entity.parts.items():
+                        if part and part.status != 'destroyed':
+                            if any(act.name == action.name for act in part.actions):
+                                action_slot = slot
+                                break
                     if action_slot in ['left_arm', 'right_arm']:
                         other_arm_slot = 'right_arm' if action_slot == 'left_arm' else 'left_arm'
-                        other_arm_part = attacker_mech.parts.get(other_arm_slot)
+                        other_arm_part = attacker_entity.parts.get(other_arm_slot)
                         if other_arm_part and other_arm_part.status != 'destroyed' and "【空手】" in other_arm_part.tags:
                             final_range += two_handed_bonus
-                    else:
-                        # 如果动作不在手臂上（例如背包武器），则双手效果不适用
-                        pass
 
-            # 检查距离
-            dist = _get_distance(start_pos, target_pos)
-            if dist <= final_range:
-                is_valid_target = True
+        # 2. 根据动作类型遍历目标
+        if action.action_type == '近战':
+            sx, sy = start_pos
+            valid_melee_cells = []
+            if orientation == 'N':
+                valid_melee_cells = [(sx - 1, sy - 1), (sx, sy - 1), (sx + 1, sy - 1)]
+            elif orientation == 'S':
+                valid_melee_cells = [(sx - 1, sy + 1), (sx, sy + 1), (sx + 1, sy + 1)]
+            elif orientation == 'E':
+                valid_melee_cells = [(sx + 1, sy - 1), (sx + 1, sy), (sx + 1, sy + 1)]
+            elif orientation == 'W':
+                valid_melee_cells = [(sx - 1, sy - 1), (sx - 1, sy), (sx - 1, sy + 1)]
 
-        if is_valid_target:
-            back_attack = is_back_attack(start_pos, target_pos, self.ai_mech.orientation)
-            targets.append({'pos': target_pos, 'is_back_attack': back_attack})
+            for cell in valid_melee_cells:
+                for entity in self.get_entities_at_pos(cell):
+                    if entity.controller != attacker_entity.controller:  # 是敌人
+                        back_attack = False
+                        if isinstance(entity, Mech):  # 只有机甲才能被背击
+                            back_attack = is_back_attack(start_pos, entity.pos, entity.orientation)
+                        valid_targets.append({'pos': entity.pos, 'entity': entity, 'is_back_attack': back_attack})
 
-        return targets
+        # [v1.28 修复] 合并射击和抛射的 *目标* 查找逻辑
+        elif action.action_type == '射击' or action.action_type == '抛射':
+            # 遍历所有敌方实体
+            for entity in self.entities.values():
+                if entity.controller != attacker_entity.controller and entity.status != 'destroyed':
+                    dist = _get_distance(start_pos, entity.pos)
+                    if dist <= final_range:
+                        # [BUG FIX] 抛射 (action_type == '抛射') 应该总是无视朝向 (LOS)
+                        # [v_MODIFIED] is_curved 现在的逻辑是正确的
+                        if action.action_type == '抛射' or is_curved or is_in_forward_arc(start_pos, orientation,
+                                                                                          entity.pos):  # 曲射无视朝向
+                            back_attack = False
+                            if isinstance(entity, Mech):
+                                back_attack = is_back_attack(start_pos, entity.pos, entity.orientation)
+                            valid_targets.append({'pos': entity.pos, 'entity': entity, 'is_back_attack': back_attack})
+
+            # [v1.28] 如果是抛射, *额外* 查找所有可发射的空格子
+            if action.action_type == '抛射':
+                occupied_tiles = self.get_occupied_tiles()
+                for x in range(1, self.board_width + 1):
+                    for y in range(1, self.board_height + 1):
+                        cell_pos = (x, y)
+                        if cell_pos in occupied_tiles: continue  # 只查找空格子
+
+                        dist = _get_distance(start_pos, cell_pos)
+                        if 0 < dist <= final_range:  # 距离必须 > 0
+                            # [BUG FIX] 抛射 (action_type == '抛射') 应该总是无视朝向 (LOS)
+                            # [v_MODIFIED] is_curved 现在的逻辑是正确的
+                            if action.action_type == '抛射' or is_curved or is_in_forward_arc(start_pos, orientation,
+                                                                                              cell_pos):  # 曲射无视朝向
+                                valid_launch_cells.append(cell_pos)
+
+        # [v1.29 新增] 检查被动动作 (拦截)
+        elif action.action_type == '被动':
+            # 拦截动作的目标是抛射物，由 run_projectile_logic 动态决定
+            # 但 calculate_attack_range 仍需返回一个范围，用于前端（如果需要高亮）
+            # 目前, 我们只在后端处理拦截，所以这里返回空
+            pass
+
+        return valid_targets, valid_launch_cells
+
 
