@@ -1,9 +1,15 @@
 import math
 import heapq
 import random
-from data_models import (
+# [v_REFACTOR]
+# 文件已移至 game_logic/
+# 更新导入以使用相对路径 (..) 来引用根目录的 parts_database
+# 并使用相对路径 (.) 来引用此包中的 data_models
+from .data_models import (
     Mech, Part, Action, GameEntity, Projectile, Drone
 )
+# [v_REFACTOR] 使用 '..' 访问上一级目录
+# [v_REFACTOR_FIX] 修复 ImportError。使用从项目根目录开始的绝对导入
 from parts_database import (
     ALL_PARTS, CORES, LEGS, LEFT_ARMS, RIGHT_ARMS, BACKPACKS,
     PROJECTILE_TEMPLATES,  # [v1.17] 导入抛射物模板

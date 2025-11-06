@@ -421,7 +421,8 @@
         <div class="phase-indicator" style="color: var(--status-destroyed);">玩家机甲未加载</div>
         {% endif %}
 
-        <form id="end-turn-form" action="{{ url_for('end_turn') }}" method="POST" style="display: none;"><button type="submit"></button></form>
+        <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->
+        <form id="end-turn-form" action="{{ url_for('game.end_turn') }}" method="POST" style="display: none;"><button type="submit"></button></form>
         <button id="end-turn-btn" class="btn" style="background-color: #c53030;" onclick="document.getElementById('end-turn-form').submit();">结束回合</button>
     </div>
 
@@ -525,7 +526,8 @@
 
     <div id="game-over-modal">
         <h2 id="game-over-title" style="font-size: 2rem; margin-bottom: 1.5rem; white-space: pre-wrap;"></h2>
-        <form action="{{ url_for('reset_game') }}" method="POST">
+        <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->
+        <form action="{{ url_for('game.reset_game') }}" method="POST">
             <button class="btn" style="background-color: var(--primary-color);" type="submit">返回机库</button>
         </form>
     </div>
@@ -536,10 +538,12 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
         <h2 style="font-size: 2rem; margin-bottom: 1.5rem; color: var(--status-ok);">目标已摧毁！</h2>
         <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-            <form action="{{ url_for('respawn_ai') }}" method="POST">
+            <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->
+            <form action="{{ url_for('game.respawn_ai') }}" method="POST">
                 <button class="btn" style="background-color: var(--primary-color);" type="submit">继续</button>
             </form>
-            <form action="{{ url_for('reset_game') }}" method="POST">
+            <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->
+            <form action="{{ url_for('game.reset_game') }}" method="POST">
                 <button class="btn" style="background-color: var(--border-color);" type="submit">返回机库</button>
             </form>
         </div>
@@ -678,19 +682,29 @@
 
             // 等待 2 秒 (让 AI 机甲的移动动画播放完毕)，然后请求服务器运行抛射物阶段
             setTimeout(() => {
-                fetch('/run_projectile_phase', {
+                // [v_REFACTOR_FIX] 修复 fetch URL
+                fetch('{{ url_for("game.run_projectile_phase") }}', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({}) // session 中存有状态
                 })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        window.location.reload(); // 重新加载页面以显示抛射物阶段的结果
+                .then(res => {
+                    // [v_REFACTOR_FIX] 检查重定向
+                    if (res.redirected) {
+                        window.location.href = res.url;
                     } else {
+                        return res.json();
+                    }
+                })
+                .then(data => {
+                    // [v_REFACTOR_FIX] 如果没有重定向，则检查 JSON 响应
+                    if (data && data.success) {
+                        window.location.reload(); // 重新加载页面以显示抛射物阶段的结果
+                    } else if (data) {
                         console.error("抛射物阶段运行失败:", data.message);
                         window.location.reload(); // 失败也重载
                     }
+                    // 如果 res.redirected 为 true, data 将为 undefined, 此时不应执行任何操作
                 })
                 .catch(e => {
                     console.error("Fetch error:", e);
@@ -960,13 +974,14 @@
         clearHighlights();
         selectedAction = { name, range, type, cost, slot: partSlot, player_id: playerID };
 
+        // [v_REFACTOR_FIX] 所有 API 调用现在都需要 /api/ 前缀
         let url = '', body = { action_name: name, part_slot: partSlot, player_id: playerID };
 
         if (type === '移动' || name === '调整移动') {
-            url = '/get_move_range';
+            url = '/api/get_move_range';
         }
         else if (type === '近战' || type === '射击' || type === '抛射') { // [v1.23]
-            url = '/get_attack_range';
+            url = '/api/get_attack_range';
         }
         else if (name === '仅转向') {
             showOrientationSelector(playerEntity.pos[0], playerEntity.pos[1], true);
@@ -1061,7 +1076,8 @@
 
     function confirmEffectChoice(choice) {
         document.getElementById('effect-selector-modal').style.display = 'none';
-        postAndReload('/resolve_effect_choice', { choice: choice, player_id: playerID });
+        // [v_REFACTOR_FIX] 添加 /api/ 前缀
+        postAndReload('/api/resolve_effect_choice', { choice: choice, player_id: playerID });
     }
 
     function showOrientationSelector(x, y, isRotationOnly = false) {
@@ -1085,10 +1101,17 @@
 
         fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
         .then(res => {
+            // [v_REFACTOR_FIX] 检查 Flask 重定向
+            if (res.redirected) {
+                window.location.href = res.url;
+                return null; // 停止处理
+            }
             if (!res.ok) { throw new Error(`HTTP error! status: ${res.status}`); }
             return res.json();
         })
         .then(data => {
+            if (!data) return; // 如果发生了重定向，则 data 为 null
+
             if(data.success) {
                 if (data.action_required === 'select_part') { showPartSelector(); }
                 else if (data.action_required === 'select_effect') { showEffectSelector(data.options); }
@@ -1114,7 +1137,8 @@
         updateUIForPhase(); // 这会立即更新 'active' 按钮
 
         // 2. 在后台与服务器同步，但不刷新页面
-        fetch('/select_timing', {
+        // [v_REFACTOR_FIX] 添加 /api/ 前缀
+        fetch('/api/select_timing', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ timing: t, player_id: playerID })
@@ -1136,7 +1160,8 @@
         if (gameState.pendingEffect) return;
 
         // 1. 在后台与服务器同步
-        fetch('/confirm_timing', {
+        // [v_REFACTOR_FIX] 添加 /api/ 前缀
+        fetch('/api/confirm_timing', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ player_id: playerID })
@@ -1166,7 +1191,8 @@
         updateUIForPhase(); // 这会立即更新 'active' 按钮
 
         // 2. 在后台与服务器同步，但不刷新页面
-        fetch('/change_stance', {
+        // [v_REFACTOR_FIX] 添加 /api/ 前缀
+        fetch('/api/change_stance', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ stance: s, player_id: playerID })
@@ -1188,7 +1214,8 @@
         if (gameState.pendingEffect) return;
 
         // 1. 在后台与服务器同步
-        fetch('/confirm_stance', {
+        // [v_REFACTOR_FIX] 添加 /api/ 前缀
+        fetch('/api/confirm_stance', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ player_id: playerID })
@@ -1214,7 +1241,8 @@
         if (gameState.pendingEffect) return;
 
         // 1. 在后台与服务器同步
-        fetch('/skip_adjustment', {
+        // [v_REFACTOR_FIX] 添加 /api/ 前缀
+        fetch('/api/skip_adjustment', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ player_id: playerID })
@@ -1239,7 +1267,8 @@
     // --- [BUG 修复结束] ---
 
     function executeMove() {
-        let url = selectedAction.isRotationOnly ? '/change_orientation' : (selectedAction.name === '调整移动' ? '/execute_adjust_move' : '/move_player');
+        // [v_REFACTOR_FIX] 添加 /api/ 前缀
+        let url = selectedAction.isRotationOnly ? '/api/change_orientation' : (selectedAction.name === '调整移动' ? '/api/execute_adjust_move' : '/api/move_player');
         postAndReload(url, {
             action_name: selectedAction.name,
             target_pos: selectedAction.targetPos,
@@ -1256,7 +1285,8 @@
             target_pos: selectedAction.targetPos,
             target_part_name: selectedAction.targetPartName
         };
-        postAndReload('/execute_attack', body);
+        // [v_REFACTOR_FIX] 添加 /api/ 前缀
+        postAndReload('/api/execute_attack', body);
     }
 
     // [新增] 显示部件详情的函数
@@ -1435,4 +1465,3 @@
 </script>
 </body>
 </html>
-

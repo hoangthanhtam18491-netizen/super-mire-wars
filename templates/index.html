@@ -48,7 +48,8 @@
     <div class="text-center">
         <h1 class="text-5xl font-bold mb-8 animate-pulse">超级泥沼大战</h1>
         <!-- 链接到机库 -->
-        <a href="{{ url_for('hangar') }}" class="bg-blue-600 hover:bg-blue-800 text-white font-bold py-3 px-6 rounded-lg text-2xl transition-all duration-300 shadow-lg hover:shadow-xl">
+        <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->
+        <a href="{{ url_for('main.hangar') }}" class="bg-blue-600 hover:bg-blue-800 text-white font-bold py-3 px-6 rounded-lg text-2xl transition-all duration-300 shadow-lg hover:shadow-xl">
             进入机库
         </a>
     </div>

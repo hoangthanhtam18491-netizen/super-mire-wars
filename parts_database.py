@@ -1,5 +1,6 @@
-from data_models import Action, Part, Projectile # [v1.18] 导入 Projectile
-
+# [v_REFACTOR]
+# 更新导入，从新的 game_logic 包中导入
+from game_logic.data_models import Action, Part, Projectile # [v1.18] 导入 Projectile
 
 # --- 效果构建辅助函数 ---
 def build_effects(*effects_list):

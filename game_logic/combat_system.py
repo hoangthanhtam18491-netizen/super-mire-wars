@@ -1,9 +1,10 @@
 import random
-# [修改] 导入 process_rolls
-from dice_roller import roll_dice, process_rolls
+# [v_REFACTOR]
+# 文件已移至 game_logic/
+# 更新导入以使用相对路径
+from .dice_roller import roll_dice, process_rolls
 import re
-# [新增 v1.17] 导入实体类
-from data_models import Mech, Projectile, Part, Action
+from .data_models import Mech, Projectile, Part, Action
 
 
 def parse_dice_string(dice_str):

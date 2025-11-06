@@ -1,8 +1,8 @@
 import random
 
-
-# [v1.23 修复] 移除下面这行错误的循环自导入
-# from data_models import Part # [v1.18 修复] 移除错误的循环导入
+# [v_REFACTOR]
+# 文件已移至 game_logic/
+# 修复了原始文件中的循环导入错误 (移除了 'from data_models import Part')
 
 class Action:
     """

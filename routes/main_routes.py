@@ -1,0 +1,116 @@
+import os
+import markdown
+import bleach
+from flask import Blueprint, render_template, request, session, redirect, url_for
+
+# [v_REFACTOR]
+# “优化 1” - 这是一个新的蓝图文件
+# 它包含与核心游戏循环无关的路由 (/, /hangar, /start_game)
+
+# [v_REFACTOR] 导入 game_logic 和 parts_database
+# '..' 代表上一级目录
+from game_logic.game_logic import GameState
+from parts_database import (
+    PLAYER_CORES, PLAYER_LEGS, PLAYER_LEFT_ARMS, PLAYER_RIGHT_ARMS, PLAYER_BACKPACKS,
+    AI_LOADOUTS
+)
+
+main_bp = Blueprint('main', __name__)
+
+# [v_REFACTOR] 调整基础目录路径
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# '..' 返回到 routes/ 的父目录 (即项目根目录)
+ROOT_DIR = os.path.dirname(BASE_DIR)
+
+MAX_LOG_ENTRIES = 50
+
+
+@main_bp.route('/')
+def index():
+    """渲染游戏的主索引/开始页面。"""
+    update_notes = [
+        "版本 v1.35: 项目结构重构",
+        "- [重构] 核心应用已拆分为蓝图 (Blueprints)。",
+        "- [重构] API 逻辑已移至 GameController。",
+        "- [修复] 修复了抛射物在 '立即' 动作后自毁的BUG。",
+    ]
+    rules_html = ""
+
+    rules_file_path = os.path.join(ROOT_DIR, "Game Introduction.md")
+
+    try:
+        with open(rules_file_path, "r", encoding="utf-8") as f:
+            md_content = f.read()
+            html = markdown.markdown(md_content)
+            allowed_tags = ['h1', 'h2', 'h3', 'p', 'ul', 'ol', 'li', 'strong', 'em', 'br', 'div']
+            rules_html = bleach.clean(html, tags=allowed_tags)
+    except FileNotFoundError:
+        rules_html = f"<p>错误：在 {rules_file_path} 未找到 Game Introduction.md 文件。</p>"
+    except Exception as e:
+        rules_html = f"<p>加载规则时出错: {e}</p>"
+
+    return render_template('index.html', update_notes=update_notes, rules_html=rules_html)
+
+
+@main_bp.route('/hangar')
+def hangar():
+    """渲染机库页面，用于机甲组装和模式选择。"""
+    player_left_arms = {k: v for k, v in PLAYER_LEFT_ARMS.items()}
+
+    return render_template(
+        'hangar.html',
+        cores=PLAYER_CORES,
+        legs=PLAYER_LEGS,
+        left_arms=player_left_arms,
+        right_arms=PLAYER_RIGHT_ARMS,
+        backpacks=PLAYER_BACKPACKS,
+        ai_loadouts=AI_LOADOUTS
+    )
+
+
+@main_bp.route('/start_game', methods=['POST'])
+def start_game():
+    """
+    [v1.17]
+    处理来自机库的表单，初始化游戏状态并重定向到游戏界面。
+    """
+    selection = {
+        'core': request.form.get('core'),
+        'legs': request.form.get('legs'),
+        'left_arm': request.form.get('left_arm'),
+        'right_arm': request.form.get('right_arm'),
+        'backpack': request.form.get('backpack')
+    }
+    game_mode = request.form.get('game_mode', 'duel')
+    ai_opponent_key = request.form.get('ai_opponent')
+
+    game = GameState(
+        player_mech_selection=selection,
+        ai_loadout_key=ai_opponent_key,
+        game_mode=game_mode
+    )
+
+    session['game_state'] = game.to_dict()
+    log = [f"> 玩家机甲组装完毕。"]
+
+    ai_mech = game.get_ai_mech()
+    ai_name = ai_mech.name if ai_mech else "未知AI"
+
+    if game_mode == 'horde':
+        log.append(f"> [生存模式] 已启动。")
+        log.append(f"> 第一波遭遇: {ai_name}。")
+    elif game_mode == 'range':
+        log.append(f"> [靶场模式] 已启动。")
+        log.append(f"> 遭遇敌机: {ai_name}。")
+    else:
+        log.append(f"> [决斗模式] 已启动。")
+        log.append(f"> 遭遇敌机: {ai_name}。")
+    log.append("> 战斗开始！")
+
+    if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
+    session['combat_log'] = log
+    session['visual_feedback_events'] = []
+    # [v1.28] 清除回合过渡标志
+    session.pop('run_projectile_phase', None)
+    # [v_REFACTOR] 重定向到 'game.game' (game 蓝图的 game 函数)
+    return redirect(url_for('game.game'))

@@ -1,14 +1,17 @@
 import random
 import heapq
 import re
-from game_logic import (
+# [v_REFACTOR]
+# 文件已移至 game_logic/
+# 更新导入以使用相对路径 (.)
+from .game_logic import (
     is_in_forward_arc, get_ai_lock_status, _is_adjacent, _is_tile_locked_by_opponent,
     _get_distance,
     # [v1.33] 导入拦截检查
     check_interception,
     # [v_MODIFIED] run_projectile_logic, run_drone_logic 已移至 game_logic
 )
-from data_models import Mech  # [v1.17] 导入 Mech
+from .data_models import Mech  # [v1.17] 导入 Mech
 
 
 # --- AI 评估辅助函数 ---

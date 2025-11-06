@@ -91,7 +91,8 @@
         <h1 class="text-4xl font-bold text-center mb-2 text-blue-400">机库整备</h1>
         <p class="text-center text-gray-400 mb-8">为你的机甲选择装备，然后进入战场。</p>
 
-        <form action="{{ url_for('start_game') }}" method="POST">
+        <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->
+        <form action="{{ url_for('main.start_game') }}" method="POST">
 
             <!-- [修改] 机甲总览与示意图 -->
             <div class="mb-10 p-4 md:p-6 bg-gray-900 rounded-lg shadow-inner grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -617,5 +618,3 @@
     </script>
 </body>
 </html>
-
-
