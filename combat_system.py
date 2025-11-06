@@ -386,7 +386,13 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
         log.append(f"  > 最终造成了 [击穿]！")
 
         # 5.1 更新状态
-        if target_part.structure == 0:
+        # [v1.36 修复] 抛射物被击穿时应立即摧毁，无视 "ok -> damaged" 规则
+        if isinstance(defender_entity, Projectile):
+            target_part.status = 'destroyed'
+            log.append(f"  > [抛射物] 目标 [{target_part.name}] 被 [摧毁]！")
+
+        # [v1.36] 常规机甲部件的损伤逻辑
+        elif target_part.structure == 0:
             target_part.status = 'destroyed'
             log.append(f"  > (无结构) 部件 [{target_part.name}] 被 [摧毁]！")
         elif original_status == 'ok':

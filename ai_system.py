@@ -4,9 +4,9 @@ import re
 from game_logic import (
     is_in_forward_arc, get_ai_lock_status, _is_adjacent, _is_tile_locked_by_opponent,
     _get_distance,
-    # [修改] 从 game_logic 导入抛射物逻辑
-    run_projectile_logic, run_drone_logic,
-    check_interception  # [v1.33 新增] 导入拦截检查
+    # [v1.33] 导入拦截检查
+    check_interception,
+    # [v_MODIFIED] run_projectile_logic, run_drone_logic 已移至 game_logic
 )
 from data_models import Mech  # [v1.17] 导入 Mech
 
@@ -84,6 +84,9 @@ def _evaluate_action_strength(action, available_s_action_count, is_in_range):
             strength += 1.0  # 假设它能触发
         if action.effects.get("two_handed_sniper", False):
             strength += 0.5  # 狙击效果
+        # [v1.32] 拦截动作本身没有强度 (是被动)
+        if action.effects.get("interceptor", False):
+            strength = 0 # 拦截是被动触发的，不是主动评估的
 
     return strength
 
@@ -138,7 +141,8 @@ def _calculate_ai_attack_range(game_state, attacker_mech, action, start_pos, ori
 
     elif action.action_type == '射击' or action.action_type == '抛射':  # [v1.17]
 
-        is_curved = (action.action_style == 'curved_fire')
+        # [v1.28 修复]
+        is_curved = (action.action_style == 'curved')
 
         # 1. 检查视线 (曲射跳过)
         if not is_curved and not is_in_forward_arc(start_pos, orientation, target_pos):
@@ -323,9 +327,8 @@ def _find_farthest_move_position(game, move_distance, all_reachable_costs, playe
 
 def run_ai_turn(ai_mech, game_state):
     """
-    [v13]
-# ... existing code ...
-    修复了 _calculate_ai_attack_range 的调用。
+    [v1.34 修复]
+    修复了 AI 发射抛射物时的拦截逻辑。
     """
     log = []
 
@@ -375,7 +378,9 @@ def run_ai_turn(ai_mech, game_state):
         if action_id not in ai_mech.actions_used_this_turn:
             part_obj = ai_mech.parts.get(part_slot)
             if part_obj and part_obj.status != 'destroyed':
-                available_actions.append((action, part_slot))
+                # [v1.32] 排除被动拦截动作
+                if not (action.action_type == '被动' and action.effects.get("interceptor")):
+                    available_actions.append((action, part_slot))
 
     sim_orientation = _get_orientation_to_target(ai_mech.pos, player_pos)
     available_s_actions_count = sum(1 for a, s in available_actions if a.cost == 'S')
@@ -618,7 +623,9 @@ def run_ai_turn(ai_mech, game_state):
             if action_id not in ai_mech.actions_used_this_turn:
                 part_obj = ai_mech.parts.get(part_slot)
                 if part_obj and part_obj.status != 'destroyed':
-                    current_available_actions_tuples.append((action, part_slot))
+                     # [v1.32] 排除被动拦截动作
+                    if not (action.action_type == '被动' and action.effects.get("interceptor")):
+                        current_available_actions_tuples.append((action, part_slot))
 
         if not current_available_actions_tuples:
             log.append(f"> AI {ai_mech.name} 已无可用动作。")
@@ -802,17 +809,24 @@ def run_ai_turn(ai_mech, game_state):
                 ammo_key = (ai_mech.id, action_slot, action_obj.name)
 
                 # 确保弹药足够 (AI 暂时不检查弹药)
+                # [v1.34 修复] AI 现在会检查弹药
+                current_ammo = game_state.ammo_counts.get(ammo_key, 0)
+                launch_count = min(salvo_count, current_ammo)
 
-                # current_ammo = game_state.ammo_counts.get(ammo_key, 0)
+                if launch_count <= 0:
+                    log.append(f"> [AI错误] 弹药耗尽，无法发射 [{action_obj.name}]。")
+                    # 把 AP/TP 还给 AI，因为它没有成功执行动作
+                    ap += cost_ap
+                    tp += cost_tp_action
+                    ai_mech.actions_used_this_turn.pop() # 移除失败的动作
+                    opening_move_taken = False # 允许它重试起手动作
+                    continue # 尝试下一个动作
 
-                # launch_count = min(salvo_count, current_ammo)
-
-                launch_count = salvo_count  # 假设 AI 弹药无限或已在动作选择时考虑
+                # [v1.34] 消耗弹药
+                game_state.ammo_counts[ammo_key] -= launch_count
 
                 log.append(f"> AI 发射 [{action_obj.name}] (齐射 {launch_count}) 到 {player_pos}！")
-
-                if launch_count == 0:
-                    log.append(f"> [AI错误] 尝试齐射0枚。")
+                log.append(f"> 消耗 {launch_count} 弹药, 剩余 {game_state.ammo_counts[ammo_key]}。")
 
                 for i in range(launch_count):
 
@@ -830,53 +844,41 @@ def run_ai_turn(ai_mech, game_state):
 
                     if not proj_obj:
                         log.append(f"> [错误] AI 生成抛射物 {action_obj.projectile_to_spawn} 失败。")
-
                         continue
+
+                    # [v1.34 修复] 检查抛射物是否有'立即'动作
+                    has_immediate_action = proj_obj.get_action_by_timing('立即')[0] is not None
+
+                    # [v1.34 修复] 只有 '延迟' 抛射物 (如导弹) 才在发射时检查拦截
+                    if not has_immediate_action:
+                        intercept_log, intercept_attacks = check_interception(proj_obj, game_state)
+                        if intercept_attacks:
+                            log.extend(intercept_log)
+                            attacks_to_resolve_list.extend(intercept_attacks)
+
 
                     # [v_MODIFIED] 3. 立即检查 '立即' 动作
                     log.append(f"> [AI] 检查 {proj_obj.name} (ID: {proj_id}) 是否有 '立即' 动作...")
 
-                    # [v1.33 新增] 检查发射时的拦截
-                    # 无论抛射物是'立即'还是'延迟'，都在其生成时检查拦截
-                    intercept_log, intercept_attacks = check_interception(proj_obj, game_state)
-                    if intercept_attacks:
-                        log.extend(intercept_log)
-                        attacks_to_resolve_list.extend(intercept_attacks)
-
-                    # [v_MODIFIED] 传入 '立即' 时机 (用于火箭弹等)
+                    # [v_MODIFIED] 传入 '立即' 时机
+                    # [v1.34 修复] run_projectile_logic 已移至 game_logic
+                    from game_logic import run_projectile_logic
                     proj_log, proj_attacks = run_projectile_logic(proj_obj, game_state, '立即')
 
                     if proj_attacks:
-
                         log.extend(proj_log)
-
                         # [v_MODIFIED] 将 '立即' 爆炸加入本回合的攻击结算队列
-
                         attacks_to_resolve_list.extend(proj_attacks)
-
                     else:
-
                         log.append(f"> [AI] ...{proj_obj.name} 没有 '立即' 动作 (将等待 '延迟' 阶段)。")
-
-                # [修改] 消耗弹药 (如果需要追踪AI弹药)
-
-                # if ammo_key in game_state.ammo_counts:
-
-                #    game_state.ammo_counts[ammo_key] -= launch_count
 
 
             # [v_MODIFIED] 常规近战/射击
-
             else:
-
                 attacks_to_resolve_list.append({
-
                     'attacker': ai_mech,
-
                     'defender': player_mech,
-
                     'action': action_obj
-
                 })
 
         if ap == 0:
@@ -895,7 +897,5 @@ def run_ai_turn(ai_mech, game_state):
     return log, attacks_to_resolve_list
 
 
-# --- [v1.17] 新增：抛射物和无人机逻辑 ---
-# [v_MODIFIED] 此处的所有逻辑已移至 game_logic.py
-# run_projectile_logic(...)
-# run_drone_logic(...)
+# --- [v1.17] 抛射物和无人机逻辑 ---
+# [v_MODIFIED v1.33] 此处的所有逻辑已移至 game_logic.py

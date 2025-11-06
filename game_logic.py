@@ -94,7 +94,7 @@ def get_ai_lock_status(game_state, ai_mech):
 # --- [v_MODIFIED] 逻辑从 ai_system.py 移动到这里 ---
 
 # [v1.32 新增] 拦截检查辅助函数
-# [v1.33 修复] 重命名为 public (移除 _)，以便 app.py 和 ai_system.py 可以导入
+# [v1.33 修复] 重命名 (移除 _ ) 以便导入
 def check_interception(projectile, game_state):
     """
     检查是否有任何敌方单位可以拦截此抛射物（在它当前的位置）。
@@ -143,7 +143,6 @@ def check_interception(projectile, game_state):
 
                         # [v1.32 修复] 移除 break。
                         # 允许一个机甲使用多个拦截系统 (如果装备了多个) 拦截同一个抛射物。
-                        # break # 机甲只拦截一次 (已移除)
                     else:
                         log.append(
                             f"> [拦截] {entity.name} 侦测到 {projectile.name}，但 [{intercept_action.name}] 弹药耗尽。")
@@ -152,9 +151,9 @@ def check_interception(projectile, game_state):
 
 def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
     """
-    [v_MODIFIED v1.32]
+    [v_MODIFIED v1.35]
     为单个抛射物实体运行其AI逻辑。
-    现在在 '立即' 和 '延迟' 阶段都会检查拦截。
+    修复了 '立即' 动作会过早自毁的BUG。
     """
     log = []
     attacks_to_resolve = []
@@ -171,7 +170,7 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
         log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 立即执行 [{action_obj.name}]！")
 
         # [v1.32] 立即检查拦截 (例如，火箭弹发射时)
-        # [v1.33 修复] 调用重命名后的函数
+        # 拦截攻击会优先于抛射物自己的攻击
         intercept_log, intercept_attacks = check_interception(projectile, game_state)
         log.extend(intercept_log)
         attacks_to_resolve.extend(intercept_attacks)
@@ -186,9 +185,11 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
                     'defender': target_entity,
                     'action': action_obj
                 })
-        # '立即' 动作执行后，抛射物被摧毁
-        projectile.status = 'destroyed'
-        log.append(f"> [抛射物] {projectile.name} 已引爆并被移除。")
+
+        # [v1.35 BUG 修复] 移除以下两行！
+        # 抛射物的销毁工作由 combat_system.py 在攻击结算后处理。
+        # projectile.status = 'destroyed'
+        # log.append(f"> [抛射物] {projectile.name} 已引爆并被移除。")
 
     elif timing_to_run == '延迟':
         log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 激活【延迟】动作 [{action_obj.name}]！")
@@ -245,7 +246,7 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
                 log.append(f"> [抛射物] {projectile.name} 无法找到更近的位置，停留在 {projectile.pos}。")
 
         # 4. [v1.32] 检查拦截 (例如，导弹飞行后)
-        # [v1.33 修复] 调用重命名后的函数
+        # 拦截攻击会优先于抛射物自己的攻击
         intercept_log, intercept_attacks = check_interception(projectile, game_state)
         log.extend(intercept_log)
         attacks_to_resolve.extend(intercept_attacks)
@@ -263,8 +264,6 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
                 })
 
         # [v1.29 BUG 修复] 移除此行！攻击结算系统 (combat_system.py) 将在攻击后处理此问题。
-        # projectile.status = 'destroyed'
-        # log.append(f"> [抛射物] {projectile.name} 已完成机动并移除。") # <--- [v1.29 BUG 修复] 移除此日志。
 
     return log, attacks_to_resolve
 
@@ -391,6 +390,7 @@ class GameState:
                             ammo_key = (ai_mech.id, part_slot, action.name)
                             self.ammo_counts[ammo_key] = action.ammo
             self.entities[ai_mech.id] = ai_mech
+
             # [BUG 修复 v1.30] ai_mech 变量现在可能为 None，移动到 if 块内
             player_mech = self.get_player_mech()  # 获取实例
 
@@ -854,5 +854,3 @@ class GameState:
             pass
 
         return valid_targets, valid_launch_cells
-
-

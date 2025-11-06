@@ -43,10 +43,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def index():
     """渲染游戏的主索引/开始页面。"""
     update_notes = [
-        "版本 v1.28: 延迟阶段与齐射",
-        "- [新增] 导弹和制导攻击。",
-        "- [新增] 【齐射】和【曲射】效果。",
-        "- [新增] 回合结束时增加“延迟动作阶段”。",
+        "版本 v1.34: 拦截逻辑修复",
+        "- [修复] 修复了拦截系统会重复触发的问题。",
+        "- [修复] 修复了被拦截的抛射物仍然能攻击的问题。",
+        "- [修复] 修复了AI拦截弹药未正确初始化的问题。",
     ]
     rules_html = ""
 
@@ -124,18 +124,17 @@ def start_game():
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
     session['visual_feedback_events'] = []
+    # [v1.28] 清除回合过渡标志
+    session.pop('run_projectile_phase', None)
     return redirect(url_for('game'))
 
 
 @app.route('/game', methods=['GET'])
 def game():
     """
-    [v2.0 更新]
-    【新增】 【55型 轻盾 + CC-6 格斗刀】、【G/AC-6 火箭筒】
-    【完善】 【ML-32 双联发射器 + CC-3 格斗刀】、【AMS-190 主动防御】
-    【新增】 各种贴图
-    【新增】 战斗界面现在可以查看部件信息
-    【新增】 完整的抛射系统
+    [v1.26 修复]
+    渲染主游戏界面，显示棋盘、状态和日志。
+    修复了 'last_pos' 的清除逻辑，防止重复动画。
     """
     if 'game_state' not in session:
         return redirect(url_for('hangar'))
@@ -151,11 +150,11 @@ def game():
     is_player_locked, locker_pos = get_player_lock_status(game_state_obj, player_mech)
     log = session.get('combat_log', [])
 
-    # [修改] 获取 AI 回合暂停标志
-    run_projectile_phase_flag = session.get('run_projectile_phase', False)
-
     # 1. 弹出 *之前* 存储的事件 (来自 /end_turn 或 /execute_attack)
     visual_events = session.pop('visual_feedback_events', [])
+
+    # [v1.28] 检查是否需要自动运行抛射物阶段
+    run_projectile_phase_flag = session.pop('run_projectile_phase', False)
 
     # 2. 从 *当前* 游戏状态中获取新生成的事件
     state_modified = False
@@ -189,7 +188,7 @@ def game():
         ai_defeat_count=game_state_obj.ai_defeat_count,
         visual_feedback_events=visual_events,
         orientationMap=orientation_map,
-        run_projectile_phase=run_projectile_phase_flag  # [新增] 将标志传递给模板
+        run_projectile_phase=run_projectile_phase_flag  # [v1.28] 传递标志
     )
 
     # --- [v1.26 修复] ---
@@ -218,18 +217,18 @@ def reset_game():
     session.pop('game_state', None)
     session.pop('combat_log', None)
     session.pop('visual_feedback_events', None)
+    session.pop('run_projectile_phase', None)  # [v1.28] 清除
     return redirect(url_for('hangar'))
 
 
 @app.route('/end_turn', methods=['POST'])
 def end_turn():
     """
-    [v_MODIFIED]
+    [v_MODIFIED v1.28]
     玩家结束回合。
     流程:
     1. AI 机甲阶段 (AI 机甲移动并发射 '立即' 抛射物, 立即结算攻击)
-    2. [修改] 停止，保存状态，并设置一个标志
-    3. (JS 将在暂停后调用 /run_projectile_phase)
+    2. (v1.28) 暂停, 将 'run_projectile_phase' 标志设为 True, 重定向回 /game
     """
     game_state_obj = GameState.from_dict(session.get('game_state'))
     player_mech = game_state_obj.get_player_mech()
@@ -246,8 +245,6 @@ def end_turn():
 
     log.append("-" * 20)
     log.append("> 玩家回合结束。")
-
-    # [v_MODIFIED] all_attacks_to_resolve 被移除, 攻击在各自阶段内结算
 
     entities_to_process = list(game_state_obj.entities.values())
     game_ended_mid_turn = False
@@ -281,6 +278,11 @@ def end_turn():
                             log.append(f"> [严重错误] AI 攻击字典数据不完整: {attack}")
                             continue
 
+                        # [v1.34 修复] 检查攻击者是否已被摧毁 (例如, 被发射时拦截)
+                        if attacker_entity.status == 'destroyed':
+                            log.append(f"> [结算] 攻击者 {attacker_entity.name} 已被摧毁，攻击取消！")
+                            continue
+
                         if defender_entity.status == 'destroyed':
                             log.append(f"> [AI] {attacker_entity.name} 的目标 {defender_entity.name} 已被摧毁。")
                             continue
@@ -293,6 +295,9 @@ def end_turn():
                             if isinstance(attacker_entity, Mech):
                                 back_attack = is_back_attack(attacker_entity.pos, defender_entity.pos,
                                                              defender_entity.orientation)
+                            # [v1.31 修复] 拦截攻击 (attacker=Mech, defender=Projectile) 不会触发背击
+                            elif isinstance(defender_entity, Projectile):
+                                back_attack = False
 
                         target_part_slot = None
 
@@ -335,6 +340,7 @@ def end_turn():
                                     log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
 
                         else:
+                            # [v1.31 修复] 目标是 Projectile 或 Drone
                             target_part_slot = 'core'
                             log.append(f"> 攻击自动瞄准 [{defender_entity.name}] 的核心。")
 
@@ -377,46 +383,42 @@ def end_turn():
                 log.extend(entity_log)
                 # (如果无人机未来有攻击, 也应在这里结算)
 
-    # --- 阶段 2: 延迟动作阶段 (抛射物) ---
-    if not game_ended_mid_turn:
-        log.append("--- AI 机甲阶段结束 ---")
-        # [修改] 移除此阶段的逻辑，它被移到了 /run_projectile_phase
+    # --- [v1.28] 阶段 1 结束 ---
+    log.append("--- AI 机甲阶段结束 ---")
 
-    # --- 阶段 3: 回合结束 ---
-    if not game_state_obj.game_over:
-        # [修改] 移除此阶段的逻辑
-        pass
-
-    # [修改] 设置标志，让 JS 知道下一步该做什么
-    session['run_projectile_phase'] = True
     session['game_state'] = game_state_obj.to_dict()
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
     session['visual_feedback_events'] = game_state_obj.visual_events
+
+    # [v1.28] 设置标志, 让 /game 在重定向后触发 JS 暂停, 然后再调用 /run_projectile_phase
+    if not game_ended_mid_turn:
+        session['run_projectile_phase'] = True
+
     return redirect(url_for('game'))
 
 
 @app.route('/run_projectile_phase', methods=['POST'])
 def run_projectile_phase():
     """
-    [新增] AJAX 端点，用于运行延迟的抛射物阶段并结束回合。
-    由 game.html 中的 JS 在短暂延迟后调用。
+    [v1.28 新增]
+    在 AI 机甲阶段之后由 JS 调用的独立路由。
+    流程:
+    1. 延迟动作阶段 (所有 '延迟' 抛射物 (玩家和AI的) 移动并攻击, 立即结算攻击)
+    2. 回合重置
     """
-    if 'game_state' not in session:
-        return jsonify({'success': False, 'message': 'Session expired.'})
-
     game_state_obj = GameState.from_dict(session.get('game_state'))
     log = session.get('combat_log', [])
 
-    if not session.get('run_projectile_phase', False):
-        log.append("> [警告] 抛射物阶段已运行。")
-        session['combat_log'] = log
-        return jsonify({'success': True})  # 已经完成，直接重载
+    if game_state_obj.game_over:
+        return redirect(url_for('game'))
 
-    log.append("--- 延迟动作阶段 (抛射物) ---")
     game_ended_mid_turn = False
 
-    # --- [从 /end_turn 复制的阶段 2 逻辑] ---
+    # --- 阶段 2: 延迟动作阶段 (抛射物) ---
+    log.append("--- 延迟动作阶段 (抛射物) ---")
+
+    # 重新获取实体列表, 因为 '立即' 动作可能生成了新的抛射物
     entities_to_process = list(game_state_obj.entities.values())
 
     for entity in entities_to_process:
@@ -426,6 +428,7 @@ def run_projectile_phase():
         if entity.entity_type == 'projectile' and entity.status == 'ok':
             # [v_MODIFIED] 运行 '延迟' 逻辑
             entity_log, attacks = run_projectile_logic(entity, game_state_obj, '延迟')
+            log.extend(entity_log)  # [v1.29 修复] 确保移动日志被记录
 
             # [v_MODIFIED] 立即结算此抛射物的攻击
             for attack in attacks:
@@ -439,11 +442,11 @@ def run_projectile_phase():
                     log.append(f"> [严重错误] 抛射物攻击字典数据不完整: {attack}")
                     continue
 
-                # [新增] 检查攻击者（例如导弹）是否在结算前被拦截
+                # [v1.31 修复] 检查攻击者是否已被摧毁 (例如, 被拦截)
                 if attacker_entity.status == 'destroyed':
                     log.append(f"> [结算] 攻击者 {attacker_entity.name} 已被摧毁，攻击取消！")
                     continue
-                # [修改] 现有的检查
+
                 if defender_entity.status == 'destroyed':
                     log.append(f"> [结算] {attacker_entity.name} 的目标 {defender_entity.name} 已被摧毁。")
                     continue
@@ -456,6 +459,9 @@ def run_projectile_phase():
                     if isinstance(attacker_entity, Mech):
                         back_attack = is_back_attack(attacker_entity.pos, defender_entity.pos,
                                                      defender_entity.orientation)
+                    # [v1.31 修复] 拦截攻击 (attacker=Mech, defender=Projectile) 不会触发背击
+                    elif isinstance(defender_entity, Projectile):
+                        back_attack = False
 
                 target_part_slot = None
 
@@ -482,6 +488,7 @@ def run_projectile_phase():
                             log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
 
                 else:
+                    # [v1.31 修复] 目标是 Projectile 或 Drone
                     target_part_slot = 'core'
                     log.append(f"> 攻击自动瞄准 [{defender_entity.name}] 的核心。")
 
@@ -524,17 +531,13 @@ def run_projectile_phase():
                     game_ended_mid_turn = True
                     break  # 停止结算攻击
 
-            # [v_MODIFIED] 无论是否攻击, 都记录日志
-            # (run_projectile_logic 会就地修改 log)
-            log.extend(entity_log)
-
-    # --- [从 /end_turn 复制的阶段 3 逻辑] ---
+    # --- 阶段 3: 回合结束 ---
     if not game_state_obj.game_over:
         log.append(
             "> AI回合结束。请开始你的回合。" if game_state_obj.game_mode != 'range' else "> [靶场模式] 请开始你的回合。")
         log.append("-" * 20)
 
-        player_mech = game_state_obj.get_player_mech()
+        player_mech = game_state_obj.get_player_mech()  # [v1.28] 重新获取
         if player_mech:
             player_mech.player_ap = 2
             player_mech.player_tp = 1
@@ -547,12 +550,11 @@ def run_projectile_phase():
 
         game_state_obj.check_game_over()
 
-    session.pop('run_projectile_phase', None)  # [修改] 清除标志
     session['game_state'] = game_state_obj.to_dict()
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
     session['visual_feedback_events'] = game_state_obj.visual_events
-    return jsonify({'success': True})
+    return redirect(url_for('game'))
 
 
 @app.route('/respawn_ai', methods=['POST'])
@@ -788,7 +790,8 @@ def execute_main_action(game_state, player_mech, action, action_name, part_slot)
     player_mech.actions_used_this_turn.append((part_slot, action_name))
 
     # [v_MODIFIED] 弹药消耗逻辑移至 /execute_attack 以处理【齐射】
-    if action.ammo > 0 and action.action_type != '抛射':
+    # [v1.30] 拦截动作的弹药在 game_logic.py 中消耗
+    if action.ammo > 0 and action.action_type != '抛射' and not action.effects.get("interceptor"):
         game_state.ammo_counts[ammo_key] -= 1
         log.append(f"> [{action.name}] 消耗 1 弹药，剩余 {game_state.ammo_counts[ammo_key]}。")
 
@@ -835,10 +838,11 @@ def move_player():
 @app.route('/execute_attack', methods=['POST'])
 def execute_attack():
     """
-    [v_MODIFIED]
+    [v_MODIFIED v1.34]
     (AJAX) 处理玩家的“攻击”动作（近战、射击、抛射）。
     - 增加了【齐射】 (Salvo) 逻辑。
     - 增加了【立即】 (Immediate) 抛射物结算逻辑。
+    - 修复了拦截逻辑
     """
     data = request.get_json()
     game_state_obj, player_mech, error_response = _get_game_state_and_player(data)
@@ -940,76 +944,88 @@ def execute_attack():
                     log.append(f"> [错误] 生成抛射物 {attack_action.projectile_to_spawn} 失败！")
                     continue
 
-                # [v1.33 新增] 检查发射时的拦截
-                # 无论抛射物是'立即'还是'延迟'，都在其生成时检查拦截
-                intercept_log, intercept_attacks = check_interception(projectile_obj, game_state_obj)
-                if intercept_attacks:
-                    log.extend(intercept_log)
-                    attacks_to_resolve_list.extend(intercept_attacks)
+                # [v1.34 修复] 检查抛射物是否有'立即'动作
+                has_immediate_action = projectile_obj.get_action_by_timing('立即')[0] is not None
 
-                # [v_MODIFIED] 立即检查 '立即' 动作
+                # [v1.34 修复] 只有 '延迟' 抛射物 (如导弹) 才在发射时检查拦截
+                if not has_immediate_action:
+                    intercept_log, intercept_attacks = check_interception(projectile_obj, game_state_obj)
+                    if intercept_attacks:
+                        log.extend(intercept_log)
+                        attacks_to_resolve_list.extend(intercept_attacks)
+
+                # [v_MODIFIED] 立即检查 '立即' 动作 (例如火箭弹)
                 entity_log, attacks = run_projectile_logic(projectile_obj, game_state_obj, '立即')
                 log.extend(entity_log)
                 # [v1.33 修复] 将 '立即' 攻击添加到同一个列表
                 attacks_to_resolve_list.extend(attacks)
 
-                # [v_MODIFIED] 立即结算 '立即' 动作的攻击
-                # [v1.33 修复] 循环遍历 *所有* 待处理的攻击 (拦截 + 立即)
-                for attack in attacks_to_resolve_list:
-                    if not isinstance(attack, dict): continue
-                    attacker = attack.get('attacker')
-                    defender = attack.get('defender')
-                    action = attack.get('action')
-                    if not attacker or not defender or not action: continue
+            # [v_MODIFIED] 立即结算 '立即' 动作的攻击
+            # [v1.33 修复] 循环遍历 *所有* 待处理的攻击 (拦截 + 立即)
+            for attack in attacks_to_resolve_list:
+                if not isinstance(attack, dict): continue
+                attacker = attack.get('attacker')
+                defender = attack.get('defender')
+                action = attack.get('action')
+                if not attacker or not defender or not action: continue
 
-                    log.append(f"--- [立即引爆] 结算 ({attacker.name} -> {action.name}) ---")
+                # [v1.34 修复] 检查攻击者是否已被摧毁
+                if attacker.status == 'destroyed':
+                    log.append(f"> [结算] 攻击者 {attacker.name} 已被摧毁，攻击取消！")
+                    continue
+                # [v1.34 修复] 检查防御者是否已被摧毁 (例如被同一个齐射中的前一枚火箭弹)
+                if defender.status == 'destroyed':
+                    log.append(f"> [结算] 目标 {defender.name} 已被摧毁，攻击跳过。")
+                    continue
 
-                    back_attack = False  # 抛射物不计算背击
-                    target_part_slot = None
+                log.append(f"--- [立即引爆] 结算 ({attacker.name} -> {action.name}) ---")
 
-                    if isinstance(defender, Mech):
-                        hit_roll_result = roll_black_die()
-                        log.append(f"> 投掷部位骰结果: 【{hit_roll_result}】")
-                        if hit_roll_result == 'any':
-                            valid_parts = [s for s, p in defender.parts.items() if p and p.status != 'destroyed']
-                            target_part_slot = random.choice(valid_parts) if valid_parts else 'core'
-                            log.append(f"> 抛射物随机命中: [{target_part_slot}]。")
-                        elif defender.parts.get(hit_roll_result) and defender.parts[
-                            hit_roll_result].status != 'destroyed':
-                            target_part_slot = hit_roll_result
-                        else:
-                            target_part_slot = 'core'
-                            log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
+                back_attack = False  # 抛射物不计算背击
+                target_part_slot = None
+
+                if isinstance(defender, Mech):
+                    hit_roll_result = roll_black_die()
+                    log.append(f"> 投掷部位骰结果: 【{hit_roll_result}】")
+                    if hit_roll_result == 'any':
+                        valid_parts = [s for s, p in defender.parts.items() if p and p.status != 'destroyed']
+                        target_part_slot = random.choice(valid_parts) if valid_parts else 'core'
+                        log.append(f"> 抛射物随机命中: [{target_part_slot}]。")
+                    elif defender.parts.get(hit_roll_result) and defender.parts[
+                        hit_roll_result].status != 'destroyed':
+                        target_part_slot = hit_roll_result
                     else:
                         target_part_slot = 'core'
-                        log.append(f"> 攻击自动瞄准 [{defender.name}] 的核心。")
+                        log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
+                else:
+                    target_part_slot = 'core'
+                    log.append(f"> 攻击自动瞄准 [{defender.name}] 的核心。")
 
-                    attack_log, result, overflow_data, dice_roll_details = resolve_attack(
-                        attacker_entity=attacker,
-                        defender_entity=defender,
-                        action=action,
-                        target_part_name=target_part_slot,
-                        is_back_attack=False,  # 抛射物不计算背击
-                        chosen_effect=None
-                    )
-                    log.extend(attack_log)
+                attack_log, result, overflow_data, dice_roll_details = resolve_attack(
+                    attacker_entity=attacker,
+                    defender_entity=defender,
+                    action=action,
+                    target_part_name=target_part_slot,
+                    is_back_attack=False,  # 抛射物不计算背击
+                    chosen_effect=None
+                )
+                log.extend(attack_log)
 
-                    if dice_roll_details:
-                        game_state_obj.add_visual_event(
-                            'dice_roll',
-                            attacker_name=attacker.name,
-                            defender_name=defender.name,
-                            action_name=action.name,
-                            details=dice_roll_details
-                        )
+                if dice_roll_details:
                     game_state_obj.add_visual_event(
-                        'attack_result',
-                        defender_pos=defender.pos,
-                        result_text=result
+                        'dice_roll',
+                        attacker_name=attacker.name,
+                        defender_name=defender.name,
+                        action_name=action.name,
+                        details=dice_roll_details
                     )
-                    game_state_obj.check_game_over()
-                    if game_state_obj.game_over:
-                        break  # 如果游戏结束, 停止结算
+                game_state_obj.add_visual_event(
+                    'attack_result',
+                    defender_pos=defender.pos,
+                    result_text=result
+                )
+                game_state_obj.check_game_over()
+                if game_state_obj.game_over:
+                    break  # 如果游戏结束, 停止结算
 
             session['game_state'] = game_state_obj.to_dict()
             if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
@@ -1347,7 +1363,3 @@ def get_attack_range():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-
-
-
