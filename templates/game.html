@@ -1517,7 +1517,7 @@
 
     try {
         // --- 1. 初始化 Firebase ---
-        const firebaseConfig = JSON.parse('{{ firebase_config | tojson | safe }}');
+        const firebaseConfig = JSON.parse('{{ firebase_config | safe }}');
         const appId = '{{ app_id | safe }}';
         const auth_token = '{{ auth_token | safe }}';
 

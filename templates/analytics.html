@@ -145,8 +145,9 @@
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, onSnapshot, collection, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // 从 Flask 模板中读取配置
-        const firebaseConfig = JSON.parse('{{ firebase_config | tojson | safe }}');
+         // 从 Flask 模板中读取配置
+        // [FIX] 移除多余的 | tojson 过滤器
+        const firebaseConfig = JSON.parse('{{ firebase_config | safe }}');
         const appId = '{{ app_id | safe }}';
         const auth_token = '{{ auth_token | safe }}';
         const analyticsPath = `/artifacts/${appId}/public/data/analytics`;
