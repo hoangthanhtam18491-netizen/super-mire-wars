@@ -52,19 +52,52 @@ def index():
     return render_template('index.html', update_notes=update_notes, rules_html=rules_html)
 
 
+# [NEW] 新增的统计数据页面路由
+@main_bp.route('/analytics')
+def analytics():
+    """渲染分析数据统计页面。"""
+
+    # [NEW] 注入 Firebase 环境变量，以便 JS 可以使用它们
+    firebase_config = os.environ.get('__firebase_config', '{}')
+    app_id = os.environ.get('__app_id', 'default-app-id')
+    auth_token = os.environ.get('__initial_auth_token', 'undefined')
+
+    return render_template(
+        'analytics.html',
+        firebase_config=firebase_config,
+        app_id=app_id,
+        auth_token=auth_token
+    )
+
+
 @main_bp.route('/hangar')
 def hangar():
     """渲染机库页面，用于机甲组装和模式选择。"""
-    player_left_arms = {k: v for k, v in PLAYER_LEFT_ARMS.items()}
+    # [MODIFIED] 过滤掉所有包含“（弃置）”的部件
+    player_left_arms = {k: v for k, v in PLAYER_LEFT_ARMS.items() if '（弃置）' not in k}
+    player_right_arms = {k: v for k, v in PLAYER_RIGHT_ARMS.items() if '（弃置）' not in k}
+    player_cores = {k: v for k, v in PLAYER_CORES.items() if '（弃置）' not in k}
+    player_legs = {k: v for k, v in PLAYER_LEGS.items() if '（弃置）' not in k}
+    player_backpacks = {k: v for k, v in PLAYER_BACKPACKS.items() if '（弃置）' not in k}
+
+    # [NEW] 注入 Firebase 环境变量，以便 JS 可以使用它们
+    # 我们使用 os.environ.get 来安全地从运行环境中读取这些变量
+    firebase_config = os.environ.get('__firebase_config', '{}')
+    app_id = os.environ.get('__app_id', 'default-app-id')
+    auth_token = os.environ.get('__initial_auth_token', 'undefined')
 
     return render_template(
         'hangar.html',
-        cores=PLAYER_CORES,
-        legs=PLAYER_LEGS,
+        cores=player_cores,
+        legs=player_legs,
         left_arms=player_left_arms,
-        right_arms=PLAYER_RIGHT_ARMS,
-        backpacks=PLAYER_BACKPACKS,
-        ai_loadouts=AI_LOADOUTS
+        right_arms=player_right_arms,
+        backpacks=player_backpacks,
+        ai_loadouts=AI_LOADOUTS,
+        # [NEW] 将配置传递给模板
+        firebase_config=firebase_config,
+        app_id=app_id,
+        auth_token=auth_token
     )
 
 

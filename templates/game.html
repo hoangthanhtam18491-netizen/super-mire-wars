@@ -1,7 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>机甲战棋游戏</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>机甲战棋游戏</title>
+
+    <!-- [MODIFIED] 导入 Firebase SDK -->
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
+
     <style>
         :root {
             --bg-color: #1a202c; --border-color: #4a5568; --text-color: #e2e8f0; --primary-color: #4299e1;
@@ -380,7 +388,8 @@
                 {% endfor %}
             </tbody>
         </table>
-        <div id="phase-timing-controls"><h4>选择时机</h4><div class="selector-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"><button id="timing-近战" onclick="selectTiming('近战')">近战</button><button id="timing-射击" onclick="selectTiming('射击')">射击</button><button id="timing-移动" onclick="selectTiming('移动')">移动</button><button id="timing-抛射" onclick="selectTiming('抛射')">抛射</button></div><button class="btn" style="margin-top: 1rem; background-color: var(--primary-color);" onclick="confirmTiming()">确认时机</button></div>
+        <!-- [MODIFIED] 添加了 '快速' 动作 -->
+        <div id="phase-timing-controls"><h4>选择时机</h4><div class="selector-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"><button id="timing-近战" onclick="selectTiming('近战')">近战</button><button id="timing-射击" onclick="selectTiming('射击')">射击</button><button id="timing-移动" onclick="selectTiming('移动')">移动</button><button id="timing-抛射" onclick="selectTiming('抛射')">抛射</button><button id="timing-快速" onclick="selectTiming('快速')" style="grid-column: span 2;">快速</button></div><button class="btn" style="margin-top: 1rem; background-color: var(--primary-color);" onclick="confirmTiming()">确认时机</button></div>
         <div id="phase-stance-controls"><h4>姿态选择</h4><div class="selector-group" style="display: flex;"><button id="stance-defense" class="{{ 'active' if player_mech.stance == 'defense' else '' }}" onclick="changeStance('defense')">防御</button><button id="stance-agile" class="{{ 'active' if player_mech.stance == 'agile' else '' }}" onclick="changeStance('agile')">机动</button><button id="stance-attack" class="{{ 'active' if player_mech.stance == 'attack' else '' }}" onclick="changeStance('attack')">攻击</button></div><button class="btn" style="margin-top: 1rem; background-color: var(--primary-color);" onclick="confirmStance()">确认姿态</button></div>
         <div id="phase-adjustment-controls"><h4>调整时点动作 (TP)</h4><div id="action-adjust-move" class="action-item" onclick="selectAction('调整移动', 0, 'TP', '', 'system')"><span>调整移动</span><span class="action-cost">1 TP</span></div><div id="action-change-orientation" class="action-item" onclick="selectAction('仅转向', 0, 'TP', '', 'system')"><span>仅转向</span><span class="action-cost">1 TP</span></div><button class="btn" style="margin-top: 1rem;" onclick="skipAdjustment()">跳过调整</button></div>
         <div id="phase-main-controls"><h4>行动时点动作 (AP)</h4>
@@ -394,12 +403,20 @@
             {% set ammo_key = (player_mech.id, part_slot, action.name) %}
             {% set current_ammo = game.ammo_counts.get(ammo_key, 0) %}
             {% set out_of_ammo = (action.ammo > 0 and current_ammo <= 0) %}
+            <!-- [MODIFIED] 弃置动作的特殊处理 -->
+            {% set is_jettison = action.name == '【弃置】' %}
+            {% set jettison_target_slot = part_slot %} <!-- 弃置动作总是针对它所在的部件 -->
             <div class="action-item {{ 'disabled' if is_used or out_of_ammo else '' }}"
                  id="action-{{ action.name }}-{{ part_slot }}"
                  data-action-type="{{ action.action_type }}"
                  {% if not is_used and not out_of_ammo %}
-                 onclick="selectAction('{{ action.name }}', {{ action.range_val }}, '{{ action.action_type }}', '{{ action.cost }}', '{{ part_slot }}')"
-                 data-original-onclick="selectAction('{{ action.name }}', {{ action.range_val }}, '{{ action.action_type }}', '{{ action.cost }}', '{{ part_slot }}')"
+                    {% if is_jettison %}
+                        onclick="initiateJettison('{{ jettison_target_slot }}')"
+                        data-original-onclick="initiateJettison('{{ jettison_target_slot }}')"
+                    {% else %}
+                        onclick="selectAction('{{ action.name }}', {{ action.range_val }}, '{{ action.action_type }}', '{{ action.cost }}', '{{ part_slot }}')"
+                        data-original-onclick="selectAction('{{ action.name }}', {{ action.range_val }}, '{{ action.action_type }}', '{{ action.cost }}', '{{ part_slot }}')"
+                    {% endif %}
                  {% endif %}
                  title="{{ '本回合已使用' if is_used else ('弹药耗尽' if out_of_ammo else '') }}">
                 <span>
@@ -616,6 +633,10 @@
     const playerEntity = allEntities.find(e => e.id === playerID) || {};
     // [新增] 查找AI实体
     const aiEntity = allEntities.find(e => e.controller === 'ai' && e.entity_type === 'mech' && e.status !== 'destroyed');
+
+    // [NEW] 从模板中获取分析数据
+    const playerLoadout = {{ player_loadout | tojson | safe }};
+    const aiOpponentName = {{ ai_opponent_name | tojson | safe }};
 
     const gameState = {
         turnPhase: playerEntity.turn_phase || 'timing',
@@ -877,6 +898,11 @@
     }
 
     function showGameOverModal(status) {
+         // [MODIFIED] 调用 Firebase 分析函数，并传递所需数据
+         if (window.recordGameOutcome) {
+            window.recordGameOutcome(status, playerLoadout, aiOpponentName);
+         }
+
          let modal;
          if (status === 'ai_defeated_in_range') {
              modal = document.getElementById('range-continue-modal');
@@ -909,7 +935,8 @@
         if (gameState.turnPhase === 'timing') {
             document.querySelectorAll('#phase-timing-controls button').forEach(btn => {
                 // [BUG 修复] 检查 playerEntity.timing (来自JS状态) 而不是 gameState.timing
-                btn.classList.toggle('active', btn.innerText === playerEntity.timing);
+                // [MODIFIED] 修正 textContent/innerText
+                btn.classList.toggle('active', btn.textContent === playerEntity.timing);
             });
         }
         if (gameState.turnPhase === 'stance') {
@@ -980,7 +1007,8 @@
         if (type === '移动' || name === '调整移动') {
             url = '/api/get_move_range';
         }
-        else if (type === '近战' || type === '射击' || type === '抛射') { // [v1.23]
+        // [MODIFIED] 添加 '快速' 动作
+        else if (type === '近战' || type === '射击' || type === '抛射' || type === '快速') {
             url = '/api/get_attack_range';
         }
         else if (name === '仅转向') {
@@ -1018,6 +1046,18 @@
                 });
             });
         }
+    }
+
+    // [MODIFIED] 添加弃置动作的专用处理函数
+    function initiateJettison(partSlot) {
+        if (gameState.pendingEffect) return;
+        clearHighlights();
+
+        // [v_REFACTOR_FIX] 添加 /api/ 前缀
+        postAndReload('/api/jettison_part', {
+            action_name: '【弃置】',
+            part_slot: partSlot
+        });
     }
 
     // [v1.23] 区分 '攻击' (以实体为目标) 和 '发射' (以地块为目标)
@@ -1462,6 +1502,109 @@
         }
     }
 
+</script>
+
+<!-- [MODIFIED] Firebase Analytics 脚本 -->
+<script type="module">
+    // 导入 Firebase 模块
+    import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    // [MODIFIED] 导入更多 firestore 功能
+    import { getFirestore, doc, setDoc, increment, writeBatch, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    let db, analyticsPath;
+    let isAuthReady = false;
+
+    try {
+        // --- 1. 初始化 Firebase ---
+        const firebaseConfig = JSON.parse('{{ firebase_config | tojson | safe }}');
+        const appId = '{{ app_id | safe }}';
+        const auth_token = '{{ auth_token | safe }}';
+
+        const app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        const auth = getAuth(app);
+        setLogLevel('Debug');
+
+        analyticsPath = `/artifacts/${appId}/public/data/analytics`;
+
+        // --- 2. 认证 ---
+        if (auth_token && auth_token !== 'undefined' && auth_token !== 'None') {
+            await signInWithCustomToken(auth, auth_token);
+        } else {
+            await signInAnonymously(auth);
+        }
+        isAuthReady = true;
+        console.log("Firebase (Analytics) 已准备就绪。");
+
+    } catch (error) {
+        console.error("Firebase (Analytics) 初始化失败:", error);
+    }
+
+    // --- 3. 定义分析函数并附加到 window ---
+    // [MODIFIED] 扩展函数以接受新数据
+    window.recordGameOutcome = async (status, playerLoadout, aiName) => {
+        if (!isAuthReady || !db) {
+            console.warn("Firebase 尚未准备好，跳过游戏结果分析。");
+            return;
+        }
+
+        let generalOutcomeKey = null; // 用于 game_outcomes (player_wins / ai_wins)
+        let specificOutcomeKey = null; // 用于 ai_matchups (player_wins / player_losses)
+
+        if (status === 'player_win') {
+            generalOutcomeKey = 'player_wins';
+            specificOutcomeKey = 'player_wins';
+        } else if (status === 'ai_win') {
+            generalOutcomeKey = 'ai_wins';
+            specificOutcomeKey = 'player_losses';
+        } else {
+            // 不记录 'ai_defeated_in_range' 或其他状态
+            return;
+        }
+
+        try {
+            // 使用批量写入来合并所有数据库操作
+            const batch = writeBatch(db);
+
+            // 1. 记录全局胜/负
+            const outcomesDocRef = doc(db, analyticsPath, "game_outcomes");
+            batch.set(outcomesDocRef, {
+                [generalOutcomeKey]: increment(1)
+            }, { merge: true });
+
+            // 2. 记录针对特定AI的胜/负
+            // 清理AI名称，使其可以用作 Firestore 文档的键 (替换掉非法字符)
+            const aiNameKey = aiName.replace(/[.\#[\]$]/g, '_');
+            const aiMatchupRef = doc(db, analyticsPath, "ai_matchups");
+            // 使用点符号来更新嵌套对象
+            batch.set(aiMatchupRef, {
+                [aiNameKey]: {
+                    [specificOutcomeKey]: increment(1)
+                }
+            }, { merge: true });
+
+            // 3. 记录胜利时的部件配置 (仅当玩家胜利时)
+            if (status === 'player_win' && playerLoadout) {
+                // 创建一个指向 'winning_loadouts' 集合中新文档的引用
+                const winningLoadoutRef = doc(collection(db, analyticsPath, "winning_loadouts"));
+
+                // 添加一个时间戳
+                const loadoutData = {
+                    ...playerLoadout,
+                    timestamp: serverTimestamp()
+                };
+                batch.set(winningLoadoutRef, loadoutData);
+            }
+
+            // 提交所有更改
+            await batch.commit();
+            console.log(`分析数据已记录: ${generalOutcomeKey}, ${aiNameKey}.${specificOutcomeKey}`);
+
+        } catch (error) {
+            console.error("记录游戏结果失败:", error);
+        }
+    };
 </script>
 </body>
 </html>

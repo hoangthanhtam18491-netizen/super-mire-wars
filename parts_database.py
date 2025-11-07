@@ -83,6 +83,11 @@ EFFECT_FLIGHT_MOVEMENT = {
     "logic": {"flight_movement": True},
     "name": "【空中移动】"
 }
+# [新增] 弃置效果
+EFFECT_JETTISON = {
+    "logic": {"jettison_part": True},
+    "name": "【弃置】"
+}
 # [新增] 抛射效果
 EFFECT_SALVO_2 = {
     "logic": {"salvo": 2},
@@ -135,6 +140,9 @@ ACTION_SUSHE = Action(name="速射", action_type="射击", cost="M", dice="4黄1
                         effects=build_effects(EFFECT_TWO_HANDED_RANGE_2))
 ACTION_DIANSHE_ZHAN = Action(name="点射(战)", action_type="射击", cost="S", dice="1黄2红", range_val=6)
 
+# [新增] 快速动作 (Quick)
+ACTION_JETTISON = Action(name="【弃置】", action_type="快速", cost="S", dice="", range_val=0,
+                         effects=build_effects(EFFECT_JETTISON))
 
 # 移动 (Movement)
 ACTION_BENPAO = Action(name="奔跑", action_type="移动", cost="M", dice="", range_val=4)
@@ -236,6 +244,25 @@ PROJECTILE_TEMPLATES = {
 }
 
 
+# --- [新增] 通用动作 (Generic Actions) ---
+# [v_MODIFIED] 动作定义移回 parts_database.py
+ACTION_PUNCH_KICK = Action(
+    name="拳打脚踢",
+    action_type="近战",
+    cost="M",
+    dice="2红",
+    range_val=1
+)
+
+# 定义通用动作及其解锁所需的部件槽位
+# 格式: {ActionObject: ['required_slot_1', 'required_slot_2', ...]}
+# 机甲 *至少需要一个* 列表中的部件 (且未被摧毁) 才能使用该动作。
+GENERIC_ACTIONS = {
+    ACTION_PUNCH_KICK: ['left_arm', 'right_arm', 'legs']
+}
+# --- 通用动作结束 ---
+
+
 # --- 玩家可用部件 ---
 PLAYER_CORES = {
     'RT-06 "泥沼"核心': Part(name='RT-06 "泥沼"核心', armor=6, structure=2, electronics=2,
@@ -252,12 +279,16 @@ PLAYER_LEGS = {
                             actions=[ACTION_BENPAO],
                            image_url='static/images/parts/RL-08.png'),
 }
-PLAYER_LEFT_ARMS = {'ML-32 双联发射器 + CC-3 格斗刀': Part(name='ML-32 双联发射器 + CC-3 格斗刀', armor=4, structure=0, parry=1,
+PLAYER_LEFT_ARMS = {
+    'ML-32 双联发射器 + CC-3 格斗刀': Part(name='ML-32 双联发射器 + CC-3 格斗刀', armor=4, structure=0, parry=1,
                        actions=[ACTION_CIJI, ACTION_LAUNCH_GUIDED_MISSILE],  tags=["【空手】"],
                            image_url='static/images/parts/CC-3.png'),
-    '55型 轻盾 + CC-6 格斗刀': Part(name='55型 轻盾 + CC-6 格斗刀', armor=5, structure=0, parry=2, actions=[ACTION_DUNJI, ACTION_PIKAN],
-                       tags=["【空手】"],
+    '55型 轻盾 + CC-6 格斗刀': Part(name='55型 轻盾 + CC-6 格斗刀', armor=5, structure=0, parry=2, actions=[ACTION_DUNJI, ACTION_PIKAN, ACTION_JETTISON],
+                       tags=["【手持】"],
                            image_url='static/images/parts/CC-6.png'),
+    '55型 轻盾 + CC-6 格斗刀（弃置）': Part(name='55型 轻盾 + CC-6 格斗刀（弃置）', armor=5, structure=0, parry=2, actions=[ACTION_DUNJI],
+                       tags=["【空手】"],
+                           image_url='static/images/parts/CC-6Q.png'),
     'R-20 肩置磁轨炮（左）': Part(name='R-20 肩置磁轨炮（左）', armor=4, structure=0, parry=0, actions=[ACTION_DIANSHE_CI],
                        tags=["【空手】"],
                            image_url='static/images/parts/R-20L.png'),
@@ -267,34 +298,54 @@ PLAYER_LEFT_ARMS = {'ML-32 双联发射器 + CC-3 格斗刀': Part(name='ML-32 �
     '55型 轻盾': Part(name='55型 轻盾', armor=5, structure=0, parry=2, actions=[ACTION_DUNJI],
                        tags=["【空手】"],
                            image_url='static/images/parts/55.png'),
-    '55 型轻盾 + PC-9 霰弹枪（左）': Part(name='55 型轻盾 + PC-9 霰弹枪（左）', armor=5, structure=0, parry=2, actions=[ACTION_DIANSHE_XIAN],
+    '55 型轻盾 + PC-9 霰弹枪（左）': Part(name='55 型轻盾 + PC-9 霰弹枪（左）', armor=5, structure=0, parry=2, actions=[ACTION_DIANSHE_XIAN, ACTION_JETTISON],
                        tags=["【手持】"],
                            image_url='static/images/parts/PC-9L.png'),
-    'G/AC-6 火箭筒': Part(name='G/AC-6 火箭筒', armor=4, structure=0, parry=0, actions=[ACTION_LAUNCH_ROCKET],
+    '55 型轻盾 + PC-9 霰弹枪（左）（弃置）': Part(name='55 型轻盾 + PC-9 霰弹枪（左）（弃置）', armor=5, structure=0, parry=2, actions=[ACTION_DUNJI],
+                       tags=["【空手】"],
+                           image_url='static/images/parts/PC-9LQ.png'),
+    'G/AC-6 火箭筒': Part(name='G/AC-6 火箭筒', armor=4, structure=0, parry=0, actions=[ACTION_LAUNCH_ROCKET, ACTION_JETTISON],
                        tags=["【手持】"],
                            image_url='static/images/parts/GAC-6.png'),
+    'G/AC-6 火箭筒（弃置）': Part(name='G/AC-6 火箭筒（弃置）', armor=4, structure=0, parry=0,
+                       tags=["【空手】"],
+                           image_url='static/images/parts/GAC-6Q.png'),
 }
 PLAYER_RIGHT_ARMS = {
-    'AC-32 自动步枪': Part(name='AC-32 自动步枪', armor=4, structure=0, actions=[ACTION_DIANSHE],
+    'AC-32 自动步枪': Part(name='AC-32 自动步枪', armor=4, structure=0, actions=[ACTION_DIANSHE, ACTION_JETTISON],
                          tags=["【手持】"],
                            image_url='static/images/parts/AC-32.png'),
-    'AC-35 狙击步枪': Part(name='AC-35 狙击步枪', armor=4, structure=0, actions=[ACTION_JUJI], tags=["【手持】"],
+    'AC-32 自动步枪（弃置）': Part(name='AC-32 自动步枪（弃置）', armor=4, structure=0,
+                         tags=["【空手】"],
+                           image_url='static/images/parts/AC-32Q.png'),
+    'AC-35 狙击步枪': Part(name='AC-35 狙击步枪', armor=4, structure=0, actions=[ACTION_JUJI, ACTION_JETTISON], tags=["【手持】"],
                            image_url='static/images/parts/AC-35.png'),
+    'AC-35 狙击步枪（弃置）': Part(name='AC-35 狙击步枪', armor=4, structure=0, tags=["【空手】"],
+                           image_url='static/images/parts/AC-35Q.png'),
     'R-20 肩置磁轨炮（右）': Part(name='R-20 肩置磁轨炮（右）', armor=4, structure=0, parry=0, actions=[ACTION_DIANSHE_CI],
                          tags=["【空手】"],
                            image_url='static/images/parts/R-20R.png'),
-    'AC-39 战术步枪': Part(name='AC-39 战术步枪', armor=4, structure=0, actions=[ACTION_SUSHE, ACTION_DIANSHE_ZHAN],
+    'AC-39 战术步枪': Part(name='AC-39 战术步枪', armor=4, structure=0, actions=[ACTION_SUSHE, ACTION_DIANSHE_ZHAN, ACTION_JETTISON],
                          tags=["【手持】"],
                            image_url='static/images/parts/AC-39.png'),
+    'AC-39 战术步枪（弃置）': Part(name='AC-39 战术步枪（弃置）', armor=4, structure=0,
+                         tags=["【空手】"],
+                           image_url='static/images/parts/AC-39Q.png'),
     '63型 臂炮 + CC-20 单手剑（右）': Part(name='63型 臂炮 + CC-20 单手剑（右）', armor=4, structure=0, parry=2,
                          actions=[ACTION_HUIZHAN, ACTION_SUSHE_BIPAO],tags=["【空手】"],
                            image_url='static/images/parts/CC-20R.png'),
-    '55 型轻盾 + PC-9 霰弹枪（右）': Part(name='55 型轻盾 + PC-9 霰弹枪（右）', armor=5, structure=0, parry=2, actions=[ACTION_DIANSHE_XIAN],
+    '55 型轻盾 + PC-9 霰弹枪（右）': Part(name='55 型轻盾 + PC-9 霰弹枪（右）', armor=5, structure=0, parry=2, actions=[ACTION_DIANSHE_XIAN, ACTION_JETTISON],
                        tags=["【手持】"],
                            image_url='static/images/parts/PC-9R.png'),
+    '55 型轻盾 + PC-9 霰弹枪（右）（弃置）': Part(name='55 型轻盾 + PC-9 霰弹枪（右）（弃置）', armor=5, structure=0, parry=2, actions=[ACTION_DUNJI],
+                       tags=["【空手】"],
+                           image_url='static/images/parts/PC-9RQ.png'),
     'L-320 肩部机枪 + CC-90 重格斗刀': Part(name='L-320 肩部机枪 + CC-90 重格斗刀', armor=4, structure=0, parry=2,
-                         actions=[ACTION_HUIZHAN_ZHONG, ACTION_SAOSHE],tags=["【手持】"],
+                         actions=[ACTION_HUIZHAN_ZHONG, ACTION_SAOSHE, ACTION_JETTISON],tags=["【手持】"],
                            image_url='static/images/parts/CC-90.png'),
+    'L-320 肩部机枪 + CC-90 重格斗刀（弃置）': Part(name='L-320 肩部机枪 + CC-90 重格斗刀（弃置）', armor=4, structure=0, parry=2,
+                         actions=[ACTION_SAOSHE],tags=["【空手】"],
+                           image_url='static/images/parts/CC-90Q.png'),
 }
 PLAYER_BACKPACKS = {
     'AMS-190 主动防御': Part(name='AMS-190 主动防御', armor=3, structure=0, electronics=1,actions=[ACTION_AUTO_INTERCEPT],

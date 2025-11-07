@@ -156,6 +156,19 @@ def execute_attack():
     return _handle_controller_response(new_state, logs, result, err)
 
 
+# [NEW] 弃置部件的 API 路由
+@api_bp.route('/jettison_part', methods=['POST'])
+def jettison_part():
+    data = request.get_json()
+    game_state, player_mech, error_response = _get_game_state_and_player(data)
+    if error_response: return error_response
+
+    new_state, logs, result, err = controller.handle_jettison_part(
+        game_state, player_mech, data.get('part_slot')
+    )
+    return _handle_controller_response(new_state, logs, result, err)
+
+
 @api_bp.route('/resolve_effect_choice', methods=['POST'])
 def resolve_effect_choice():
     data = request.get_json()

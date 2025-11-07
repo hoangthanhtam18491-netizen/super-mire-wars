@@ -1,7 +1,9 @@
-from .data_models import Mech, Projectile
+from .data_models import Mech, Projectile # [MODIFIED] 从这里移除 Part
 from .combat_system import resolve_attack, _resolve_effect_logic
 from .dice_roller import roll_black_die
 from .game_logic import is_back_attack, run_projectile_logic, check_interception, GameState
+import random
+
 
 
 # [v_REFACTOR]
@@ -55,7 +57,8 @@ def _execute_main_action(game_state, player_mech, action, action_name, part_slot
         return game_state, log, False, error
 
     if not player_mech.opening_move_taken:
-        if action.action_type != player_mech.timing:
+        # [MODIFIED] 允许 '快速' 动作
+        if action.action_type != player_mech.timing and action.action_type != '快速':
             error = f"起手动作错误！当前时机为 [{player_mech.timing}]，无法执行 [{action.action_type}] 动作。"
             log.append(f"> [错误] {error}")
             return game_state, log, False, error
@@ -425,6 +428,67 @@ def handle_execute_attack(game_state, player_mech, data):
         return game_state, log, None, None, None
 
     return game_state, log, None, None, "无效的动作类型"
+
+
+# [NEW] 弃置部件的控制器逻辑
+def handle_jettison_part(game_state, player_mech, part_slot):
+    # [MODIFIED] 将导入移至函数内部，以解决循环导入
+    from parts_database import ALL_PARTS
+    from .data_models import Part  # [MODIFIED] 在这里（函数内部）导入 Part
+
+    log = []
+
+    # 1. 验证部件和动作
+    part = player_mech.parts.get(part_slot)
+    if not part:
+        return game_state, log, None, "未找到部件"
+
+    action_obj = None
+    for act in part.actions:
+        if act.name == "【弃置】":
+            action_obj = act
+            break
+
+    if not action_obj:
+        return game_state, log, None, "该部件没有【弃置】动作"
+
+    # 2. 消耗AP (调用 _execute_main_action)
+    game_state, action_log, success, message = _execute_main_action(
+        game_state, player_mech, action_obj, "【弃置】", part_slot
+    )
+    log.extend(action_log)
+    if not success:
+        return game_state, log, None, message
+
+    # 3. 执行弃置逻辑
+    current_part_name = part.name
+    current_status = part.status
+    discarded_part_name = f"{current_part_name}（弃置）"
+
+    if discarded_part_name not in ALL_PARTS:
+        log.append(f"> [错误] 数据库中未找到对应的（弃置）部件: {discarded_part_name}")
+        # AP 已经消耗，这是一个“失败”的动作
+        return game_state, log, None, "未找到（弃置）部件"
+
+    # 4. 创建并替换部件
+    new_part_data = ALL_PARTS[discarded_part_name]
+    new_part = Part.from_dict(new_part_data.to_dict())
+
+    # 继承状态
+    new_part.status = current_status
+    if current_status == 'damaged':
+        log.append(f"> 部件状态 [破损] 已继承。")
+    elif current_status == 'destroyed':
+        # 这种情况不应该发生，因为已摧毁的部件无法执行动作
+        new_part.status = 'destroyed'
+
+    player_mech.parts[part_slot] = new_part
+    log.append(f"> 玩家弃置了 [{current_part_name}]，更换为 [{new_part.name}]。")
+
+    # [v1.26] 清除动画状态，因为我们即将刷新
+    game_state = _clear_transient_state(game_state)
+
+    return game_state, log, None, None
 
 
 def handle_resolve_effect_choice(game_state, player_mech, choice):

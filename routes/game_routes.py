@@ -1,4 +1,5 @@
 import random
+import os  # [MODIFIED] 确保 os 被导入
 from flask import Blueprint, render_template, session, redirect, url_for, make_response
 from game_logic.game_logic import GameState, is_back_attack, get_player_lock_status, check_interception
 from game_logic.ai_system import run_ai_turn
@@ -30,7 +31,7 @@ def game():
     game_state_obj = GameState.from_dict(session['game_state'])
 
     player_mech = game_state_obj.get_player_mech()
-    ai_mech = game_state_obj.get_ai_mech()
+    ai_mech = game_state_obj.get_ai_mech()  # [NEW] 获取AI机甲
 
     if not player_mech:
         # [v_REFACTOR] 重定向到 'main.hangar'
@@ -44,6 +45,20 @@ def game():
 
     # [v1.28] 检查是否需要自动运行抛射物阶段
     run_projectile_phase_flag = session.pop('run_projectile_phase', False)
+
+    # [MODIFIED] 注入 Firebase 环境变量，以便 JS 可以使用它们
+    firebase_config = os.environ.get('__firebase_config', '{}')
+    app_id = os.environ.get('__app_id', 'default-app-id')
+    auth_token = os.environ.get('__initial_auth_token', 'undefined')
+
+    # [NEW] 提取玩家配置和AI名称以用于分析
+    player_loadout = {}
+    if player_mech and player_mech.parts:
+        player_loadout = {slot: part.name for slot, part in player_mech.parts.items() if part}
+
+    ai_opponent_name = "Unknown AI"  # 默认值
+    if ai_mech and ai_mech.name:
+        ai_opponent_name = ai_mech.name
 
     # 2. 从 *当前* 游戏状态中获取新生成的事件
     state_modified = False
@@ -77,7 +92,13 @@ def game():
         ai_defeat_count=game_state_obj.ai_defeat_count,
         visual_feedback_events=visual_events,
         orientationMap=orientation_map,
-        run_projectile_phase=run_projectile_phase_flag  # [v1.28] 传递标志
+        run_projectile_phase=run_projectile_phase_flag,  # [v1.28] 传递标志
+        # [MODIFIED] 将所有配置传递给模板
+        firebase_config=firebase_config,
+        app_id=app_id,
+        auth_token=auth_token,
+        player_loadout=player_loadout,  # [NEW]
+        ai_opponent_name=ai_opponent_name  # [NEW]
     )
 
     # --- [v1.26 修复] ---

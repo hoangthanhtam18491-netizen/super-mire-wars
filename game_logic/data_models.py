@@ -1,8 +1,13 @@
 import random
 
+
 # [v_REFACTOR]
 # 文件已移至 game_logic/
 # 修复了原始文件中的循环导入错误 (移除了 'from data_models import Part')
+
+# [新增] 导入通用动作
+# from parts_database import GENERIC_ACTIONS # <-- [修复] 移除此行以打破循环
+
 
 class Action:
     """
@@ -63,6 +68,11 @@ class Action:
             projectile_to_spawn=data.get('projectile_to_spawn', None),
             ammo=data.get('ammo', 0),
         )
+
+
+# --- [新增] 通用动作 (Generic Actions) ---
+# [v_MODIFIED] 移回 parts_database.py, 此处删除
+# --- 通用动作结束 ---
 
 
 class Part:
@@ -156,7 +166,7 @@ class GameEntity:
             'id': self.id,
             'entity_type': self.entity_type,
             'controller': self.controller,
-            'controller_css': self.controller_css,  # [v1.22]
+            'controller_css': self.controller_css,  # [v1S.22]
             'pos': self.pos,
             'orientation': self.orientation,
             'name': self.name,
@@ -253,17 +263,61 @@ class Mech(GameEntity):
         return sum(part.electronics for part in self.parts.values() if part and part.status != 'destroyed')
 
     def get_all_actions(self):
-        """获取所有动作及其所属的部件槽位。"""
+        """
+        获取所有动作及其所属的部件槽位。
+        [修改] 现在也包括符合条件的通用动作。
+        """
+        # [新增] 使用局部导入来解决循环依赖
+        from parts_database import GENERIC_ACTIONS
+
         all_actions = []
+        # 1. 收集所有来自部件的动作
         for part_slot, part in self.parts.items():
             if part and part.status != 'destroyed':
                 for action in part.actions:
                     all_actions.append((action, part_slot))
+
+        # 2. [新增] 检查通用动作
+        if GENERIC_ACTIONS:
+            for generic_action, required_slots in GENERIC_ACTIONS.items():
+                # 检查机甲是否 *至少有一个* 所需的、且未被摧毁的部件
+                is_unlocked = False
+                for slot in required_slots:
+                    part = self.parts.get(slot)
+                    if part and part.status != 'destroyed':
+                        is_unlocked = True
+                        break  # 找到一个就够了
+
+                if is_unlocked:
+                    # 使用一个特殊的槽位名 'generic' 来标识它
+                    all_actions.append((generic_action, 'generic'))
+
         return all_actions
 
     # [v1.21] 新增
+    # [修改] 更新以支持 'generic' 槽位
     def get_action_by_name_and_slot(self, action_name, part_slot):
         """通过名称和槽位获取一个动作对象。"""
+
+        # --- [新增] 检查通用动作 ---
+        if part_slot == 'generic':
+            # [新增] 使用局部导入来解决循环依赖
+            from parts_database import GENERIC_ACTIONS
+            if GENERIC_ACTIONS:
+                for generic_action, required_slots in GENERIC_ACTIONS.items():
+                    if generic_action.name == action_name:
+                        # 再次验证机甲是否真的有权限 (防止作弊或状态不同步)
+                        is_unlocked = False
+                        for slot in required_slots:
+                            part = self.parts.get(slot)
+                            if part and part.status != 'destroyed':
+                                is_unlocked = True
+                                break
+                        if is_unlocked:
+                            return generic_action
+            return None  # 没找到或未解锁
+
+        # --- 原始的部件动作检查 ---
         part = self.parts.get(part_slot)
         if part and part.status != 'destroyed':
             for action in part.actions:
@@ -274,6 +328,7 @@ class Mech(GameEntity):
     # [v1.20] 新增
     def get_action_by_timing(self, timing_type):
         """获取第一个匹配该时机类型的可用动作。"""
+        # [修改] 现在会自动包含通用动作
         for action, part_slot in self.get_all_actions():
             if action.action_type == timing_type:
                 return action, part_slot
@@ -289,12 +344,13 @@ class Mech(GameEntity):
         return None
 
     def has_melee_action(self):
-        """检查机甲是否有可用的近战动作。"""
-        for part_slot, part in self.parts.items():
-            if part and part.status != 'destroyed':
-                for action in part.actions:
-                    if action.action_type == '近战':
-                        return True
+        """
+        检查机甲是否有可用的近战动作。
+        [修改] 现在会自动包含通用近战动作。
+        """
+        for action, part_slot in self.get_all_actions():
+            if action.action_type == '近战':
+                return True
         return False
 
     def get_active_parts_count(self):
@@ -304,22 +360,20 @@ class Mech(GameEntity):
     def get_passive_effects(self):
         """收集机甲所有未摧毁部件上的所有被动动作的效果。"""
         passive_effects = []
-        for part_slot, part in self.parts.items():
-            if part and part.status != 'destroyed':
-                for action in part.actions:
-                    if action.action_type == '被动' and action.effects:
-                        passive_effects.append(action.effects)
+        # [修改] 现在会自动包含通用被动动作 (如果有的话)
+        for action, part_slot in self.get_all_actions():
+            if action.action_type == '被动' and action.effects:
+                passive_effects.append(action.effects)
         return passive_effects
 
     def get_interceptor_actions(self):
         """[新增] 获取所有可用的拦截器动作（被动，带拦截效果）。"""
         interceptor_actions = []
-        for part_slot, part in self.parts.items():
-            if part and part.status != 'destroyed':
-                for action in part.actions:
-                    # 必须是被动动作，并且在 effects 中有 'interceptor' 键
-                    if action.action_type == '被动' and action.effects and 'interceptor' in action.effects:
-                        interceptor_actions.append((action, part_slot))
+        # [修改] 现在会自动包含通用拦截动作 (如果有的话)
+        for action, part_slot in self.get_all_actions():
+            # 必须是被动动作，并且在 effects 中有 'interceptor' 键
+            if action.action_type == '被动' and action.effects and 'interceptor' in action.effects:
+                interceptor_actions.append((action, part_slot))
         return interceptor_actions
 
     def to_dict(self):
@@ -405,7 +459,7 @@ class Projectile(GameEntity):
     """
 
     def __init__(self, id, controller, pos, name, evasion, stance, actions, life_span,
-                 electronics=0, move_range=0): # [修改] 添加新属性
+                 electronics=0, move_range=0):  # [修改] 添加新属性
         super().__init__(id, 'projectile', controller, pos, 'NONE', name)  # 抛射物没有朝向
 
         self.evasion = evasion
@@ -544,4 +598,3 @@ class Drone(GameEntity):
             drone.controller_css = 'ai'
 
         return drone
-
