@@ -7,15 +7,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- [NEW] Firebase SDK (必须在 <head> 中) -->
     <script type="module">
-        // [FIX #8] 直接从 Jinja 模板注入 Python 变量
-        const __firebase_config_str = {{ firebase_config | tojson | safe }};
+        // [MODIFIED] firebase_config 现在是一个字典, tojson 会正确地将其序列化为 JSON 对象字面量
+        const firebaseConfig = {{ firebase_config | tojson | safe }};
 
         try {
-            // [MODIFIED] 从上面注入的 const 读取
-            const firebaseConfig = (typeof __firebase_config_str === 'string' && __firebase_config_str.length > 2)
-                ? JSON.parse(__firebase_config_str)
-                : {};
-
             if (firebaseConfig.apiKey) {
                 // 只有在配置有效时才加载 SDK
                 const { initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
@@ -651,8 +646,8 @@
         let db, analyticsPath, batch;
         let isFirebaseInitialized = false;
 
-        // [FIX #8] 直接从 Jinja 模板注入 Python 变量
-        const __firebase_config_str = {{ firebase_config | tojson | safe }};
+        // [MODIFIED] firebase_config 现在是一个字典, tojson 会正确地将其序列化为 JSON 对象字面量
+        const firebaseConfig = {{ firebase_config | tojson | safe }};
         const __app_id = {{ app_id | tojson | safe }};
         const __initial_auth_token = {{ initial_auth_token | tojson | safe }};
 
@@ -663,10 +658,7 @@
             const auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : 'undefined';
             analyticsPath = `/artifacts/${appId}/public/data/analytics`; // [FIX] 确保 analyticsPath 被定义
 
-            const firebaseConfig = (typeof __firebase_config_str === 'string' && __firebase_config_str.length > 2)
-                ? JSON.parse(__firebase_config_str)
-                : {};
-
+            // [MODIFIED] 移除旧的 JSON.parse 逻辑
             if (!firebaseConfig.apiKey) {
                 throw new Error("Firebase config is empty. Analytics will be disabled.");
             }

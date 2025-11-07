@@ -58,22 +58,33 @@ def index():
 def analytics():
     """渲染分析数据统计页面。"""
 
+    firebase_config_json_str = None
+
     # [FIX #9] 优先从本地文件加载配置，用于本地开发
     try:
         config_path = os.path.join(ROOT_DIR, 'firebase_config.json')
         with open(config_path, 'r', encoding='utf-8') as f:
-            firebase_config = f.read()
+            firebase_config_json_str = f.read()
     except (FileNotFoundError, IOError):
         # 如果文件不存在，则回退到环境变量（用于生产环境）
-        firebase_config = os.environ.get('__firebase_config', '{}')
+        firebase_config_json_str = os.environ.get('__firebase_config', '{}')
+
+    # [NEW] 无论从哪里获取，都尝试将其解析为 Python 字典
+    # 以便 tojson 过滤器能正确处理它
+    try:
+        # 尝试解析 JSON 字符串
+        firebase_config_dict = json.loads(firebase_config_json_str)
+    except json.JSONDecodeError:
+        # 如果解析失败 (例如，它是一个空字符串或无效JSON)
+        firebase_config_dict = {}  # 回退为空字典
 
     app_id = os.environ.get('__app_id', 'default-app-id')
     auth_token = os.environ.get('__initial_auth_token', 'undefined')
 
     return render_template(
         'analytics.html',
-        # [FIX #8] 将配置传递给 Jinja
-        firebase_config=firebase_config,
+        # [MODIFIED] 传递 Python 字典，而不是 JSON 字符串
+        firebase_config=firebase_config_dict,
         app_id=app_id,
         initial_auth_token=auth_token
     )
@@ -89,14 +100,19 @@ def hangar():
     player_legs = {k: v for k, v in PLAYER_LEGS.items() if '（弃置）' not in k}
     player_backpacks = {k: v for k, v in PLAYER_BACKPACKS.items() if '（弃置）' not in k}
 
-    # [FIX #9] 优先从本地文件加载配置，用于本地开发
+    # [MODIFIED] 重用 /analytics 路由中的 Firebase 配置加载逻辑
+    firebase_config_json_str = None
     try:
         config_path = os.path.join(ROOT_DIR, 'firebase_config.json')
         with open(config_path, 'r', encoding='utf-8') as f:
-            firebase_config = f.read()
+            firebase_config_json_str = f.read()
     except (FileNotFoundError, IOError):
-        # 如果文件不存在，则回退到环境变量（用于生产环境）
-        firebase_config = os.environ.get('__firebase_config', '{}')
+        firebase_config_json_str = os.environ.get('__firebase_config', '{}')
+
+    try:
+        firebase_config_dict = json.loads(firebase_config_json_str)
+    except json.JSONDecodeError:
+        firebase_config_dict = {}
 
     app_id = os.environ.get('__app_id', 'default-app-id')
     auth_token = os.environ.get('__initial_auth_token', 'undefined')
@@ -109,8 +125,8 @@ def hangar():
         right_arms=player_right_arms,
         backpacks=player_backpacks,
         ai_loadouts=AI_LOADOUTS,
-        # [FIX #8] 将配置传递给 Jinja
-        firebase_config=firebase_config,
+        # [MODIFIED] 传递 Python 字典
+        firebase_config=firebase_config_dict,
         app_id=app_id,
         initial_auth_token=auth_token
     )

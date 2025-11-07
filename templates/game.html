@@ -9,7 +9,8 @@
     <!-- [FIX #8] 在导入 SDK 之前注入配置变量 -->
     <script>
         // 这些将由 Jinja 填充
-        window.__firebase_config_str = {{ firebase_config | tojson | safe }};
+        // [MODIFIED] firebase_config 现在是一个字典, tojson 会正确地将其序列化为 JSON 对象字面量
+        window.firebaseConfig = {{ firebase_config | tojson | safe }};
         window.__app_id = {{ app_id | tojson | safe }};
         window.__initial_auth_token = {{ initial_auth_token | tojson | safe }};
     </script>
@@ -1526,15 +1527,13 @@
     try {
         // --- 1. 初始化 Firebase ---
         // [MODIFIED] 从全局 window 变量读取
-        const firebaseConfigStr = (typeof window.__firebase_config_str === 'string' && window.__firebase_config_str.length > 2)
-            ? window.__firebase_config_str
-            : '{}';
+        const firebaseConfig = window.firebaseConfig || {};
         const appId = window.__app_id || 'default-app-id';
         const auth_token = window.__initial_auth_token || 'undefined';
 
         analyticsPath = `/artifacts/${appId}/public/data/analytics`; // [FIX] 确保 analyticsPath 被定义
 
-        const firebaseConfig = JSON.parse(firebaseConfigStr);
+        // [MODIFIED] 移除旧的 JSON.parse 逻辑
         if (!firebaseConfig.apiKey) {
             throw new Error("Firebase config is empty. Analytics will be disabled.");
         }
@@ -1604,8 +1603,16 @@
 
             // 3. 记录胜利时的部件配置 (仅当玩家胜利时)
             if (status === 'player_win' && playerLoadout) {
+
+                // [FIX] 'winning_loadouts' 是一个顶层集合, 与 'analytics' 平行
+                // 1. 创建正确的路径 (5 段)
+                const winningLoadoutsCollectionPath = analyticsPath.replace("analytics", "winning_loadouts");
+                // 2. 引用该集合
+                const winningLoadoutsRef = collection(db, winningLoadoutsCollectionPath);
+
                 // 创建一个指向 'winning_loadouts' 集合中新文档的引用
-                const winningLoadoutRef = doc(collection(db, analyticsPath, "winning_loadouts"));
+                // [FIX] 使用修正后的 winningLoadoutsRef
+                const winningLoadoutRef = doc(winningLoadoutsRef);
 
                 // 添加一个时间戳
                 const loadoutData = {
