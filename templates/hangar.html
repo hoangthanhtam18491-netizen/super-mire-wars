@@ -728,7 +728,7 @@
 
                     // --- 5. 提交数据 ---
                     console.log("Sending analytics batch...");
-                    await batch.commit();
+                    batch.commit();
                     console.log("Analytics batch sent!");
 
                 } catch (e) {
