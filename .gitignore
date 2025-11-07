@@ -1,4 +1,6 @@
 venv/
-# Python 编译文件
-__pycache__/
+Python 编译文件
+pycache/
 *.pyc
+[FIX #9] 忽略本地 Firebase 配置文件
+firebase_config.json

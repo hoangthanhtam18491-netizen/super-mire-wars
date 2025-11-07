@@ -6,6 +6,14 @@
     <title>机甲战棋游戏</title>
 
     <!-- [MODIFIED] 导入 Firebase SDK -->
+    <!-- [FIX #8] 在导入 SDK 之前注入配置变量 -->
+    <script>
+        // 这些将由 Jinja 填充
+        window.__firebase_config_str = {{ firebase_config | tojson | safe }};
+        window.__app_id = {{ app_id | tojson | safe }};
+        window.__initial_auth_token = {{ initial_auth_token | tojson | safe }};
+    </script>
+
     <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
     <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
     <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
@@ -1517,9 +1525,19 @@
 
     try {
         // --- 1. 初始化 Firebase ---
-        const firebaseConfig = JSON.parse('{{ firebase_config | safe }}');
-        const appId = '{{ app_id | safe }}';
-        const auth_token = '{{ auth_token | safe }}';
+        // [MODIFIED] 从全局 window 变量读取
+        const firebaseConfigStr = (typeof window.__firebase_config_str === 'string' && window.__firebase_config_str.length > 2)
+            ? window.__firebase_config_str
+            : '{}';
+        const appId = window.__app_id || 'default-app-id';
+        const auth_token = window.__initial_auth_token || 'undefined';
+
+        analyticsPath = `/artifacts/${appId}/public/data/analytics`; // [FIX] 确保 analyticsPath 被定义
+
+        const firebaseConfig = JSON.parse(firebaseConfigStr);
+        if (!firebaseConfig.apiKey) {
+            throw new Error("Firebase config is empty. Analytics will be disabled.");
+        }
 
         const app = initializeApp(firebaseConfig);
         db = getFirestore(app);

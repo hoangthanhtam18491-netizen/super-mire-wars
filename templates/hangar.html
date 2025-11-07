@@ -5,6 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>机库 - 机甲整备</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- [NEW] Firebase SDK (必须在 <head> 中) -->
+    <script type="module">
+        // [FIX #8] 直接从 Jinja 模板注入 Python 变量
+        const __firebase_config_str = {{ firebase_config | tojson | safe }};
+
+        try {
+            // [MODIFIED] 从上面注入的 const 读取
+            const firebaseConfig = (typeof __firebase_config_str === 'string' && __firebase_config_str.length > 2)
+                ? JSON.parse(__firebase_config_str)
+                : {};
+
+            if (firebaseConfig.apiKey) {
+                // 只有在配置有效时才加载 SDK
+                const { initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                initializeApp(firebaseConfig);
+            } else {
+                console.warn("Firebase config is empty. Analytics will be disabled.");
+            }
+        } catch (e) {
+            console.error("Firebase initialization error:", e);
+        }
+    </script>
     <style>
         .part-card { transition: all 0.2s ease-in-out; }
         .part-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
@@ -92,7 +114,8 @@
         <p class="text-center text-gray-400 mb-8">为你的机甲选择装备，然后进入战场。</p>
 
         <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->
-        <form action="{{ url_for('main.start_game') }}" method="POST">
+        <!-- [MODIFIED] 添加 id="hangar-form" -->
+        <form id="hangar-form" action="{{ url_for('main.start_game') }}" method="POST">
 
             <!-- [修改] 机甲总览与示意图 -->
             <div class="mb-10 p-4 md:p-6 bg-gray-900 rounded-lg shadow-inner grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -513,7 +536,8 @@
 
             <!-- 开始按钮 -->
             <div class="mt-10 text-center">
-                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-10 rounded-lg text-2xl transition-all duration-300 shadow-lg hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
+                <!-- [MODIFIED] 按钮类型改为 "button" 以阻止默认提交 -->
+                <button type="button" id="start-game-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-10 rounded-lg text-2xl transition-all duration-300 shadow-lg hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
                     开始战斗
                 </button>
             </div>
@@ -615,7 +639,110 @@
             // 页面加载时默认显示 'core' (核心) 部件列表
             showPartCategory('core');
         });
-        const firebaseConfig = JSON.parse('{{ firebase_config | safe }}');
+    </script>
+
+    <!-- [NEW] Firebase Analytics 脚本 -->
+    <script type="module">
+        // 导入 Firebase 模块
+        import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, increment, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        let db, analyticsPath, batch;
+        let isFirebaseInitialized = false;
+
+        // [FIX #8] 直接从 Jinja 模板注入 Python 变量
+        const __firebase_config_str = {{ firebase_config | tojson | safe }};
+        const __app_id = {{ app_id | tojson | safe }};
+        const __initial_auth_token = {{ initial_auth_token | tojson | safe }};
+
+        try {
+            // --- 1. 初始化 Firebase ---
+            // [MODIFIED] 从上面注入的 const 读取
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : 'undefined';
+            analyticsPath = `/artifacts/${appId}/public/data/analytics`; // [FIX] 确保 analyticsPath 被定义
+
+            const firebaseConfig = (typeof __firebase_config_str === 'string' && __firebase_config_str.length > 2)
+                ? JSON.parse(__firebase_config_str)
+                : {};
+
+            if (!firebaseConfig.apiKey) {
+                throw new Error("Firebase config is empty. Analytics will be disabled.");
+            }
+
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            setLogLevel('Debug');
+
+            // --- 2. 匿名登录 ---
+            const auth = getAuth(app);
+            if (auth_token && auth_token !== 'undefined') {
+                await signInWithCustomToken(auth, auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+            console.log("Firebase Auth success. User:", auth.currentUser.uid);
+            isFirebaseInitialized = true;
+        } catch (e) {
+            console.error("Firebase Hangar Analytics Error:", e);
+        }
+
+        // --- 3. 绑定表单提交事件 ---
+        const form = document.getElementById('hangar-form');
+        const submitButton = document.getElementById('start-game-btn');
+
+        submitButton.addEventListener('click', async (e) => {
+            e.preventDefault(); // 阻止表单立即提交
+
+            // 禁用按钮防止重复点击
+            submitButton.disabled = true;
+            submitButton.innerText = "加载中...";
+
+            if (isFirebaseInitialized) {
+                try {
+                    // --- 4. 准备批量写入 ---
+                    const batch = writeBatch(db);
+
+                    // A. 统计部件选择
+                    const partSelectionsRef = doc(db, analyticsPath, "part_selections");
+                    const partData = {};
+                    partData[`parts.${document.querySelector('input[name="core"]:checked').value}`] = increment(1);
+                    partData[`parts.${document.querySelector('input[name="legs"]:checked').value}`] = increment(1);
+                    partData[`parts.${document.querySelector('input[name="left_arm"]:checked').value}`] = increment(1);
+                    partData[`parts.${document.querySelector('input[name="right_arm"]:checked').value}`] = increment(1);
+                    partData[`parts.${document.querySelector('input[name="backpack"]:checked').value}`] = increment(1);
+                    batch.set(partSelectionsRef, partData, { merge: true });
+
+                    // B. 统计AI选择
+                    const aiSelectionsRef = doc(db, analyticsPath, "ai_selections");
+                    const aiKey = document.querySelector('input[name="ai_opponent"]:checked').value;
+                    const aiName = document.querySelector(`label[for="ai_${aiKey}"] h4`).innerText;
+                    batch.set(aiSelectionsRef, { [aiName]: increment(1) }, { merge: true });
+
+                    // C. 统计模式选择
+                    const modeSelectionsRef = doc(db, analyticsPath, "mode_selections");
+                    const modeKey = document.querySelector('input[name="game_mode"]:checked').value;
+                    const modeName = document.querySelector(`label[for="mode_${modeKey}"] h4`).innerText;
+                    batch.set(modeSelectionsRef, { [modeName]: increment(1) }, { merge: true });
+
+                    // --- 5. 提交数据 ---
+                    console.log("Sending analytics batch...");
+                    await batch.commit();
+                    console.log("Analytics batch sent!");
+
+                } catch (e) {
+                    console.error("Error sending analytics:", e);
+                    // 即使分析失败，也要继续游戏
+                }
+            } else {
+                console.warn("Firebase 未初始化, 跳过分析。");
+            }
+
+            // --- 6. 提交表单 ---
+            form.submit();
+        });
+
     </script>
 </body>
 </html>

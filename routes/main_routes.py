@@ -1,6 +1,7 @@
 import os
 import markdown
 import bleach
+import json  # [FIX #9] 导入 json 模块
 from flask import Blueprint, render_template, request, session, redirect, url_for
 
 # [v_REFACTOR]
@@ -57,16 +58,24 @@ def index():
 def analytics():
     """渲染分析数据统计页面。"""
 
-    # [NEW] 注入 Firebase 环境变量，以便 JS 可以使用它们
-    firebase_config = os.environ.get('__firebase_config', '{}')
+    # [FIX #9] 优先从本地文件加载配置，用于本地开发
+    try:
+        config_path = os.path.join(ROOT_DIR, 'firebase_config.json')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            firebase_config = f.read()
+    except (FileNotFoundError, IOError):
+        # 如果文件不存在，则回退到环境变量（用于生产环境）
+        firebase_config = os.environ.get('__firebase_config', '{}')
+
     app_id = os.environ.get('__app_id', 'default-app-id')
     auth_token = os.environ.get('__initial_auth_token', 'undefined')
 
     return render_template(
         'analytics.html',
+        # [FIX #8] 将配置传递给 Jinja
         firebase_config=firebase_config,
         app_id=app_id,
-        auth_token=auth_token
+        initial_auth_token=auth_token
     )
 
 
@@ -80,9 +89,15 @@ def hangar():
     player_legs = {k: v for k, v in PLAYER_LEGS.items() if '（弃置）' not in k}
     player_backpacks = {k: v for k, v in PLAYER_BACKPACKS.items() if '（弃置）' not in k}
 
-    # [NEW] 注入 Firebase 环境变量，以便 JS 可以使用它们
-    # 我们使用 os.environ.get 来安全地从运行环境中读取这些变量
-    firebase_config = os.environ.get('__firebase_config', '{}')
+    # [FIX #9] 优先从本地文件加载配置，用于本地开发
+    try:
+        config_path = os.path.join(ROOT_DIR, 'firebase_config.json')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            firebase_config = f.read()
+    except (FileNotFoundError, IOError):
+        # 如果文件不存在，则回退到环境变量（用于生产环境）
+        firebase_config = os.environ.get('__firebase_config', '{}')
+
     app_id = os.environ.get('__app_id', 'default-app-id')
     auth_token = os.environ.get('__initial_auth_token', 'undefined')
 
@@ -94,10 +109,10 @@ def hangar():
         right_arms=player_right_arms,
         backpacks=player_backpacks,
         ai_loadouts=AI_LOADOUTS,
-        # [NEW] 将配置传递给模板
+        # [FIX #8] 将配置传递给 Jinja
         firebase_config=firebase_config,
         app_id=app_id,
-        auth_token=auth_token
+        initial_auth_token=auth_token
     )
 
 

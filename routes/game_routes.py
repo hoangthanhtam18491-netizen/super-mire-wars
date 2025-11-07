@@ -46,7 +46,7 @@ def game():
     # [v1.28] 检查是否需要自动运行抛射物阶段
     run_projectile_phase_flag = session.pop('run_projectile_phase', False)
 
-    # [MODIFIED] 注入 Firebase 环境变量，以便 JS 可以使用它们
+    # [FIX #8] 从 os.environ 读取配置并将其传递给模板
     firebase_config = os.environ.get('__firebase_config', '{}')
     app_id = os.environ.get('__app_id', 'default-app-id')
     auth_token = os.environ.get('__initial_auth_token', 'undefined')
@@ -93,10 +93,10 @@ def game():
         visual_feedback_events=visual_events,
         orientationMap=orientation_map,
         run_projectile_phase=run_projectile_phase_flag,  # [v1.28] 传递标志
-        # [MODIFIED] 将所有配置传递给模板
+        # [FIX #8] 将配置传递给 Jinja
         firebase_config=firebase_config,
         app_id=app_id,
-        auth_token=auth_token,
+        initial_auth_token=auth_token,
         player_loadout=player_loadout,  # [NEW]
         ai_opponent_name=ai_opponent_name  # [NEW]
     )

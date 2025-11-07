@@ -5,308 +5,323 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>游戏数据统计</title>
     <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- 导入 Firebase SDK -->
-    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
-    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
-    <script type="module" src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
-
     <style>
-        body {
-            background-color: #1a202c; /* bg-gray-900 */
-            color: #e2e8f0; /* text-gray-200 */
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        .stat-card {
-            background-color: #2d3748; /* bg-gray-800 */
-            border: 1px solid #4a5568; /* border-gray-700 */
-            border-radius: 0.75rem; /* rounded-xl */
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        }
-        .stat-title {
-            color: #63b3ed; /* text-blue-400 */
-            border-bottom: 1px solid #4a5568; /* border-gray-700 */
-            padding-bottom: 0.75rem;
-            margin-bottom: 1rem;
-            font-size: 1.25rem; /* text-xl */
-            font-weight: 600; /* font-semibold */
-        }
-        .loading-spinner {
-            border: 4px solid #4a5568; /* border-gray-700 */
-            border-top: 4px solid #63b3ed; /* border-blue-400 */
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-        }
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
         }
-        .data-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 0.5rem 0.25rem;
-            border-bottom: 1px solid #374151; /* border-gray-700 */
-        }
-        .data-row:last-child {
-            border-bottom: none;
-        }
-        .data-key {
-            color: #a0aec0; /* text-gray-400 */
-        }
-        .data-value {
-            font-weight: 600; /* font-semibold */
-            color: #cbd5e0; /* text-gray-300 */
-        }
-        .loadout-card {
-            background-color: #374151; /* bg-gray-700 */
-            padding: 0.75rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 0.875rem; /* text-sm */
-            line-height: 1.6;
+        .spinner {
+            animation: spin 1s linear infinite;
         }
     </style>
 </head>
-<body class="p-4 md:p-8">
-    <div class="container mx-auto max-w-7xl">
-        <h1 class="text-3xl font-bold text-center text-white mb-8">游戏数据统计 (实时)</h1>
+<body class="bg-gray-800 text-gray-200 font-mono">
 
-        <!-- 加载指示器 -->
-        <div id="loading-indicator" class="flex justify-center items-center h-64">
-            <div class="loading-spinner"></div>
-        </div>
-
-        <!-- 统计数据网格 -->
-        <div id="analytics-grid" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-            <!-- 左侧列 -->
-            <div class="lg:col-span-1 space-y-6">
-                <!-- 游戏结果 -->
-                <div class="stat-card p-6">
-                    <h2 class="stat-title">游戏结果</h2>
-                    <div id="game-outcomes-data" class="space-y-2">
-                        <!-- JS 将填充这里 -->
-                    </div>
-                </div>
-
-                <!-- AI 对战统计 -->
-                <div class="stat-card p-6">
-                    <h2 class="stat-title">AI 对战统计</h2>
-                    <div id="ai-matchups-data" class="space-y-4">
-                        <!-- JS 将填充这里 -->
-                    </div>
-                </div>
-            </div>
-
-            <!-- 中间列 -->
-            <div class="lg:col-span-1 space-y-6">
-                <!-- 部件选择 -->
-                <div class="stat-card p-6">
-                    <h2 class="stat-title">部件选择次数</h2>
-                    <div id="part-selections-data" class="space-y-2 max-h-96 overflow-y-auto pr-2">
-                        <!-- JS 将填充这里 -->
-                    </div>
-                </div>
-
-                <!-- 模式选择 -->
-                <div class="stat-card p-6">
-                    <h2 class="stat-title">模式选择次数</h2>
-                    <div id="mode-selections-data" class="space-y-2">
-                        <!-- JS 将填充这里 -->
-                    </div>
-                </div>
-
-                <!-- AI 选择 -->
-                <div class="stat-card p-6">
-                    <h2 class="stat-title">AI 对手选择次数</h2>
-                    <div id="ai-selections-data" class="space-y-2">
-                        <!-- JS 将填充这里 -->
-                    </div>
-                </div>
-            </div>
-
-            <!-- 右侧列 -->
-            <div class="lg:col-span-1 space-y-6">
-                <!-- 胜利配置 -->
-                <div class="stat-card p-6">
-                    <h2 class="stat-title">最近的胜利配置</h2>
-                    <div id="winning-loadouts-data" class="space-y-3 max-h-[60rem] overflow-y-auto pr-2">
-                        <!-- JS 将填充这里 -->
-                    </div>
-                </div>
-            </div>
-
+    <!-- 加载指示器 -->
+    <div id="loading-indicator" class="flex items-center justify-center h-screen">
+        <div class="flex flex-col items-center">
+            <div class="spinner w-12 h-12 rounded-full border-4 border-t-blue-500 border-gray-600 mb-4"></div>
+            <p id="loading-text" class="text-lg text-gray-400">正在加载统计数据...</p>
+            <!-- [FIX #7] 详细错误信息将显示在这里 -->
+            <p id="loading-error-details" class="text-sm text-red-400 mt-2 max-w-md text-center"></p>
         </div>
     </div>
 
+    <!-- 统计数据网格 (默认隐藏) -->
+    <div id="analytics-grid" class="hidden container mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- 概览 -->
+        <div class="lg:col-span-3 bg-gray-900 p-6 rounded-lg shadow-lg">
+            <h2 class="text-2xl font-bold mb-4 text-blue-400 border-b border-gray-700 pb-2">数据概览</h2>
+            <div id="game-outcomes-data" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                <p class="text-gray-500">加载中...</p>
+            </div>
+        </div>
+
+        <!-- AI 对战胜率 -->
+        <div class="bg-gray-900 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-bold mb-4 text-blue-400 border-b border-gray-700 pb-2">AI 对战胜率</h2>
+            <div id="ai-matchups-data" class="space-y-4 max-h-96 overflow-y-auto">
+                <p class="text-gray-500">加载中...</p>
+            </div>
+        </div>
+
+        <!-- 部件选择 -->
+        <div class="bg-gray-900 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-bold mb-4 text-blue-400 border-b border-gray-700 pb-2">部件选择次数</h2>
+            <div id="part-selections-data" class="space-y-2 max-h-96 overflow-y-auto">
+                <p class="text-gray-500">加载中...</p>
+            </div>
+        </div>
+
+        <!-- 模式与AI选择 -->
+        <div class="bg-gray-900 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-bold mb-4 text-blue-400 border-b border-gray-700 pb-2">模式与AI选择</h2>
+            <h3 class="text-lg font-semibold text-gray-300 mt-4">AI 对手</h3>
+            <div id="ai-selections-data" class="space-y-2 mb-4 max-h-48 overflow-y-auto">
+                <p class="text-gray-500">加载中...</p>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-300 mt-4">游戏模式</h3>
+            <div id="mode-selections-data" class="space-y-2 max-h-48 overflow-y-auto">
+                <p class="text-gray-500">加载中...</p>
+            </div>
+        </div>
+
+        <!-- 最近的胜利配置 -->
+        <div class="lg:col-span-3 bg-gray-900 p-6 rounded-lg shadow-lg">
+            <h2 class="text-2xl font-bold mb-4 text-blue-400 border-b border-gray-700 pb-2">最近的胜利配置 (最新 20 场)</h2>
+            <div id="winning-loadouts-data" class="space-y-4 max-h-96 overflow-y-auto">
+                <p class="text-gray-500">加载中...</p>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Firebase 脚本 -->
     <script type="module">
         import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, onSnapshot, collection, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-         // 从 Flask 模板中读取配置
-        // [FIX] 移除多余的 | tojson 过滤器
-        const firebaseConfig = JSON.parse('{{ firebase_config | safe }}');
-        const appId = '{{ app_id | safe }}';
-        const auth_token = '{{ auth_token | safe }}';
+        // [FIX #8] 直接从 Jinja 模板注入 Python 变量
+        // 使用 |tojson|safe 过滤器来正确处理 JSON 字符串
+        const __firebase_config_str = {{ firebase_config | tojson | safe }};
+        const __app_id = {{ app_id | tojson | safe }};
+        const __initial_auth_token = {{ initial_auth_token | tojson | safe }};
+
+        // [MODIFIED] 现在从上面注入的 const 读取
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : 'undefined';
         const analyticsPath = `/artifacts/${appId}/public/data/analytics`;
 
         const loadingIndicator = document.getElementById('loading-indicator');
         const analyticsGrid = document.getElementById('analytics-grid');
-
-        // --- 辅助函数：排序和渲染 ---
-        function sortAndRender(data, containerId) {
-            const container = document.getElementById(containerId);
-            if (!container) return;
-
-            if (!data || Object.keys(data).length === 0) {
-                container.innerHTML = '<p class="data-key">暂无数据</p>';
-                return;
-            }
-
-            // 按计数值降序排序
-            const sortedData = Object.entries(data).sort(([, countA], [, countB]) => countB - countA);
-
-            let html = '';
-            for (const [key, value] of sortedData) {
-                html += `
-                    <div class="data-row">
-                        <span class="data-key">${key}</span>
-                        <span class="data-value">${value}</span>
-                    </div>
-                `;
-            }
-            container.innerHTML = html;
-        }
-
-        function renderAiMatchups(data) {
-            const container = document.getElementById('ai-matchups-data');
-            if (!container) return;
-
-            if (!data || Object.keys(data).length === 0) {
-                container.innerHTML = '<p class="data-key">暂无数据</p>';
-                return;
-            }
-
-            let html = '';
-            // 按 AI 名称排序
-            for (const aiName of Object.keys(data).sort()) {
-                const stats = data[aiName];
-                const wins = stats.player_wins || 0;
-                const losses = stats.player_losses || 0;
-                const total = wins + losses;
-                const winRate = total > 0 ? ((wins / total) * 100).toFixed(0) : 0;
-
-                html += `
-                    <div class="loadout-card p-3">
-                        <div class="font-semibold text-white mb-2">${aiName.replace(/_/g, ' ')}</div>
-                        <div class="data-row text-sm">
-                            <span class="data-key">玩家胜利:</span>
-                            <span class="data-value">${wins}</span>
-                        </div>
-                        <div class="data-row text-sm">
-                            <span class="data-key">玩家失败:</span>
-                            <span class="data-value">${losses}</span>
-                        </div>
-                        <div class="data-row text-sm">
-                            <span class="data-key">胜率:</span>
-                            <span class="data-value">${winRate}%</span>
-                        </div>
-                    </div>
-                `;
-            }
-            container.innerHTML = html;
-        }
+        // [FIX #7] 获取错误文本元素
+        const loadingText = document.getElementById('loading-text');
+        const errorDetails = document.getElementById('loading-error-details');
 
         try {
-            // --- 1. 初始化和认证 ---
+            setLogLevel('Debug');
+
+            // [FIX #6] 将 JSON.parse 移入 try 块
+            const firebaseConfig = (typeof __firebase_config_str === 'string' && __firebase_config_str.length > 2) // 检查是否不仅仅是 "{}"
+                ? JSON.parse(__firebase_config_str)
+                : {};
+
+            // [FIX #5] 检查配置是否有效
+            if (!firebaseConfig || !firebaseConfig.apiKey) {
+                throw new Error("Firebase config is empty or invalid. Analytics will be disabled.");
+            }
+
             const app = initializeApp(firebaseConfig);
             const db = getFirestore(app);
             const auth = getAuth(app);
-            setLogLevel('Debug');
 
+            // [FIX #4] 检查 auth_token 是否为 'undefined' 或 'None' 字符串
             if (auth_token && auth_token !== 'undefined' && auth_token !== 'None') {
                 await signInWithCustomToken(auth, auth_token);
             } else {
                 await signInAnonymously(auth);
             }
-            console.log("Firebase (Analytics) 已认证。");
+            console.log("Firebase Auth success. User:", auth.currentUser.uid);
 
-            // --- 2. 隐藏加载器，显示网格 ---
+            // 成功连接，显示内容
             loadingIndicator.style.display = 'none';
             analyticsGrid.style.display = 'grid';
 
-            // --- 3. 监听文档数据 (实时) ---
-            const docRefs = {
-                "game-outcomes-data": doc(db, analyticsPath, "game_outcomes"),
-                "ai-matchups-data": doc(db, analyticsPath, "ai_matchups"),
-                "part-selections-data": doc(db, analyticsPath, "part_selections"), // [FIXED] analyticsRath -> analyticsPath
-                "mode-selections-data": doc(db, analyticsPath, "mode_selections"),
-                "ai-selections-data": doc(db, analyticsPath, "ai_selections"),
-            };
+            // --- 渲染函数 ---
 
-            // 监听所有单文档数据
-            for (const [containerId, docRef] of Object.entries(docRefs)) {
-                onSnapshot(docRef, (docSnap) => {
-                    if (docSnap.exists()) {
-                        const data = docSnap.data();
-                        if (containerId === 'ai-matchups-data') {
-                            renderAiMatchups(data);
-                        } else {
-                            sortAndRender(data, containerId);
-                        }
-                    } else {
-                        document.getElementById(containerId).innerHTML = '<p class="data-key">暂无数据</p>';
-                    }
-                }, (error) => {
-                    console.error(`监听 ${containerId} 出错:`, error);
-                    document.getElementById(containerId).innerHTML = '<p class="text-red-500">加载数据出错</p>';
-                });
-            }
+            // 帮助函数：对简单的键值对数据进行排序和渲染
+            const sortAndRender = (data, containerId) => {
+                const container = document.getElementById(containerId);
+                if (!container) return;
 
-            // --- 4. 监听集合数据 (胜利配置) ---
-            const loadoutsContainer = document.getElementById('winning-loadouts-data');
-            const loadoutsQuery = query(
-                collection(db, analyticsPath, "winning_loadouts"),
-                orderBy("timestamp", "desc"),
-                limit(20) // 最多显示最近 20 条
-            );
-
-            onSnapshot(loadoutsQuery, (querySnapshot) => {
-                if (querySnapshot.empty) {
-                    loadoutsContainer.innerHTML = '<p class="data-key">暂无胜利配置数据</p>';
+                if (!data || Object.keys(data).length === 0) {
+                    container.innerHTML = '<p class="text-gray-500">暂无数据</p>';
                     return;
                 }
 
-                let html = '';
-                querySnapshot.forEach((doc) => {
-                    const data = doc.data();
-                    const timestamp = data.timestamp ? new Date(data.timestamp.seconds * 1000).toLocaleString('zh-CN') : 'N/A';
+                const entries = Object.entries(data);
+                entries.sort((a, b) => b[1] - a[1]); // 按计数值降序排序
 
-                    html += `
-                        <div class="loadout-card">
-                            <div class="text-gray-400 text-xs mb-2">${timestamp}</div>
+                container.innerHTML = entries.map(([key, value]) => `
+                    <div class="flex justify-between items-center text-sm py-1 border-b border-gray-700 last:border-b-0">
+                        <span class="truncate pr-2">${key}</span>
+                        <span class="font-bold text-blue-300">${value}</span>
+                    </div>
+                `).join('');
+            };
+
+            // 帮助函数：渲染AI对战胜率
+            const renderAiMatchups = (data) => {
+                // [FIX #3] data 已经是正确的嵌套对象 { "AI Name": { "player_wins": X, "player_losses": Y } }
+                // 不再需要扁平化解析
+                const container = document.getElementById('ai-matchups-data');
+                if (!container) return;
+
+                if (!data || Object.keys(data).length === 0) {
+                    container.innerHTML = '<p class="text-gray-500">暂无数据</p>';
+                    return;
+                }
+
+                // 2. 将嵌套对象转换为数组并排序
+                const entries = Object.entries(data);
+                entries.sort((a, b) => (b[1].player_wins || 0) - (a[1].player_wins || 0));
+
+                // 3. 渲染
+                container.innerHTML = entries.map(([aiName, stats]) => {
+                    const wins = stats.player_wins || 0;
+                    // [FIX #2] 读取 "player_losses" 而不是 "ai_wins"
+                    const losses = stats.player_losses || 0;
+                    const total = wins + losses;
+                    const winRate = total > 0 ? ((wins / total) * 100).toFixed(0) : 0;
+
+                    let winRateColor = 'text-gray-400';
+                    if (winRate > 60) winRateColor = 'text-green-400';
+                    else if (winRate < 40) winRateColor = 'text-red-400';
+
+                    return `
+                        <div class="mb-2 pb-2 border-b border-gray-700 last:border-b-0">
+                            <div class="flex justify-between font-semibold">
+                                <span class="truncate pr-2">${aiName}</span>
+                                <span class="${winRateColor}">${winRate}% 胜率</span>
+                            </div>
+                            <div class="text-sm text-gray-400">
+                                (胜: <span class="text-green-500">${wins}</span> / 负: <span class="text-red-500">${losses}</span> / 总: ${total})
+                            </div>
+                        </div>
                     `;
-                    // 动态显示所有部件
-                    for (const [slot, partName] of Object.entries(data)) {
-                        if (slot !== 'timestamp') {
-                            html += `<div><span class="data-key">${slot}:</span> ${partName}</div>`;
+                }).join('') || '<p class="text-gray-500">暂无数据</p>';
+            };
+
+            // 帮助函数：渲染胜利配置
+            const renderWinningLoadouts = (docs) => {
+                const container = document.getElementById('winning-loadouts-data');
+                if (!container) return;
+
+                if (!docs || docs.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500">暂无胜利记录</p>';
+                    return;
+                }
+
+                container.innerHTML = docs.map(doc => {
+                    const data = doc.data();
+                    const timestamp = data.timestamp ? new Date(data.timestamp.seconds * 1000).toLocaleString('zh-CN') : '未知时间';
+                    // [FIX #1] 数据是扁平的 (e.g., data.core)，而不是嵌套在 data.loadout.core
+                    return `
+                        <div class="p-3 bg-gray-800 rounded grid grid-cols-2 md:grid-cols-6 gap-2 text-xs border border-gray-700">
+                            <div class="md:col-span-1 text-gray-400">${timestamp}</div>
+                            <div class="truncate"><span class="text-blue-400">核心:</span> ${data.core || 'N/A'}</div>
+                            <div class="truncate"><span class="text-blue-400">下肢:</span> ${data.legs || 'N/A'}</div>
+                            <div class="truncate"><span class="text-blue-400">左臂:</span> ${data.left_arm || 'N/A'}</div>
+                            <div class="truncate"><span class="text-blue-400">右臂:</span> ${data.right_arm || 'N/A'}</div>
+                            <div class="truncate"><span class="text-blue-400">背包:</span> ${data.backpack || 'N/A'}</div>
+                        </div>
+                    `;
+                }).join('');
+            };
+
+            // --- 实时监听器 ---
+            const partSelectionsRef = doc(db, analyticsPath, "part_selections");
+            const aiSelectionsRef = doc(db, analyticsPath, "ai_selections");
+            const modeSelectionsRef = doc(db, analyticsPath, "mode_selections");
+            const gameOutcomesRef = doc(db, analyticsPath, "game_outcomes");
+            const aiMatchupsRef = doc(db, analyticsPath, "ai_matchups");
+            const winningLoadoutsRef = collection(db, analyticsPath, "winning_loadouts");
+
+            // 监听 1: 部件选择
+            onSnapshot(partSelectionsRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const flatData = docSnap.data();
+                    const cleanedData = {};
+                    // 将 "parts.CoreName": 1 转换为 "CoreName": 1
+                    for (const key in flatData) {
+                        if (key.startsWith("parts.")) {
+                            const cleanedKey = key.substring(6); // 移除 "parts." 前缀
+                            cleanedData[cleanedKey] = flatData[key];
                         }
                     }
-                    html += '</div>';
-                });
-                loadoutsContainer.innerHTML = html;
+                    sortAndRender(cleanedData, 'part-selections-data');
+                } else {
+                    sortAndRender(null, 'part-selections-data');
+                }
+            }, (error) => console.error("Part Selections Error: ", error));
 
-            }, (error) => {
-                console.error("监听 winning_loadouts 出错:", error);
-                loadoutsContainer.innerHTML = '<p class="text-red-500">加载数据出错</p>';
-            });
+            // 监听 2: AI 选择
+            onSnapshot(aiSelectionsRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    sortAndRender(docSnap.data(), 'ai-selections-data');
+                } else {
+                    sortAndRender(null, 'ai-selections-data');
+                }
+            }, (error) => console.error("AI Selections Error: ", error));
 
-        } catch (error) {
-            console.error("Firebase 初始化或数据获取失败:", error);
-            loadingIndicator.innerHTML = '<p class="text-red-500 text-center">无法加载统计数据。请检查控制台。</p>';
+            // 监听 3: 模式选择
+            onSnapshot(modeSelectionsRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    sortAndRender(docSnap.data(), 'mode-selections-data');
+                } else {
+                    sortAndRender(null, 'mode-selections-data');
+                }
+            }, (error) => console.error("Mode Selections Error: ", error));
+
+            // 监听 4: 游戏结果
+            onSnapshot(gameOutcomesRef, (docSnap) => {
+                const container = document.getElementById('game-outcomes-data');
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    const wins = data.player_wins || 0;
+                    const losses = data.ai_wins || 0;
+                    const total = wins + losses;
+                    const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : 0;
+
+                    container.innerHTML = `
+                        <div>
+                            <div class="text-4xl font-bold text-green-400">${wins}</div>
+                            <div class="text-sm text-gray-400">玩家胜利</div>
+                        </div>
+                        <div>
+                            <div class="text-4xl font-bold text-red-400">${losses}</div>
+                            <div class="text-sm text-gray-400">AI 胜利</div>
+                        </div>
+                        <div>
+                            <div class="text-4xl font-bold text-blue-400">${total}</div>
+                            <div class="text-sm text-gray-400">总场次</div>
+                        </div>
+                        <div>
+                            <div class="text-4xl font-bold text-blue-400">${winRate}%</div>
+                            <div class="text-sm text-gray-400">玩家胜率</div>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = '<p class="text-gray-500">暂无数据</p>';
+                }
+            }, (error) => console.error("Game Outcomes Error: ", error));
+
+            // 监听 5: AI 对战胜率
+            onSnapshot(aiMatchupsRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    renderAiMatchups(docSnap.data());
+                } else {
+                    renderAiMatchups(null);
+                }
+            }, (error) => console.error("AI Matchups Error: ", error));
+
+            // 监听 6: 胜利配置 (查询)
+            const q = query(winningLoadoutsRef, orderBy("timestamp", "desc"), limit(20));
+            onSnapshot(q, (querySnapshot) => {
+                renderWinningLoadouts(querySnapshot.docs);
+            }, (error) => console.error("Winning Loadouts Error: ", error));
+
+        } catch (e) {
+            console.error("Firebase Analytics Error:", e);
+            // [FIX #7] 更新 UI 以显示详细错误
+            loadingText.innerText = "无法加载统计数据。请检查控制台。";
+            loadingText.style.color = "#f56565"; // text-red-400
+            errorDetails.innerText = `错误详情: ${e.message}`;
+            loadingIndicator.querySelector('.spinner').style.display = 'none'; // 隐藏旋转器
         }
     </script>
+
 </body>
 </html>
