@@ -13,6 +13,12 @@
         .spinner {
             animation: spin 1s linear infinite;
         }
+        /* [新增] 错误信息样式 */
+        .error-message {
+            color: #f56565; /* text-red-400 */
+            font-size: 0.875rem;
+            text-align: center;
+        }
     </style>
 </head>
 <body class="bg-gray-800 text-gray-200 font-mono">
@@ -131,6 +137,15 @@
 
             // --- 渲染函数 ---
 
+            // [新增] 帮助函数：在卡片中渲染错误信息
+            const renderError = (containerId, error) => {
+                const container = document.getElementById(containerId);
+                if (container) {
+                    container.innerHTML = `<p class="error-message">加载失败: ${error.message.split('(')[0]}</p>`;
+                }
+                console.error(`Firebase Error (${containerId}):`, error);
+            };
+
             // 帮助函数：对简单的键值对数据进行排序和渲染
             const sortAndRender = (data, containerId) => {
                 const container = document.getElementById(containerId);
@@ -245,7 +260,7 @@
                 } else {
                     sortAndRender(null, 'part-selections-data');
                 }
-            }, (error) => console.error("Part Selections Error: ", error));
+            }, (error) => renderError('part-selections-data', error)); // [修改]
 
             // 监听 2: AI 选择
             onSnapshot(aiSelectionsRef, (docSnap) => {
@@ -254,7 +269,7 @@
                 } else {
                     sortAndRender(null, 'ai-selections-data');
                 }
-            }, (error) => console.error("AI Selections Error: ", error));
+            }, (error) => renderError('ai-selections-data', error)); // [修改]
 
             // 监听 3: 模式选择
             onSnapshot(modeSelectionsRef, (docSnap) => {
@@ -263,7 +278,7 @@
                 } else {
                     sortAndRender(null, 'mode-selections-data');
                 }
-            }, (error) => console.error("Mode Selections Error: ", error));
+            }, (error) => renderError('mode-selections-data', error)); // [修改]
 
             // 监听 4: 游戏结果
             onSnapshot(gameOutcomesRef, (docSnap) => {
@@ -296,7 +311,7 @@
                 } else {
                     container.innerHTML = '<p class="text-gray-500">暂无数据</p>';
                 }
-            }, (error) => console.error("Game Outcomes Error: ", error));
+            }, (error) => renderError('game-outcomes-data', error)); // [修改]
 
             // 监听 5: AI 对战胜率
             onSnapshot(aiMatchupsRef, (docSnap) => {
@@ -305,13 +320,13 @@
                 } else {
                     renderAiMatchups(null);
                 }
-            }, (error) => console.error("AI Matchups Error: ", error));
+            }, (error) => renderError('ai-matchups-data', error)); // [修改]
 
             // 监听 6: 胜利配置 (查询)
             const q = query(winningLoadoutsRef, orderBy("timestamp", "desc"), limit(20));
             onSnapshot(q, (querySnapshot) => {
                 renderWinningLoadouts(querySnapshot.docs);
-            }, (error) => console.error("Winning Loadouts Error: ", error));
+            }, (error) => renderError('winning-loadouts-data', error)); // [修改]
 
         } catch (e) {
             console.error("Firebase Analytics Error:", e);
