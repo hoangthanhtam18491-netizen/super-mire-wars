@@ -256,14 +256,16 @@ def _resolve_effect_logic(log, defender_entity, target_part, overflow_hits, over
     return log, dice_roll_details_2
 
 
+# [v_REROLL] 修改函数签名
 def resolve_attack(attacker_entity, defender_entity, action, target_part_name, is_back_attack=False,
-                   chosen_effect=None):
+                   chosen_effect=None, skip_reroll_phase=False, rerolled_attack_raw=None, rerolled_defense_raw=None):
     """
     [v_MODIFIED v1.29]
     处理一次完整的攻击结算流程。
     现在接收通用的 GameEntity。
     抛射物在攻击后会自毁。
     [BUG 修复] 确保所有代码路径都返回一个 4 元组。
+    [v_REROLL] 添加 skip_reroll_phase 和 rerolled_..._raw 参数用于专注重投。
     """
     log = [f"> {attacker_entity.name} 使用 [{action.name}] 攻击 {defender_entity.name}。"]
 
@@ -331,8 +333,12 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
 
     dice_roll_details['attack_dice_input'] = attack_dice_counts.copy()
 
-    # [修改] 使用新的 roll_dice 和 process_rolls
-    attack_raw_rolls = roll_dice(**attack_dice_counts)
+    # [v_REROLL] 检查是否传入了重投的骰子
+    if rerolled_attack_raw:
+        attack_raw_rolls = rerolled_attack_raw
+        log.append("  > (使用重投后的攻击骰...)")
+    else:
+        attack_raw_rolls = roll_dice(**attack_dice_counts)
 
     # 检查【频闪武器】
     convert_lightning = action.effects and action.effects.get("convert_lightning_to_crit", False)
@@ -375,8 +381,13 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
 
     dice_roll_details['defense_dice_input'] = {'white_count': white_dice_count, 'blue_count': blue_dice_count}
 
-    # [修改] 使用新的 roll_dice 和 process_rolls
-    defense_raw_rolls = roll_dice(white_count=white_dice_count, blue_count=blue_dice_count)
+    # [v_REROLL] 检查是否传入了重投的骰子
+    if rerolled_defense_raw:
+        defense_raw_rolls = rerolled_defense_raw
+        log.append("  > (使用重投后的防御骰...)")
+    else:
+        defense_raw_rolls = roll_dice(white_count=white_dice_count, blue_count=blue_dice_count)
+
     processed_defense_rolls, defense_roll = process_rolls(
         defense_raw_rolls,
         stance=defender_entity.stance
@@ -386,7 +397,57 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
     log.append(
         f"  > 防御方 (基于{log_dice_source}) 投掷 {white_dice_count}白 {blue_dice_count}蓝, 结果 (处理后): {defense_roll or '无'}")
 
-    # 4. 结算伤害
+    # 4. [v_REROLL] 专注重投检查
+    if not skip_reroll_phase:
+        # 检查是否*任何一方*是玩家机甲且有链接值
+        player_is_attacker = (attacker_entity.controller == 'player')
+        player_is_defender = (defender_entity.controller == 'player')
+
+        attacker_can_reroll = (
+                player_is_attacker and
+                isinstance(attacker_entity, Mech) and
+                attacker_entity.pilot and
+                attacker_entity.pilot.link_points > 0
+        )
+        defender_can_reroll = (
+                player_is_defender and
+                isinstance(defender_entity, Mech) and
+                defender_entity.pilot and
+                defender_entity.pilot.link_points > 0
+        )
+
+        # 只要玩家 (作为攻击方或防御方) 可以重投，就中断
+        if attacker_can_reroll or defender_can_reroll:
+
+            player_link_points = 0
+            if player_is_attacker:
+                # 确保 attacker_entity 是 Mech 实例 (理论上 attacker_can_reroll 已保证)
+                if isinstance(attacker_entity, Mech):
+                    player_link_points = attacker_entity.pilot.link_points
+            elif player_is_defender:
+                # 确保 defender_entity 是 Mech 实例
+                if isinstance(defender_entity, Mech):
+                    player_link_points = defender_entity.pilot.link_points
+
+            log.append(f"  > 玩家链接值: {player_link_points}。等待重投决策...")
+
+            # 准备用于 *恢复* 战斗的数据
+            pending_reroll_data = {
+                'attacker_id': attacker_entity.id,
+                'defender_id': defender_entity.id,
+                'action_dict': action.to_dict(),
+                'target_part_name': target_part_name,
+                'is_back_attack': is_back_attack,
+                'attack_raw_rolls': attack_raw_rolls,  # 存储 *原始* 结果
+                'defense_raw_rolls': defense_raw_rolls,  # 存储 *原始* 结果
+                'player_is_attacker': player_is_attacker,  # 告诉控制器谁是玩家
+                'player_is_defender': player_is_defender
+            }
+
+            # 中断并返回！
+            return log, "reroll_choice_required", pending_reroll_data, dice_roll_details
+
+    # 5. 结算伤害
     defenses = defense_roll.get('防御', 0)
     dodges = defense_roll.get('闪避', 0)
     cancelled_hits = min(hits, defenses)
@@ -400,7 +461,7 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
     log.append(
         f"  > {dodges + cancelled_crits}个[闪避]抵消了{cancelled_crits}个[重击]和{cancelled_hits_by_dodge}个[轻击]。")
 
-    # 5. 判断结果
+    # 6. 判断结果
     final_damage = hits + crits
     overflow_hits_for_effects = hits
     overflow_crits_for_effects = crits
@@ -408,7 +469,7 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
     if final_damage > 0:
         log.append(f"  > 最终造成了 [击穿]！")
 
-        # 5.1 更新状态
+        # 6.1 更新状态
         # [v1.36 修复] 抛射物被击穿时应立即摧毁，无视 "ok -> damaged" 规则
         if isinstance(defender_entity, Projectile):
             target_part.status = 'destroyed'
@@ -438,7 +499,7 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
             defender_entity.status = 'destroyed'
             log.append(f"  > 实体 [{defender_entity.name}] 的核心被摧毁，实体被移除！")
 
-        # 5.2 --- 【毁伤】/【霰射】/【顺劈】互斥选择 ---
+        # 6.2 --- 【毁伤】/【霰射】/【顺劈】互斥选择 ---
         # [修改 v1.17] 这些效果只在攻击机甲时有效
         if not is_mech_defender:
             log.append(f"  > 目标不是机甲，跳过【毁伤】/【霰射】/【顺劈】效果结算。")

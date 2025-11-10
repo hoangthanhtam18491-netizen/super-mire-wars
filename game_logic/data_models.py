@@ -303,6 +303,7 @@ class Mech(GameEntity):
         self.opening_move_taken = False
         self.actions_used_this_turn = []
         self.pending_effect_data = None
+        self.pending_reroll_data = None # [v_REROLL] 新增
         # ---
 
     def get_total_evasion(self):
@@ -466,6 +467,7 @@ class Mech(GameEntity):
             "opening_move_taken": self.opening_move_taken,
             "actions_used_this_turn": make_json_safe(self.actions_used_this_turn),
             "pending_effect_data": make_json_safe(self.pending_effect_data),
+            "pending_reroll_data": make_json_safe(self.pending_reroll_data), # [v_REROLL] 新增
         })
         return base_dict
 
@@ -505,6 +507,7 @@ class Mech(GameEntity):
         mech.opening_move_taken = data.get('opening_move_taken', False)
         mech.actions_used_this_turn = data.get('actions_used_this_turn', [])
         mech.pending_effect_data = data.get('pending_effect_data', None)
+        mech.pending_reroll_data = data.get('pending_reroll_data', None) # [v_REROLL] 新增
         mech.last_pos = data.get('last_pos', None)
 
         # [v1.22] 确保 controller_css 被设置

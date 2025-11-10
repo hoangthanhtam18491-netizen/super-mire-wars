@@ -14,9 +14,11 @@ DICE_FACES = {
 # [新增] 定义黑骰子的面
 BLACK_DIE_FACES = ['core', 'legs', 'left_arm', 'right_arm', 'backpack', 'any']
 
+
 def roll_black_die():
     """投掷一个黑骰子（部位骰）并返回结果。"""
     return random.choice(BLACK_DIE_FACES)
+
 
 # 用于将骰面结果映射到中文名称
 RESULT_MAP = {
@@ -192,3 +194,32 @@ def process_rolls(raw_rolls_dict, stance='defense', convert_lightning_to_crit=Fa
 
     return processed_results_by_color, aggregated_summary
 
+
+# [v_REROLL 新增] 专注重投功能
+def reroll_specific_dice(raw_rolls_dict, selections_to_reroll):
+    """
+    根据索引重投 'raw_rolls_dict' 中的特定骰子。
+    selections_to_reroll 是一个列表, 格式为:
+    [{'color': 'yellow', 'index': 0}, {'color': 'red', 'index': 2}, ...]
+    """
+    if not selections_to_reroll:
+        return raw_rolls_dict  # 没有骰子被重投
+
+    # 遍历玩家的选择
+    for selection in selections_to_reroll:
+        color = selection.get('color')
+        index = selection.get('index')
+        color_key = f"{color}_rolls"  # 例如 'yellow_rolls'
+
+        # 验证数据是否有效
+        if color in DICE_FACES and color_key in raw_rolls_dict and \
+                isinstance(index, int) and 0 <= index < len(raw_rolls_dict[color_key]):
+
+            # 执行重投并替换原始字典中的骰子
+            new_die_roll = random.choice(DICE_FACES[color])
+            raw_rolls_dict[color_key][index] = new_die_roll
+        else:
+            # 记录一个无害的警告，以防前端发送了无效数据
+            print(f"警告: 收到无效的重投请求: {selection}")
+
+    return raw_rolls_dict

@@ -1,9 +1,8 @@
-from .data_models import Mech, Projectile # [MODIFIED] 从这里移除 Part
+from .data_models import Mech, Projectile, Action  # [v_REROLL] 导入 Action
 from .combat_system import resolve_attack, _resolve_effect_logic
-from .dice_roller import roll_black_die
+from .dice_roller import roll_black_die, reroll_specific_dice  # [v_REROLL] 导入 reroll
 from .game_logic import is_back_attack, run_projectile_logic, check_interception, GameState
 import random
-
 
 
 # [v_REFACTOR]
@@ -15,10 +14,14 @@ import random
 # --- 辅助函数 ---
 
 def _clear_transient_state(game_state):
-    """(辅助函数) 清除所有用于单次动画的状态"""
+    """
+    (辅助函数) 清除所有用于单次动画的状态
+    [v_REROLL_FIX] 此函数现在只应清除 last_pos。
+    visual_events 由控制器在适当的时候（例如处理完中断后）清除。
+    """
     for entity in game_state.entities.values():
         entity.last_pos = None
-    game_state.visual_events = []
+    # game_state.visual_events = [] # [v_REROLL_FIX] 移除此行
     return game_state
 
 
@@ -84,6 +87,7 @@ def handle_select_timing(game_state, player_mech, timing):
     if player_mech.turn_phase == 'timing' and not game_state.game_over:
         player_mech.timing = timing
         game_state = _clear_transient_state(game_state)
+        game_state.visual_events = []  # [v_REROLL_FIX] 确认动作后清除事件
         return game_state, log, None, None
     return game_state, log, None, "Not in timing phase"
 
@@ -93,6 +97,7 @@ def handle_confirm_timing(game_state, player_mech):
     if player_mech.turn_phase == 'timing' and player_mech.timing and not game_state.game_over:
         player_mech.turn_phase = 'stance'
         game_state = _clear_transient_state(game_state)
+        game_state.visual_events = []  # [v_REROLL_FIX] 确认动作后清除事件
         log.append(f"> 时机已确认为 [{player_mech.timing}]。进入姿态选择阶段。")
         return game_state, log, None, None
     return game_state, log, None, "Please select a timing first."
@@ -103,6 +108,7 @@ def handle_change_stance(game_state, player_mech, new_stance):
     if player_mech.turn_phase == 'stance' and not game_state.game_over:
         player_mech.stance = new_stance
         game_state = _clear_transient_state(game_state)
+        game_state.visual_events = []  # [v_REROLL_FIX] 确认动作后清除事件
         return game_state, log, None, None
     return game_state, log, None, "Not in stance phase."
 
@@ -112,6 +118,7 @@ def handle_confirm_stance(game_state, player_mech):
     if player_mech.turn_phase == 'stance' and not game_state.game_over:
         player_mech.turn_phase = 'adjustment'
         game_state = _clear_transient_state(game_state)
+        game_state.visual_events = []  # [v_REROLL_FIX] 确认动作后清除事件
         log.append(f"> 姿态已确认为 [{player_mech.stance}]。进入调整阶段。")
         return game_state, log, None, None
     return game_state, log, None, "Not in stance phase."
@@ -127,6 +134,7 @@ def handle_adjust_move(game_state, player_mech, target_pos, final_orientation):
         player_mech.orientation = final_orientation
         player_mech.player_tp -= 1
         player_mech.turn_phase = 'main'
+        game_state.visual_events = []  # [v_REROLL_FIX] 确认动作后清除事件
         log.append(f"> 玩家调整移动到 {player_mech.pos}。进入主动作阶段。")
         return game_state, log, None, None
     return game_state, log, None, "Cannot perform adjust move"
@@ -139,6 +147,7 @@ def handle_change_orientation(game_state, player_mech, final_orientation):
         player_mech.player_tp -= 1
         player_mech.turn_phase = 'main'
         game_state = _clear_transient_state(game_state)
+        game_state.visual_events = []  # [v_REROLL_FIX] 确认动作后清除事件
         log.append(f"> 玩家仅转向。进入主动作阶段。")
         return game_state, log, None, None
     return game_state, log, None, "Cannot change orientation"
@@ -149,6 +158,7 @@ def handle_skip_adjustment(game_state, player_mech):
     if player_mech.turn_phase == 'adjustment' and not game_state.game_over:
         player_mech.turn_phase = 'main'
         game_state = _clear_transient_state(game_state)
+        game_state.visual_events = []  # [v_REROLL_FIX] 确认动作后清除事件
         log.append(f"> 玩家跳过调整阶段。进入主动作阶段。")
         return game_state, log, None, None
     return game_state, log, None, "Cannot skip adjustment"
@@ -159,6 +169,9 @@ def handle_skip_adjustment(game_state, player_mech):
 def handle_move_player(game_state, player_mech, action_name, part_slot, target_pos, final_orientation):
     log = []
     action = player_mech.get_action_by_name_and_slot(action_name, part_slot)
+
+    # [v_REROLL_FIX] 在动作开始时清除视觉事件
+    game_state.visual_events = []
 
     if player_mech.turn_phase == 'main' and action:
         game_state, action_log, success, message = _execute_main_action(game_state, player_mech, action, action_name,
@@ -177,6 +190,9 @@ def handle_move_player(game_state, player_mech, action_name, part_slot, target_p
 
 def handle_execute_attack(game_state, player_mech, data):
     log = []
+    # [v_REROLL_FIX] 在动作开始时清除视觉事件
+    game_state.visual_events = []
+
     action_name = data.get('action_name')
     part_slot = data.get('part_slot')
     attack_action = player_mech.get_action_by_name_and_slot(action_name, part_slot)
@@ -263,7 +279,17 @@ def handle_execute_attack(game_state, player_mech, data):
             log.extend(entity_log)
             attacks_to_resolve_list.extend(attacks)
 
+        # [v_PROJECTILE_FIX] 新增变量
+        reroll_triggered = False
+        first_reroll_result_data = None
+
         for attack in attacks_to_resolve_list:
+            # [v_PROJECTILE_FIX] 如果已触发重投，跳过后续攻击
+            if reroll_triggered:
+                log.append(
+                    f"> [结算] 攻击 {attack.get('action').name if attack.get('action') else ''} 被暂停，等待玩家重投。")
+                continue
+
             if not isinstance(attack, dict): continue
             attacker = attack.get('attacker')
             defender = attack.get('defender')
@@ -293,9 +319,11 @@ def handle_execute_attack(game_state, player_mech, data):
             else:
                 log.append(f"> 攻击自动瞄准 [{defender.name}] 的核心。")
 
+            # [v_REROLL_FIX] 抛射物攻击也需要检查重投
             attack_log, result, overflow_data, dice_roll_details = resolve_attack(
                 attacker_entity=attacker, defender_entity=defender, action=action,
-                target_part_name=target_part_slot, is_back_attack=False, chosen_effect=None
+                target_part_name=target_part_slot, is_back_attack=False, chosen_effect=None,
+                skip_reroll_phase=False  # 允许玩家在被抛射物攻击时重投
             )
             log.extend(attack_log)
             if dice_roll_details:
@@ -304,14 +332,36 @@ def handle_execute_attack(game_state, player_mech, data):
                     action_name=action.name, details=dice_roll_details
                 )
             game_state.add_visual_event('attack_result', defender_pos=defender.pos, result_text=result)
+
+            # [v_REROLL_FIX] 捕获抛射物攻击时的重投
+            if result == "reroll_choice_required":
+                # [v_PROJECTILE_FIX] 设置标志，捕获数据，但不返回
+                reroll_triggered = True
+                # [v_REROLL_FIX] 确保在正确的 mecha (player_mech) 上设置 pending_data
+                player_mech.pending_reroll_data = overflow_data
+                first_reroll_result_data = {
+                    'action_required': 'select_reroll',
+                    'dice_details': dice_roll_details,
+                    'attacker_name': attacker.name,
+                    'defender_name': defender.name,
+                    'action_name': action.name
+                }
+                game_state.add_visual_event('reroll_required', details=first_reroll_result_data)
+                # [v_PROJECTILE_FIX] 不要在这里返回，继续循环（但后续循环会跳过）
+                # return game_state, log, None, result_data, None
+
             game_state.check_game_over()
             if game_state.game_over:
                 break
 
+        # [v_PROJECTILE_FIX] 在循环结束后，检查是否触发了重投
+        if reroll_triggered:
+            return game_state, log, None, first_reroll_result_data, None
+
         return game_state, log, None, None, None
 
     # 2. '射击' 或 '近战' 动作
-    elif attack_action.action_type in ['射击', '近战']:
+    elif attack_action.action_type in ['射击', '近战', '快速']:  # [v_REROLL_FIX] 允许'快速'动作
         if not defender_entity:
             error = "射击/近战动作需要一个实体目标。"
             log.append(f"> [错误] {error}")
@@ -384,9 +434,11 @@ def handle_execute_attack(game_state, player_mech, data):
             log.append(f"> [严重错误] {error}")
             return game_state, log, None, None, error
 
+        # [v_REROLL] 新增参数
         attack_log, result, overflow_data, dice_roll_details = resolve_attack(
             attacker_entity=player_mech, defender_entity=defender_entity, action=attack_action,
-            target_part_name=target_part_slot, is_back_attack=back_attack, chosen_effect=None
+            target_part_name=target_part_slot, is_back_attack=back_attack, chosen_effect=None,
+            skip_reroll_phase=False  # [v_REROLL] 玩家攻击时 *不* 跳过重投阶段
         )
         log.extend(attack_log)
 
@@ -396,6 +448,21 @@ def handle_execute_attack(game_state, player_mech, data):
                 action_name=attack_action.name, details=dice_roll_details
             )
         game_state.add_visual_event('attack_result', defender_pos=defender_entity.pos, result_text=result)
+
+        # [v_REROLL] 捕获重投中断
+        if result == "reroll_choice_required":
+            player_mech.pending_reroll_data = overflow_data  # 'overflow_data' 包含了 pending_reroll_data
+            # [v_REROLL_FIX] 将所有需要的上下文添加到 result_data
+            result_data = {
+                'action_required': 'select_reroll',
+                'dice_details': dice_roll_details,
+                'attacker_name': player_mech.name,
+                'defender_name': defender_entity.name,
+                'action_name': attack_action.name
+            }
+            # [v_REROLL_FIX] 添加视觉事件
+            game_state.add_visual_event('reroll_required', details=result_data)
+            return game_state, log, None, result_data, None
 
         if result == "effect_choice_required":
             player_mech.pending_effect_data = {
@@ -418,6 +485,7 @@ def handle_execute_attack(game_state, player_mech, data):
                                     defender_entity.parts[
                                         'core'].status == 'destroyed' or defender_entity.get_active_parts_count() < 3))))
 
+        # [v_REROLL_FIX] 修复 visual_events 传递 (现在已弃用)
         game_is_over = game_state.check_game_over()
 
         ai_mech = game_state.get_ai_mech()
@@ -427,6 +495,7 @@ def handle_execute_attack(game_state, player_mech, data):
 
         return game_state, log, None, None, None
 
+    # [v_REROLL_FIX] 修复 visual_events 传递 (现在已弃用)
     return game_state, log, None, None, "无效的动作类型"
 
 
@@ -437,6 +506,8 @@ def handle_jettison_part(game_state, player_mech, part_slot):
     from .data_models import Part  # [MODIFIED] 在这里（函数内部）导入 Part
 
     log = []
+    # [v_REROLL_FIX] 在动作开始时清除视觉事件
+    game_state.visual_events = []
 
     # 1. 验证部件和动作
     part = player_mech.parts.get(part_slot)
@@ -493,6 +564,9 @@ def handle_jettison_part(game_state, player_mech, part_slot):
 
 def handle_resolve_effect_choice(game_state, player_mech, choice):
     log = []
+    # [v_REROLL_FIX] 在处理中断时，首先清除所有旧的视觉事件
+    game_state.visual_events = []
+
     pending_data = player_mech.pending_effect_data
     if not pending_data:
         error = "找不到待处理的效果数据！"
@@ -556,3 +630,156 @@ def handle_resolve_effect_choice(game_state, player_mech, choice):
         log.append(f"> [警告] 新的敌人出现: {ai_mech.name}！")
 
     return game_state, log, None, None
+
+
+# [v_REROLL] 新增：处理重投的函数
+def handle_resolve_reroll(game_state, player_mech, data):
+    log = []
+    # [v_REROLL_FIX] 在处理中断时，首先清除所有旧的视觉事件
+    game_state.visual_events = []
+
+    # [v_REROLL_FIX] player_mech 始终是 player_1。我们需要从 pending_data 中找到 *真正* 的玩家实体
+    pending_data = None
+    player_entity_to_clear = None  # 将在重投时消耗链接值的实体
+
+    if player_mech.pending_reroll_data:
+        pending_data = player_mech.pending_reroll_data
+        player_entity_to_clear = player_mech
+    else:
+        # 检查AI是否被中断（AI攻击玩家，玩家是防御方）
+        ai_mech = game_state.get_ai_mech()
+        if ai_mech and ai_mech.pending_reroll_data:
+            pending_data = ai_mech.pending_reroll_data
+            player_entity_to_clear = player_mech  # 玩家是被攻击方
+
+    if not pending_data:
+        # [v_REROLL_FIX] 即使找不到数据，也返回4个值
+        return game_state, log, None, "找不到待处理的重投数据！"
+
+    # 1. 恢复上下文
+    attacker = game_state.get_entity_by_id(pending_data['attacker_id'])
+    defender = game_state.get_entity_by_id(pending_data['defender_id'])
+    action = Action.from_dict(pending_data['action_dict'])
+
+    if not attacker or not defender:
+        return game_state, log, None, "重投时找不到攻击者或防御者。"
+
+    # 2. 准备骰子
+    new_attack_rolls = pending_data['attack_raw_rolls']
+    new_defense_rolls = pending_data['defense_raw_rolls']
+
+    # 3. 获取玩家的重投选择
+    reroll_selections_attacker = data.get('reroll_selections_attacker', [])
+    reroll_selections_defender = data.get('reroll_selections_defender', [])
+    is_skipping = not reroll_selections_attacker and not reroll_selections_defender
+
+    player_did_reroll = False
+    link_cost_applied = False  # 确保只消耗 1 点
+
+    # 4. 执行玩家的重投
+    if pending_data['player_is_attacker'] and reroll_selections_attacker:
+        # 攻击者是玩家 (player_mech)
+        if player_mech.pilot and player_mech.pilot.link_points > 0:
+            log.append(f"  > 玩家 (攻击方) 消耗 1 链接值重投 {len(reroll_selections_attacker)} 枚骰子！")
+            player_mech.pilot.link_points -= 1
+            player_did_reroll = True
+            link_cost_applied = True
+            new_attack_rolls = reroll_specific_dice(new_attack_rolls, reroll_selections_attacker)
+        else:
+            log.append("  > [警告] 玩家试图重投攻击骰，但链接值不足！")
+
+    if pending_data['player_is_defender'] and reroll_selections_defender:
+        # 防御者是玩家 (player_mech)
+        if player_mech.pilot and player_mech.pilot.link_points > 0:
+            log.append(f"  > 玩家 (防御方) 消耗 1 链接值重投 {len(reroll_selections_defender)} 枚骰子！")
+            if not link_cost_applied:
+                player_mech.pilot.link_points -= 1
+            player_did_reroll = True
+            new_defense_rolls = reroll_specific_dice(new_defense_rolls, reroll_selections_defender)
+        else:
+            log.append("  > [警告] 玩家试图重投防御骰，但链接值不足！")
+
+    if not player_did_reroll and not is_skipping:
+        log.append("  > 玩家选择不重投。")
+    elif is_skipping:
+        log.append("  > 玩家跳过重投。")
+
+    # 5. 清除中断状态
+    # [v_REROLL_FIX] 确保清除了正确的 mecha 上的 data
+    if pending_data['player_is_attacker']:
+        if isinstance(attacker, Mech):
+            attacker.pending_reroll_data = None
+    if pending_data['player_is_defender']:
+        if isinstance(defender, Mech):
+            defender.pending_reroll_data = None
+
+    # 6. 恢复战斗 (跳过重投阶段)
+    attack_log, result, overflow_data, dice_roll_details = resolve_attack(
+        attacker_entity=attacker,
+        defender_entity=defender,
+        action=action,
+        target_part_name=pending_data['target_part_name'],
+        is_back_attack=pending_data['is_back_attack'],
+        chosen_effect=None,  # 重投后，效果选择重置
+        skip_reroll_phase=True,  # 关键：跳过下一次中断
+        rerolled_attack_raw=new_attack_rolls,  # 关键：传入新骰子
+        rerolled_defense_raw=new_defense_rolls  # 关键：传入新骰子
+    )
+    log.extend(attack_log)
+
+    # [v_REROLL_FIX] 总是添加最终的掷骰结果事件
+    if dice_roll_details:
+        game_state.add_visual_event(
+            'dice_roll',
+            attacker_name=attacker.name,
+            defender_name=defender.name,
+            action_name=action.name,
+            details=dice_roll_details
+        )
+    game_state.add_visual_event('attack_result', defender_pos=defender.pos, result_text=result)
+
+    # 7. [重要] 检查战斗恢复后是否需要 *另一次* 中断 (效果选择)
+    result_data = None
+    if result == "effect_choice_required":
+        # [v_REROLL_FIX] 确保在正确的 mecha 上设置 pending_data
+        if isinstance(attacker, Mech):
+            attacker.pending_effect_data = overflow_data
+        result_data = {
+            'action_required': 'select_effect',
+            'options': overflow_data['options'],
+            # [v_REROLL_FIX] 确保 dice_roll_details 也被传递
+            'dice_details': dice_roll_details,
+            'attacker_name': attacker.name,
+            'defender_name': defender.name,
+            'action_name': action.name
+        }
+        # [v_REROLL_FIX] 添加视觉事件
+        game_state.add_visual_event('effect_choice_required', details=result_data)
+        return game_state, log, result_data, None
+
+    # 8. 如果战斗结束，正常返回
+    game_is_over = game_state.check_game_over()
+
+    # [v_REROLL_FIX] 修复“卡在阶段4”的BUG
+    # 无论玩家是攻击方还是防御方，只要重投/效果结算完毕，且游戏未结束，
+    # 并且现在是AI的回合（即玩家是防御方），我们就必须重置玩家的回合。
+    # 玩家攻击时 (player_is_attacker)，我们 *不* 重置，因为玩家可能还有AP。
+    if (not game_is_over and not player_mech.pending_effect_data):
+
+        # 检查这是否是 AI 回合的结束
+        if pending_data['player_is_defender']:
+            log.append(
+                "> AI回合结束。请开始你的回合。" if game_state.game_mode != 'range' else "> [靶场模式] 请开始你的回合。")
+            log.append("-" * 20)
+
+            # [v_REROLL_FIX] 重置玩家状态
+            player_mech.player_ap = 2
+            player_mech.player_tp = 1
+            player_mech.turn_phase = 'timing'
+            player_mech.timing = None
+            player_mech.opening_move_taken = False
+            player_mech.actions_used_this_turn = []
+            player_mech.pending_effect_data = None
+            player_mech.pending_reroll_data = None  # 确保清除
+
+    return game_state, log, result_data, None

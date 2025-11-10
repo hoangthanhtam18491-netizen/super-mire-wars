@@ -30,7 +30,11 @@ def _get_game_state_and_player(data):
 
 
 def _handle_controller_response(game_state, log_entries, result_data, error):
-    """(辅助函数) 处理来自 game_controller 的标准响应。"""
+    """
+    (辅助函数) 处理来自 game_controller 的标准响应。
+    [v_REROLL_FIX] 此函数现在是 game_state 持久化的唯一真实来源（在 API 调用期间）。
+    它不再清除 visual_events，而是由 /game 路由或控制器函数在适当的时候清除。
+    """
     if error:
         return jsonify({'success': False, 'message': error})
 
@@ -40,8 +44,11 @@ def _handle_controller_response(game_state, log_entries, result_data, error):
         log = log[-MAX_LOG_ENTRIES:]
 
     session['combat_log'] = log
+
+    # [v_REROLL_FIX] 不再从 session pop 'visual_feedback_events'。
+    # visual_events 现在完全在 game_state 对象内部管理。
+    # 我们只在这里保存 game_state。
     session['game_state'] = game_state.to_dict()
-    session['visual_feedback_events'] = game_state.visual_events
 
     response = {'success': True}
     if result_data:
@@ -56,6 +63,10 @@ def select_timing():
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
 
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
+
     new_state, logs, result, err = controller.handle_select_timing(game_state, player_mech, data.get('timing'))
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -65,6 +76,10 @@ def confirm_timing():
     data = request.get_json()
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
+
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
 
     new_state, logs, result, err = controller.handle_confirm_timing(game_state, player_mech)
     return _handle_controller_response(new_state, logs, result, err)
@@ -76,6 +91,10 @@ def change_stance():
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
 
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
+
     new_state, logs, result, err = controller.handle_change_stance(game_state, player_mech, data.get('stance'))
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -86,6 +105,10 @@ def confirm_stance():
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
 
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
+
     new_state, logs, result, err = controller.handle_confirm_stance(game_state, player_mech)
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -95,6 +118,10 @@ def execute_adjust_move():
     data = request.get_json()
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
+
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
 
     new_state, logs, result, err = controller.handle_adjust_move(
         game_state, player_mech, data.get('target_pos'), data.get('final_orientation')
@@ -108,6 +135,10 @@ def change_orientation():
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
 
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
+
     new_state, logs, result, err = controller.handle_change_orientation(
         game_state, player_mech, data.get('final_orientation')
     )
@@ -120,6 +151,10 @@ def skip_adjustment():
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
 
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
+
     new_state, logs, result, err = controller.handle_skip_adjustment(game_state, player_mech)
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -129,6 +164,10 @@ def move_player():
     data = request.get_json()
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
+
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
 
     if player_mech.pending_effect_data:
         return jsonify({'success': False, 'message': '必须先选择效果！'})
@@ -147,11 +186,16 @@ def execute_attack():
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
 
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
+
     if player_mech.pending_effect_data:
         return jsonify({'success': False, 'message': '必须先选择效果！'})
 
     # handle_execute_attack 返回 (game_state, log, visual_events, result_data, error_message)
     # [v_REFACTOR_FIX] 修复 ValueError。期望 5 个返回值，而不是 4 个。
+    # [v_REROLL_FIX] visual_events 已弃用，使用 _
     new_state, logs, _, result, err = controller.handle_execute_attack(game_state, player_mech, data)
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -162,6 +206,10 @@ def jettison_part():
     data = request.get_json()
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
+
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投或效果！'})
 
     new_state, logs, result, err = controller.handle_jettison_part(
         game_state, player_mech, data.get('part_slot')
@@ -175,8 +223,30 @@ def resolve_effect_choice():
     game_state, player_mech, error_response = _get_game_state_and_player(data)
     if error_response: return error_response
 
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_reroll_data:
+        return jsonify({'success': False, 'message': '必须先解决重投！'})
+
     new_state, logs, result, err = controller.handle_resolve_effect_choice(game_state, player_mech, data.get('choice'))
     return _handle_controller_response(new_state, logs, result, err)
+
+
+# [v_REROLL] 新增路由
+@api_bp.route('/resolve_reroll', methods=['POST'])
+def resolve_reroll():
+    data = request.get_json()
+    game_state, player_mech, error_response = _get_game_state_and_player(data)
+    if error_response: return error_response
+
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data:
+        return jsonify({'success': False, 'message': '必须先选择效果！'})
+
+    new_state, logs, result_data, err = controller.handle_resolve_reroll(game_state, player_mech, data)
+
+    # [v_REROLL] handle_resolve_reroll 可能会返回 'effect_choice_required'
+    # _handle_controller_response 已经能正确处理这种情况
+    return _handle_controller_response(new_state, logs, result_data, err)
 
 
 @api_bp.route('/get_move_range', methods=['POST'])
@@ -186,6 +256,9 @@ def get_move_range():
     if error_response: return error_response
 
     if game_state.game_over: return jsonify({'valid_moves': []})
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
+        return jsonify({'valid_moves': []})
 
     action_name = data.get('action_name')
     part_slot = data.get('part_slot')
@@ -220,6 +293,9 @@ def get_attack_range():
     if error_response: return error_response
 
     if game_state.game_over:
+        return jsonify({'valid_targets': [], 'valid_launch_cells': []})
+    # [v_REROLL] 增加中断检查
+    if player_mech.pending_effect_data or player_mech.pending_reroll_data:
         return jsonify({'valid_targets': [], 'valid_launch_cells': []})
 
     action_name = data.get('action_name')

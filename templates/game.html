@@ -241,9 +241,38 @@
         .dice-result.闪电 { background-color: #f6ad55; color: #1a202c; }
         .dice-result.眼睛 { background-color: #9f7aea; color: white; }
         .dice-result.空白 { background-color: #2d3748; color: var(--disabled-color); }
-        #dice-roll-close {
-            width: auto; padding: 0.5rem 1rem; float: right; margin-top: 1rem;
-            background-color: var(--border-color);
+
+        /* [v_REROLL] 新增重投样式 */
+        .dice-reroll-group {
+            display: inline-flex; /* [v_REROLL_FIX] 改为 inline-flex */
+            align-items: center;
+            justify-content: center;
+            padding: 2px;
+            border: 2px solid transparent;
+            border-radius: 4px;
+            transition: all 0.2s;
+            /* 确保组合骰子（如 轻击*2）靠在一起 */
+            gap: 0.1rem;
+        }
+        .dice-reroll-group.clickable {
+            cursor: pointer;
+        }
+        .dice-reroll-group.clickable:hover {
+            transform: scale(1.1);
+            background-color: rgba(66, 153, 225, 0.2);
+            border-color: var(--primary-color);
+        }
+        .dice-reroll-group.selected {
+            box-shadow: 0 0 10px 3px var(--primary-color);
+            border-color: var(--primary-color);
+            background-color: #2c3748;
+        }
+        .dice-reroll-group.disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        .reroll-hidden {
+            display: none !important;
         }
 
 
@@ -380,6 +409,13 @@
             待处理：请选择效果
         </div>
         {% endif %}
+        <!-- [v_REROLL] 新增重投警告 -->
+        {% if player_mech.pending_reroll_data %}
+        <div id="pending-reroll-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
+            待处理：请解决重投
+        </div>
+        {% endif %}
+
 
         <!-- [MODIFIED v2.2] 驾驶员信息 -->
         <div id="player-pilot-info" class="bg-gray-900 p-3 rounded-lg border border-blue-500">
@@ -630,7 +666,17 @@
                  <span>结果:</span>
                  <div class="dice-group" id="dice-roll-secondary-result"></div>
             </div>
-            <button class="btn" id="dice-roll-close" onclick="closeDiceRollModal()">关闭</button>
+
+            <!-- [v_REROLL] 修改按钮 -->
+            <div id="dice-roll-buttons-default">
+                <button class="btn" id="dice-roll-close" onclick="closeDiceRollModal()" style="width: auto; padding: 0.5rem 1rem; float: right; margin-top: 1rem; background-color: var(--border-color);">关闭</button>
+            </div>
+            <div id="dice-roll-buttons-reroll" class="reroll-hidden" style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button class="btn" id="dice-roll-skip" onclick="confirmReroll(true)" style="background-color: var(--border-color); flex: 1;">跳过</button>
+                <button class="btn" id="dice-roll-confirm" onclick="confirmReroll(false)" style="background-color: var(--primary-color); flex: 2;">
+                    确认重投 (<span id="reroll-link-cost">1</span> 链接值)
+                </button>
+            </div>
         </div>
     </div>
 
@@ -670,6 +716,7 @@
     // [v1.23] 状态现在从 allEntities 中查找
     const allEntities = {{ game.get_all_entities_as_dict() | tojson | safe }};
     const playerID = '{{ player_mech.id if player_mech else "" }}';
+    // [v_REROLL] playerEntity 现在包含 pilot 数据
     const playerEntity = allEntities.find(e => e.id === playerID) || {};
     // [新增] 查找AI实体
     const aiEntity = allEntities.find(e => e.controller === 'ai' && e.entity_type === 'mech' && e.status !== 'destroyed');
@@ -685,6 +732,7 @@
         isPlayerLocked: {{ 'true' if is_player_locked else 'false' }},
         gameOver: '{{ game.game_over or "" }}',
         pendingEffect: playerEntity.pending_effect_data ? true : false,
+        pendingReroll: playerEntity.pending_reroll_data ? true : false, // [v_REROLL] 新增
         visualEvents: {{ visual_feedback_events | tojson | safe }},
         runProjectilePhase: {{ 'true' if run_projectile_phase else 'false' }} // [新增] AI回合暂停标志
     };
@@ -732,7 +780,7 @@
 
         // --- [新增] AI 回合暂停逻辑 ---
         // 检查是否刚刚完成了 AI 机甲阶段
-        if (gameState.runProjectilePhase && !gameState.gameOver && !gameState.pendingEffect) {
+        if (gameState.runProjectilePhase && !gameState.gameOver && !gameState.pendingEffect && !gameState.pendingReroll) { // [v_REROLL] 增加检查
             // 禁用所有 UI，等待抛射物阶段
             document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
                 if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal')) {
@@ -775,18 +823,58 @@
         }
         // --- [暂停逻辑结束] ---
 
+        // [v_REROLL] 修改事件检查顺序
+        const rerollEvent = gameState.visualEvents.find(e => e.type === 'reroll_required');
         const diceRollEvent = gameState.visualEvents.find(e => e.type === 'dice_roll');
         const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
 
-        if (diceRollEvent) {
-            showDiceRollModal(diceRollEvent);
-            // [修改] 存储计时器
+        if (rerollEvent) {
+            // [v_REROLL_FIX] 修复 TypeError
+            const rerollData = rerollEvent.details; // rerollData 是 { action_required, dice_details, attacker_name, ... }
+            const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
+            const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
+            // [v_REROLL_FIX] 将所有需要的参数传递给 modal
+            showDiceRollModal(
+                rerollData.dice_details, // 1. 骰子详情
+                rerollData.action_name,  // 2. 动作名称
+                rerollData.attacker_name,// 3. 攻击方名称
+                rerollData.defender_name,// 4. 防御方名称
+                true, // 5. isInteractive
+                attackerIsPlayer,      // 6.
+                defenderIsPlayer       // 7.
+            );
+        } else if (diceRollEvent) {
+            // 玩家攻击了 AI (或重投完成), 正常显示
+            const eventData = diceRollEvent; // eventData 是 { type: 'dice_roll', details, attacker_name, ... }
+            // [v_REROLL_FIX] 将所有需要的参数传递给 modal
+            showDiceRollModal(
+                eventData.details,
+                eventData.action_name,
+                eventData.attacker_name,
+                eventData.defender_name,
+                false // isInteractive
+            );
             diceModalTimer = setTimeout(() => {
                 closeDiceRollModal(); // 5秒后自动关闭
             }, 5000);
         } else if (firstAttackResult) {
             showAttackEffect(firstAttackResult.defender_pos, firstAttackResult.result_text); // [MODIFIED]
         }
+
+        // [v_REROLL_DEBUG] 新增：判断错误类型的日志
+        if (gameState.pendingReroll && !rerollEvent) {
+            console.error(
+                "--- [错误类型判断] ---",
+                "\n游戏卡死！",
+                "\n原因: gameState.pendingReroll 为 true (红色警告条出现)，",
+                "但是 gameState.visualEvents 中 *没有* 找到 'reroll_required' 事件。",
+                "\n这导致骰子弹窗 (dice-roll-modal) 无法被触发。",
+                "\n请检查后端（game_controller.py 和 game_routes.py）中所有调用 resolve_attack 的地方，",
+                "确保在 'reroll_choice_required' 返回时，已将 'reroll_required' 事件添加到 visual_events 列表中。",
+                "\nVisual Events 内容:", gameState.visualEvents
+            );
+        }
+
 
         // [新增] 绑定部件详情弹窗
         partDetailModalBackdrop = document.getElementById('part-detail-modal-backdrop');
@@ -985,11 +1073,13 @@
             });
         }
 
-        if (gameState.pendingEffect) {
+        // [v_REROLL] 增加 pendingReroll 检查
+        if (gameState.pendingEffect || gameState.pendingReroll) {
+            const message = gameState.pendingReroll ? '请先解决重投！' : '请先选择效果！';
             document.querySelectorAll('#phase-main-controls .action-item, #phase-adjustment-controls .action-item, #end-turn-btn').forEach(item => {
                 item.classList.add('disabled');
                 item.onclick = null;
-                item.title = '请先选择效果';
+                item.title = message;
             });
             return;
         }
@@ -1037,7 +1127,7 @@
     }
 
     function selectAction(name, range, type, cost, partSlot) {
-        if (gameState.pendingEffect) return;
+        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
         clearHighlights();
         selectedAction = { name, range, type, cost, slot: partSlot, player_id: playerID };
 
@@ -1090,7 +1180,7 @@
 
     // [MODIFIED] 添加弃置动作的专用处理函数
     function initiateJettison(partSlot) {
-        if (gameState.pendingEffect) return;
+        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
         clearHighlights();
 
         // [v_REFACTOR_FIX] 添加 /api/ 前缀
@@ -1194,10 +1284,38 @@
 
             if(data.success) {
                 if (data.action_required === 'select_part') { showPartSelector(); }
+                // [v_REROLL] 新增检查
+                else if (data.action_required === 'select_reroll') {
+                    // [v_REROLL_FIX] 修复 TypeError
+                    const rerollData = data; // data 是 { action_required, dice_details, attacker_name, ... }
+                    const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
+                    const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
+                    // [v_REROLL_FIX] 将所有需要的参数传递给 modal
+                    showDiceRollModal(
+                        rerollData.dice_details, // 1. 骰子详情
+                        rerollData.action_name,  // 2. 动作名称
+                        rerollData.attacker_name,// 3. 攻击方名称
+                        rerollData.defender_name,// 4. 防御方名称
+                        true, // 5. isInteractive
+                        attackerIsPlayer,      // 6.
+                        defenderIsPlayer       // 7.
+                    );
+                    // 保持UI禁用，因为模态框现在是激活的
+                }
                 else if (data.action_required === 'select_effect') { showEffectSelector(data.options); }
                 else { window.location.reload(); }
             } else {
                 console.warn("操作失败: " + data.message);
+                // [v_REROLL_DEBUG] 新增：判断错误类型的日志
+                if (data.message.includes("必须先解决重投")) {
+                     console.error(
+                        "--- [错误类型判断] ---",
+                        "\n操作失败！",
+                        "\n原因: gameState.pendingReroll (后端) 为 true。",
+                        "\n这通常意味着前端状态与后端不同步，或者骰子弹窗没有正确显示。",
+                        "\n请检查上一个 'reroll_required' 事件是否被正确处理。"
+                    );
+                }
                 window.location.reload(); // 即使失败也重载以同步状态
             }
         }).catch(e => {
@@ -1209,7 +1327,7 @@
     // --- [BUG 修复：替换以下5个函数] ---
 
     function selectTiming(t) {
-        if (gameState.pendingEffect) return;
+        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
 
         // 1. 立即在本地更新状态 (Optimistic UI Update)
         gameState.timing = t;
@@ -1237,7 +1355,7 @@
     }
 
     function confirmTiming() {
-        if (gameState.pendingEffect) return;
+        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
 
         // 1. 在后台与服务器同步
         // [v_REFACTOR_FIX] 添加 /api/ 前缀
@@ -1264,7 +1382,7 @@
     }
 
     function changeStance(s) {
-        if (gameState.pendingEffect) return;
+        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
 
         // 1. 立即在本地更新状态 (Optimistic UI Update)
         playerEntity.stance = s; // 更新本地姿态
@@ -1291,7 +1409,7 @@
     }
 
     function confirmStance() {
-        if (gameState.pendingEffect) return;
+        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
 
         // 1. 在后台与服务器同步
         // [v_REFACTOR_FIX] 添加 /api/ 前缀
@@ -1318,7 +1436,7 @@
     }
 
     function skipAdjustment() {
-        if (gameState.pendingEffect) return;
+        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
 
         // 1. 在后台与服务器同步
         // [v_REFACTOR_FIX] 添加 /api/ 前缀
@@ -1460,7 +1578,8 @@
         return html || '<span>无</span>';
     }
 
-    function formatDiceResult(result) {
+    // [v_REROLL] 修改函数签名
+    function formatDiceResult(result, rollType, isClickable = false) {
         // [v_MODIFIED] 重写以按“颗”来分隔
         let html = '';
         // result 现在的结构是: {'yellow': [['轻击', '轻击'], ['空白']], 'red': [['重击']]}
@@ -1475,20 +1594,30 @@
 
             if (dice_groups && dice_groups.length > 0) {
 
-                // 迭代 *每一颗骰子* 的结果组
-                for (const die_results of dice_groups) { // e.g., ['轻击', '轻击'] or ['空白']
+                // [v_REROLL_FIX] 使用 .entries() 来获取索引
+                for (const [die_index, die_results] of dice_groups.entries()) { // e.g., [0, ['轻击', '轻击']]
 
                     if (total_dice_groups_rendered > 0) {
-                        // 在每 *颗* 骰子之间添加分隔符
-                        html += `<span style="border-left: 2px solid var(--border-color); margin: 0 0.5rem; height: 1.5rem;"></span>`;
+                         html += `<span style="border-left: 2px solid var(--border-color); margin: 0 0.5rem; height: 1.5rem;"></span>`;
                     }
 
+                    let dieGroupHtml = '';
                     // 迭代那 *一颗* 骰子产生的所有结果 (例如 'light_hit_2' 会产生两个)
                     for (const key of die_results) { // e.g., '轻击'
                         const icon = diceIconMap[key] || '?';
                         // [修改] 我们现在总是渲染图标，包括 '空白'
-                        html += `<span class="dice-icon dice-result ${key}">${icon}</span>`;
+                        dieGroupHtml += `<span class="dice-icon dice-result ${key}">${icon}</span>`;
                     }
+
+                    // [v_REROLL] Wrap in clickable/non-clickable span
+                    const clickableClass = isClickable ? 'clickable' : 'disabled';
+                    html += `<span class="dice-reroll-group ${clickableClass}"
+                                  data-roll-type="${rollType}"
+                                  data-color="${color_key}"
+                                  data-index="${die_index}"
+                                  ${isClickable ? `onclick="toggleRerollDie(this)"` : ''}>
+                              ${dieGroupHtml}
+                             </span>`;
 
                     total_dice_groups_rendered++;
                 }
@@ -1499,15 +1628,30 @@
     }
 
 
-    function showDiceRollModal(eventData) {
-        const details = eventData.details;
-        document.getElementById('dice-roll-title').innerText = `掷骰结算: ${eventData.action_name}`;
-        document.getElementById('dice-roll-attacker-name').innerText = eventData.attacker_name;
-        document.getElementById('dice-roll-defender-name').innerText = eventData.defender_name;
+    // [v_REROLL] 修改函数签名
+    function showDiceRollModal(diceDetails, actionName, attackerName, defenderName, isInteractive = false, attackerIsPlayer = false, defenderIsPlayer = false) {
+        // 1. [修改] 清除自动关闭的计时器
+        if (diceModalTimer) {
+            clearTimeout(diceModalTimer);
+            diceModalTimer = null;
+        }
+
+        // [v_REROLL_FIX] 使用传入的参数设置标题
+        document.getElementById('dice-roll-title').innerText = `掷骰结算: ${actionName || 'Attack'}`;
+        document.getElementById('dice-roll-attacker-name').innerText = attackerName || '攻击方';
+        document.getElementById('dice-roll-defender-name').innerText = defenderName || '防御方';
+
+        // [v_REROLL_FIX] 使用 diceDetails
+        const details = diceDetails;
+
         document.getElementById('dice-roll-attacker-input').innerHTML = formatDiceInput(details.attack_dice_input);
-        document.getElementById('dice-roll-attacker-result').innerHTML = formatDiceResult(details.attack_dice_result);
+        // [v_REROLL_FIX] 传递 isClickable
+        document.getElementById('dice-roll-attacker-result').innerHTML = formatDiceResult(details.attack_dice_result, 'attacker', isInteractive && attackerIsPlayer);
+
         document.getElementById('dice-roll-defender-input').innerHTML = formatDiceInput(details.defense_dice_input);
-        document.getElementById('dice-roll-defender-result').innerHTML = formatDiceResult(details.defense_dice_result);
+        // [v_REROLL_FIX] 传递 isClickable
+        document.getElementById('dice-roll-defender-result').innerHTML = formatDiceResult(details.defense_dice_result, 'defender', isInteractive && defenderIsPlayer);
+
         const secondarySection = document.getElementById('dice-roll-secondary-section');
         if (details.secondary_roll) {
             const secondary = details.secondary_roll;
@@ -1516,14 +1660,96 @@
             if (secondary.type === 'scattershot_roll') title = "【霰射】结算";
             if (secondary.type === 'cleave_roll') title = "【顺劈】结算";
             document.getElementById('dice-roll-secondary-title').innerText = title;
+            // [v_REROLL_FIX] 确保 secondary_roll 也使用 diceDetails
             document.getElementById('dice-roll-secondary-input').innerHTML = formatDiceInput(secondary.defense_dice_input);
-            document.getElementById('dice-roll-secondary-result').innerHTML = formatDiceResult(secondary.defense_dice_result);
+            document.getElementById('dice-roll-secondary-result').innerHTML = formatDiceResult(secondary.defense_dice_result, 'secondary', false); // 第二阶段不可重投
             secondarySection.style.display = 'block';
         } else {
             secondarySection.style.display = 'none';
         }
+
+        // [v_REROLL_FIX] 检查玩家是否有链接值
+        const playerLinkPoints = (playerEntity && playerEntity.pilot) ? playerEntity.pilot.link_points : 0;
+        const canReroll = playerLinkPoints > 0;
+
+        const rerollButtons = document.getElementById('dice-roll-buttons-reroll');
+        const closeButton = document.getElementById('dice-roll-buttons-default');
+        const confirmButton = document.getElementById('dice-roll-confirm');
+        const skipButton = document.getElementById('dice-roll-skip');
+
+        if (isInteractive) {
+            rerollButtons.classList.remove('reroll-hidden');
+            closeButton.classList.add('reroll-hidden');
+
+            if (canReroll) {
+                confirmButton.classList.remove('disabled');
+                confirmButton.disabled = false;
+                document.getElementById('reroll-link-cost').innerText = '1';
+            } else {
+                confirmButton.classList.add('disabled');
+                confirmButton.disabled = true;
+                document.getElementById('reroll-link-cost').innerText = '0';
+            }
+
+            // [v_REROLL_FIX] 确保跳过按钮总是可用的
+            skipButton.classList.remove('disabled');
+            skipButton.disabled = false;
+
+        } else {
+            rerollButtons.classList.add('reroll-hidden');
+            closeButton.classList.remove('reroll-hidden');
+
+            // 只有在不是重投时才自动关闭
+            diceModalTimer = setTimeout(() => {
+                closeDiceRollModal(); // 5秒后自动关闭
+            }, 5000);
+        }
+
         document.getElementById('dice-roll-modal-backdrop').style.display = 'flex';
     }
+
+    // [v_REROLL] 新增
+    function toggleRerollDie(element) {
+        if (element.classList.contains('disabled')) return;
+        element.classList.toggle('selected');
+    }
+
+    // [v_REROLL] 新增
+    function confirmReroll(isSkipping = false) {
+        let selections_attacker = [];
+        let selections_defender = [];
+
+        if (!isSkipping) {
+            // [BUG 修复] 修复了 CSS 选择器
+            // 收集选中的攻击骰
+            document.querySelectorAll('#dice-roll-attacker-result .dice-reroll-group.clickable.selected').forEach(die => {
+                selections_attacker.push({
+                    color: die.dataset.color,
+                    index: parseInt(die.dataset.index, 10)
+                });
+            });
+
+            // 收集选中的防御骰
+            document.querySelectorAll('#dice-roll-defender-result .dice-reroll-group.clickable.selected').forEach(die => {
+                selections_defender.push({
+                    color: die.dataset.color,
+                    index: parseInt(die.dataset.index, 10)
+                });
+            });
+        }
+
+        // 关闭模态框
+        closeDiceRollModal();
+
+        // 发送重投请求 (即使是空的)
+        // postAndReload 会自动处理UI禁用和重载
+        postAndReload('/api/resolve_reroll', {
+            reroll_selections_attacker: selections_attacker,
+            reroll_selections_defender: selections_defender
+            // player_id 会被 postAndReload 自动添加
+        });
+    }
+
 
     function closeDiceRollModal() {
         // 1. [修改] 清除自动关闭的计时器
@@ -1535,10 +1761,13 @@
         // 2. 隐藏弹窗
         document.getElementById('dice-roll-modal-backdrop').style.display = 'none';
 
-        // 3. [新增] 立即触发攻击动画
-        const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
-        if (firstAttackResult && !gameState.runProjectilePhase) { // 不在AI回合暂停期间触发
-            showAttackEffect(firstAttackResult.defender_pos, firstAttackResult.result_text);
+        // 3. [MODIFIED] 触发攻击动画
+        // [v_REROLL_FIX] 只有在 *不是* 重投中断时才触发
+        if (!gameState.pendingReroll) {
+            const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
+            if (firstAttackResult && !gameState.runProjectilePhase) { // 不在AI回合暂停期间触发
+                showAttackEffect(firstAttackResult.defender_pos, firstAttackResult.result_text);
+            }
         }
     }
 

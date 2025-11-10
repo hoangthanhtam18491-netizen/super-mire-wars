@@ -20,9 +20,8 @@ MAX_LOG_ENTRIES = 50
 @game_bp.route('/game', methods=['GET'])
 def game():
     """
-    [v1.26 修复]
-    渲染主游戏界面，显示棋盘、状态和日志。
-    修复了 'last_pos' 的清除逻辑，防止重复动画。
+    [v_REROLL_FIX]
+    修复了状态管理逻辑，防止在页面刷新时清除待处理的 visual_events。
     """
     if 'game_state' not in session:
         # [v_REFACTOR] 重定向到 'main.hangar'
@@ -31,8 +30,7 @@ def game():
     game_state_obj = GameState.from_dict(session['game_state'])
 
     player_mech = game_state_obj.get_player_mech()
-    ai_mech = game_state_obj.get_ai_mech()  # [NEW] 获取AI机甲
-    # [MODIFIED v2.2] 获取驾驶员信息
+    ai_mech = game_state_obj.get_ai_mech()
     player_pilot = player_mech.pilot if player_mech else None
     ai_pilot = ai_mech.pilot if ai_mech else None
 
@@ -43,11 +41,27 @@ def game():
     is_player_locked, locker_pos = get_player_lock_status(game_state_obj, player_mech)
     log = session.get('combat_log', [])
 
-    # 1. 弹出 *之前* 存储的事件 (来自 /end_turn 或 /execute_attack)
+    # [v_REROLL_FIX] 修改事件处理逻辑
+    # 1. 从 session 弹出旧的事件（如果有）
     visual_events = session.pop('visual_feedback_events', [])
 
+    # [v_REROLL_FIX] 2. 从 game_state 扩展事件
+    #    (这是现在的主要来源, 特别是对于 API 驱动的事件)
+    state_modified = False
+    if hasattr(game_state_obj, 'visual_events') and game_state_obj.visual_events:
+        visual_events.extend(game_state_obj.visual_events)
+
+        # [v_REROLL_FIX] 关键修复：
+        # 仅当游戏*不*处于中断状态时，才清除 visual_events。
+        # 如果有待处理的重投或效果，*必须*保留这些事件，以便页面刷新时能恢复。
+        if player_mech and not player_mech.pending_effect_data and not player_mech.pending_reroll_data:
+            game_state_obj.visual_events = []
+            state_modified = True  # 标记已修改，以便保存
+
     # [v1.28] 检查是否需要自动运行抛射物阶段
-    run_projectile_phase_flag = session.pop('run_projectile_phase', False)
+    # [BUG 修复 v_NEXT] 不能 'pop'！如果页面因重投而重载，标志会丢失。
+    # 必须 'get'，并让 '/run_projectile_phase' 路由自己来 'pop'。
+    run_projectile_phase_flag = session.get('run_projectile_phase', False)
 
     # [FIX #8] 从 os.environ 读取配置并将其传递给模板
     firebase_config = os.environ.get('__firebase_config', '{}')
@@ -63,13 +77,6 @@ def game():
     if ai_mech and ai_mech.name:
         ai_opponent_name = ai_mech.name
 
-    # 2. 从 *当前* 游戏状态中获取新生成的事件
-    state_modified = False
-    if hasattr(game_state_obj, 'visual_events') and game_state_obj.visual_events:
-        visual_events.extend(game_state_obj.visual_events)
-        game_state_obj.visual_events = []  # <-- [BUG FIX] 立即清空 game_state_obj 内部的事件列表
-        state_modified = True  # <-- [BUG FIX] 确保这个清空操作会被保存
-
     # [v1.23] 为 Jinja 模板定义 orientation_map
     orientation_map = {
         'N': '↑', 'S': '↓', 'E': '→', 'W': '←',
@@ -77,33 +84,31 @@ def game():
     }
 
     # [AttributeError 修复]
-    # player_mech.actions_used_this_turn 存储的是 (slot, name) 元组。
-    # Jinja 模板期望一个 [slot, name] 列表列表。
-    player_actions_used_tuples = player_mech.actions_used_this_turn
+    player_actions_used_tuples = player_mech.actions_used_this_turn if player_mech else []
     player_actions_used_lists = [list(t) for t in player_actions_used_tuples]
 
-    # 3. 渲染模板。此时 `game_state_obj` *仍然包含* `last_pos`
+    # 3. 渲染模板。此时 `visual_events` 包含所有需要显示的事件
     html_to_render = render_template(
         'game.html',
         game=game_state_obj,
         player_mech=player_mech,
         ai_mech=ai_mech,
-        player_pilot=player_pilot,  # [MODIFIED v2.2] 传递玩家驾驶员
-        ai_pilot=ai_pilot,  # [MODIFIED v2.2] 传递AI驾驶员
+        player_pilot=player_pilot,
+        ai_pilot=ai_pilot,
         combat_log=log,
         is_player_locked=is_player_locked,
-        player_actions_used=player_actions_used_lists,  # [AttributeError 修复] 使用转换后的列表
+        player_actions_used=player_actions_used_lists,
         game_mode=game_state_obj.game_mode,
         ai_defeat_count=game_state_obj.ai_defeat_count,
-        visual_feedback_events=visual_events,
+        visual_feedback_events=visual_events,  # [v_REROLL_FIX] 传递合并后的事件列表
         orientationMap=orientation_map,
-        run_projectile_phase=run_projectile_phase_flag,  # [v1.28] 传递标志
+        run_projectile_phase=run_projectile_phase_flag,
         # [FIX #8] 将配置传递给 Jinja
         firebase_config=firebase_config,
         app_id=app_id,
         initial_auth_token=auth_token,
-        player_loadout=player_loadout,  # [NEW]
-        ai_opponent_name=ai_opponent_name  # [NEW]
+        player_loadout=player_loadout,
+        ai_opponent_name=ai_opponent_name
     )
 
     # --- [v1.26 修复] ---
@@ -113,16 +118,16 @@ def game():
             entity.last_pos = None
             state_modified = True  # 标记状态已被修改
 
-    # 5. 保存已清除 `last_pos` 和 `visual_events` 的状态回 session
+    # 5. [v_REROLL_FIX] 保存已清除 `last_pos` 和 (可能已清除的) `visual_events` 的状态回 session
     if state_modified:
         session['game_state'] = game_state_obj.to_dict()
     # --- 修复结束 ---
 
     # [v_fix] 创建一个 response 对象并添加“禁止缓存”的头信息
     response = make_response(html_to_render)
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'  # HTTP 1.1.
-    response.headers['Pragma'] = 'no-cache'  # HTTP 1.0.
-    response.headers['Expires'] = '0'  # Proxies.
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
     return response
 
 
@@ -140,11 +145,10 @@ def reset_game():
 @game_bp.route('/end_turn', methods=['POST'])
 def end_turn():
     """
-    [v_MODIFIED v1.28]
-    玩家结束回合。
-    流程:
-    1. AI 机甲阶段 (AI 机甲移动并发射 '立即' 抛射物, 立即结算攻击)
-    2. (v1.28) 暂停, 将 'run_projectile_phase' 标志设为 True, 重定向回 /game
+    [v_REROLL_FIX]
+    AI 攻击现在会检查 'reroll_choice_required' 并正确中断回合。
+    [v_PROJECTILE_FIX]
+    修复了“齐射”中断bug。
     """
     game_state_obj = GameState.from_dict(session.get('game_state'))
     player_mech = game_state_obj.get_player_mech()
@@ -153,11 +157,14 @@ def end_turn():
         return redirect(url_for('game.game'))
 
     log = session.get('combat_log', [])
-    if player_mech and player_mech.pending_effect_data:
-        log.append("> [错误] 必须先选择效果才能结束回合！")
+    if player_mech and (player_mech.pending_effect_data or player_mech.pending_reroll_data):  # [v_REROLL] 增加检查
+        log.append("> [错误] 必须先解决重投或效果才能结束回合！")  # [v_REROLL]
         if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
         session['combat_log'] = log
         return redirect(url_for('game.game'))
+
+    # [v_REROLL_FIX] 在回合开始时清除视觉事件
+    game_state_obj.visual_events = []
 
     log.append("-" * 20)
     log.append("> 玩家回合结束。")
@@ -168,7 +175,9 @@ def end_turn():
     # --- 阶段 1: AI 机甲阶段 ---
     log.append("--- AI 机甲阶段 ---")
     for entity in entities_to_process:
-        if game_ended_mid_turn: break
+        # [v_PROJECTILE_FIX] 移除此处的 break。
+        # if game_ended_mid_turn: break
+
         if entity.controller == 'ai' and entity.status == 'ok':
 
             # 1. AI 机甲逻辑
@@ -184,6 +193,12 @@ def end_turn():
 
                     # [v_MODIFIED] 立即结算此 AI 机甲的攻击
                     for attack in attacks:
+                        # [v_PROJECTILE_FIX] 检查是否*已经*触发了中断
+                        if game_ended_mid_turn:
+                            log.append(
+                                f"> [结算] 攻击 {attack.get('action').name if attack.get('action') else ''} 被暂停，等待玩家重投。")
+                            continue
+
                         if not isinstance(attack, dict): continue
 
                         attacker_entity = attack.get('attacker')
@@ -260,13 +275,15 @@ def end_turn():
                             target_part_slot = 'core'
                             log.append(f"> 攻击自动瞄准 [{defender_entity.name}] 的核心。")
 
+                        # [v_REROLL_FIX] AI 攻击玩家时，也使用 skip_reroll_phase=False
                         attack_log, result, overflow_data, dice_roll_details = resolve_attack(
                             attacker_entity=attacker_entity,
                             defender_entity=defender_entity,
                             action=attack_action,
                             target_part_name=target_part_slot,
                             is_back_attack=back_attack,
-                            chosen_effect=None
+                            chosen_effect=None,
+                            skip_reroll_phase=False  # [v_REROLL] 允许玩家在被AI攻击时重投
                         )
                         log.extend(attack_log)
 
@@ -285,6 +302,22 @@ def end_turn():
                             result_text=result
                         )
 
+                        # [v_REROLL_FIX] 新增：捕获 AI 攻击玩家时的重投中断
+                        if result == "reroll_choice_required":
+                            player_mech = game_state_obj.get_player_mech()
+                            player_mech.pending_reroll_data = overflow_data
+                            result_data = {
+                                'action_required': 'select_reroll',
+                                'dice_details': dice_roll_details,
+                                # [v_REROLL_FIX] 将名称信息添加到此
+                                'attacker_name': attacker_entity.name,
+                                'defender_name': defender_entity.name,
+                                'action_name': attack_action.name
+                            }
+                            game_state_obj.add_visual_event('reroll_required', details=result_data)
+                            game_ended_mid_turn = True  # 中断回合
+                            break  # 停止结算攻击
+
                         game_is_over = game_state_obj.check_game_over()
                         if game_is_over and game_state_obj.game_over == 'ai_win':
                             log.append(f"> 玩家机甲已被摧毁！")
@@ -299,17 +332,26 @@ def end_turn():
                 log.extend(entity_log)
                 # (如果无人机未来有攻击, 也应在这里结算)
 
+        # [v_PROJECTILE_FIX] 在 entity 循环中检查中断
+        if game_ended_mid_turn:
+            break
+
     # --- [v1.28] 阶段 1 结束 ---
-    log.append("--- AI 机甲阶段结束 ---")
+    # [v_REROLL_FIX] 仅在未被重投中断时才添加日志
+    if not game_ended_mid_turn:
+        log.append("--- AI 机甲阶段结束 ---")
+
+    # [v_REROLL_FIX] 如果回合因重投而中断，则取消抛射物阶段
+    # [BUG 修复 v_NEXT] 不！不能取消。客户端JS会处理这个。
+    # 无论是否中断，都设置 'run_projectile_phase' = True。
+    # 客户端JS会等待 reroll 解决后再触发。
+    session['run_projectile_phase'] = True  # [BUG 修复] 总是设置此标志
 
     session['game_state'] = game_state_obj.to_dict()
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
+    # [v_REROLL_FIX] 确保 visual_events 被保存到旧 key，以便 /game 路由可以 pop
     session['visual_feedback_events'] = game_state_obj.visual_events
-
-    # [v1.28] 设置标志, 让 /game 在重定向后触发 JS 暂停, 然后再调用 /run_projectile_phase
-    if not game_ended_mid_turn:
-        session['run_projectile_phase'] = True
 
     return redirect(url_for('game.game'))
 
@@ -317,18 +359,23 @@ def end_turn():
 @game_bp.route('/run_projectile_phase', methods=['POST'])
 def run_projectile_phase():
     """
-    [v1.28 新增]
-    在 AI 机甲阶段之后由 JS 调用的独立路由。
-    流程:
-    1. 延迟动作阶段 (所有 '延迟' 抛射物 (玩家和AI的) 移动并攻击, 立即结算攻击)
-    2. 回合重置
+    [v_REROLL_FIX]
+    抛射物攻击现在也会检查 'reroll_choice_required' 并正确中断回合。
+    [v_PROJECTILE_FIX]
+    修复了“齐射”中断bug。
     """
     game_state_obj = GameState.from_dict(session.get('game_state'))
     log = session.get('combat_log', [])
 
+    # [BUG 修复 v_NEXT] 消耗 'run_projectile_phase' 标志，防止重复运行
+    session.pop('run_projectile_phase', None)
+
     if game_state_obj.game_over:
         # [v_REFACTOR] 确保重定向到正确的蓝图
         return redirect(url_for('game.game'))
+
+    # [v_REROLL_FIX] 在阶段开始时清除视觉事件
+    game_state_obj.visual_events = []
 
     game_ended_mid_turn = False
 
@@ -339,7 +386,8 @@ def run_projectile_phase():
     entities_to_process = list(game_state_obj.entities.values())
 
     for entity in entities_to_process:
-        if game_ended_mid_turn: break
+        # [v_PROJECTILE_FIX] 移除此处的 break。
+        # if game_ended_mid_turn: break
 
         # 运行所有抛射物 (无论属于谁)
         if entity.entity_type == 'projectile' and entity.status == 'ok':
@@ -349,6 +397,12 @@ def run_projectile_phase():
 
             # [v_MODIFIED] 立即结算此抛射物的攻击
             for attack in attacks:
+                # [v_PROJECTILE_FIX] 检查是否*已经*触发了中断
+                if game_ended_mid_turn:
+                    log.append(
+                        f"> [结算] 攻击 {attack.get('action').name if attack.get('action') else ''} 被暂停，等待玩家重投。")
+                    continue
+
                 if not isinstance(attack, dict): continue
 
                 attacker_entity = attack.get('attacker')
@@ -409,13 +463,15 @@ def run_projectile_phase():
                     target_part_slot = 'core'
                     log.append(f"> 攻击自动瞄准 [{defender_entity.name}] 的核心。")
 
+                # [v_REROLL_FIX] 抛射物攻击也检查重投
                 attack_log, result, overflow_data, dice_roll_details = resolve_attack(
                     attacker_entity=attacker_entity,
                     defender_entity=defender_entity,
                     action=attack_action,
                     target_part_name=target_part_slot,
                     is_back_attack=back_attack,
-                    chosen_effect=None
+                    chosen_effect=None,
+                    skip_reroll_phase=False  # [v_REROLL] 允许玩家在被抛射物攻击时重投
                 )
                 log.extend(attack_log)
 
@@ -434,6 +490,21 @@ def run_projectile_phase():
                     result_text=result
                 )
 
+                # [v_REROLL_FIX] 新增：捕获抛射物攻击玩家时的重投中断
+                if result == "reroll_choice_required":
+                    player_mech = game_state_obj.get_player_mech()
+                    player_mech.pending_reroll_data = overflow_data
+                    result_data = {
+                        'action_required': 'select_reroll',
+                        'dice_details': dice_roll_details,
+                        'attacker_name': attacker_entity.name,
+                        'defender_name': defender_entity.name,
+                        'action_name': attack_action.name
+                    }
+                    game_state_obj.add_visual_event('reroll_required', details=result_data)
+                    game_ended_mid_turn = True  # 中断回合
+                    break  # 停止结算攻击
+
                 # [v_MODIFIED] 检查游戏是否在抛射物攻击后结束
                 game_is_over = game_state_obj.check_game_over()
                 if game_is_over:
@@ -448,8 +519,13 @@ def run_projectile_phase():
                     game_ended_mid_turn = True
                     break  # 停止结算攻击
 
+        # [v_PROJECTILE_FIX] 在 entity 循环中检查中断
+        if game_ended_mid_turn:
+            break
+
     # --- 阶段 3: 回合结束 ---
-    if not game_state_obj.game_over:
+    # [v_REROLL_FIX] 仅在未被重投中断时才重置玩家
+    if not game_state_obj.game_over and not game_ended_mid_turn:
         log.append(
             "> AI回合结束。请开始你的回合。" if game_state_obj.game_mode != 'range' else "> [靶场模式] 请开始你的回合。")
         log.append("-" * 20)
@@ -463,13 +539,15 @@ def run_projectile_phase():
             player_mech.opening_move_taken = False
             player_mech.actions_used_this_turn = []
             player_mech.pending_effect_data = None
-            # [v_MODIFIED] 不再在这里重置 last_pos
+            # [v_REROLL_FIX] 确保在这里也清除 reroll data
+            player_mech.pending_reroll_data = None
 
         game_state_obj.check_game_over()
 
     session['game_state'] = game_state_obj.to_dict()
     if len(log) > MAX_LOG_ENTRIES: log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
+    # [v_REROLL_FIX] 确保 visual_events 被保存到旧 key
     session['visual_feedback_events'] = game_state_obj.visual_events
     return redirect(url_for('game.game'))
 
