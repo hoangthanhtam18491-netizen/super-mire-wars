@@ -32,6 +32,9 @@ def game():
 
     player_mech = game_state_obj.get_player_mech()
     ai_mech = game_state_obj.get_ai_mech()  # [NEW] 获取AI机甲
+    # [MODIFIED v2.2] 获取驾驶员信息
+    player_pilot = player_mech.pilot if player_mech else None
+    ai_pilot = ai_mech.pilot if ai_mech else None
 
     if not player_mech:
         # [v_REFACTOR] 重定向到 'main.hangar'
@@ -85,6 +88,8 @@ def game():
         game=game_state_obj,
         player_mech=player_mech,
         ai_mech=ai_mech,
+        player_pilot=player_pilot,  # [MODIFIED v2.2] 传递玩家驾驶员
+        ai_pilot=ai_pilot,  # [MODIFIED v2.2] 传递AI驾驶员
         combat_log=log,
         is_player_locked=is_player_locked,
         player_actions_used=player_actions_used_lists,  # [AttributeError 修复] 使用转换后的列表

@@ -182,6 +182,7 @@ class GameEntity:
         """
         entity_type = data.get('entity_type')
         if entity_type == 'mech':
+            # [MODIFIED v2.2] 确保 Pilot 在 Mech 之前定义
             return Mech.from_dict(data)
         elif entity_type == 'projectile':
             return Projectile.from_dict(data)
@@ -224,6 +225,54 @@ class GameEntity:
         return None
 
 
+# [MODIFIED v2.2] 将 Pilot 类移到 Mech 之前
+class Pilot:
+    """
+    [v2.2 新增]
+    定义一个驾驶员及其属性。
+    """
+
+    def __init__(self, name, link_points=5, speed_stats=None, skills=None):
+        self.name = name
+        self.link_points = link_points
+        # [v_MODIFIED v2.2] 确保 speed_stats 有默认值 (所有 5)
+        if speed_stats is None:
+            self.speed_stats = {
+                '快速': 5, '近战': 5, '抛射': 5,
+                '射击': 5, '移动': 5, '战术': 5
+            }
+        else:
+            self.speed_stats = speed_stats
+        self.skills = skills if skills is not None else []
+
+    def to_dict(self):
+        """将Pilot对象序列化为字典。"""
+        return {
+            'name': self.name,
+            'link_points': self.link_points,
+            'speed_stats': self.speed_stats,
+            'skills': self.skills,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        """从字典创建Pilot对象。"""
+        if not data:
+            return None
+
+        default_speeds = {
+            '快速': 5, '近战': 5, '抛射': 5,
+            '射击': 5, '移动': 5, '战术': 5
+        }
+
+        return cls(
+            name=data.get('name', '未知驾驶员'),
+            link_points=data.get('link_points', 5),
+            speed_stats=data.get('speed_stats', default_speeds),
+            skills=data.get('skills', [])
+        )
+
+
 class Mech(GameEntity):
     """
     [v1.22]
@@ -231,7 +280,8 @@ class Mech(GameEntity):
     包含了 v1.19 中添加的回合制状态属性。
     """
 
-    def __init__(self, id, controller, pos, orientation, name, core, legs, left_arm, right_arm, backpack):
+    # [v2.2] 添加 pilot=None
+    def __init__(self, id, controller, pos, orientation, name, core, legs, left_arm, right_arm, backpack, pilot=None):
         super().__init__(id, 'mech', controller, pos, orientation, name)
 
         self.parts = {
@@ -241,6 +291,8 @@ class Mech(GameEntity):
             'right_arm': right_arm,
             'backpack': backpack
         }
+
+        self.pilot = pilot  # [v2.2]
 
         # --- [v1.19] 回合制状态 ---
         self.stance = 'defense'
@@ -268,7 +320,10 @@ class Mech(GameEntity):
         [修改] 现在也包括符合条件的通用动作。
         """
         # [新增] 使用局部导入来解决循环依赖
-        from parts_database import GENERIC_ACTIONS
+        try:
+            from parts_database import GENERIC_ACTIONS
+        except ImportError:
+            GENERIC_ACTIONS = {}  # [v2.2] 循环导入安全锁
 
         all_actions = []
         # 1. 收集所有来自部件的动作
@@ -302,7 +357,11 @@ class Mech(GameEntity):
         # --- [新增] 检查通用动作 ---
         if part_slot == 'generic':
             # [新增] 使用局部导入来解决循环依赖
-            from parts_database import GENERIC_ACTIONS
+            try:
+                from parts_database import GENERIC_ACTIONS
+            except ImportError:
+                GENERIC_ACTIONS = {}  # [v2.2] 循环导入安全锁
+
             if GENERIC_ACTIONS:
                 for generic_action, required_slots in GENERIC_ACTIONS.items():
                     if generic_action.name == action_name:
@@ -398,6 +457,7 @@ class Mech(GameEntity):
 
         base_dict.update({
             "parts": make_json_safe(self.parts),
+            "pilot": make_json_safe(self.pilot),  # [MODIFIED v2.2] 添加 pilot
             "stance": self.stance,
             "player_ap": self.player_ap,
             "player_tp": self.player_tp,
@@ -418,6 +478,10 @@ class Mech(GameEntity):
             part_data = parts_data.get(slot_name)
             return Part.from_dict(part_data) if part_data else None
 
+        # [MODIFIED v2.2] 加载 pilot
+        pilot_data = data.get('pilot')
+        pilot_obj = Pilot.from_dict(pilot_data) if pilot_data else None
+
         mech = cls(
             id=data.get('id', f"mech_{random.randint(0, 999)}"),
             controller=data.get('controller', 'neutral'),
@@ -428,7 +492,8 @@ class Mech(GameEntity):
             legs=safe_part_load('legs'),
             left_arm=safe_part_load('left_arm'),
             right_arm=safe_part_load('right_arm'),
-            backpack=safe_part_load('backpack')
+            backpack=safe_part_load('backpack'),
+            pilot=pilot_obj  # [MODIFIED v2.2] 传递 pilot
         )
 
         # [v1.19] 加载回合制状态

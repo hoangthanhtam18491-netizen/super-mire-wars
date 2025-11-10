@@ -13,7 +13,7 @@ from flask import Blueprint, render_template, request, session, redirect, url_fo
 from game_logic.game_logic import GameState
 from parts_database import (
     PLAYER_CORES, PLAYER_LEGS, PLAYER_LEFT_ARMS, PLAYER_RIGHT_ARMS, PLAYER_BACKPACKS,
-    AI_LOADOUTS
+    AI_LOADOUTS, PLAYER_PILOTS # [MODIFIED v2.2] 导入 PLAYER_PILOTS
 )
 
 main_bp = Blueprint('main', __name__)
@@ -124,6 +124,7 @@ def hangar():
         left_arms=player_left_arms,
         right_arms=player_right_arms,
         backpacks=player_backpacks,
+        player_pilots=PLAYER_PILOTS, # [MODIFIED v2.2] 传递驾驶员列表
         ai_loadouts=AI_LOADOUTS,
         # [MODIFIED] 传递 Python 字典
         firebase_config=firebase_config_dict,
@@ -137,6 +138,7 @@ def start_game():
     """
     [v1.17]
     处理来自机库的表单，初始化游戏状态并重定向到游戏界面。
+    [v2.2 修改] 新增接收 pilot
     """
     selection = {
         'core': request.form.get('core'),
@@ -147,11 +149,13 @@ def start_game():
     }
     game_mode = request.form.get('game_mode', 'duel')
     ai_opponent_key = request.form.get('ai_opponent')
+    player_pilot_name = request.form.get('pilot') # [MODIFIED v2.2] 获取玩家选择的驾驶员
 
     game = GameState(
         player_mech_selection=selection,
         ai_loadout_key=ai_opponent_key,
-        game_mode=game_mode
+        game_mode=game_mode,
+        player_pilot_name=player_pilot_name # [MODIFIED v2.2] 传递给GameState
     )
 
     session['game_state'] = game.to_dict()

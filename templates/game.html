@@ -381,6 +381,21 @@
         </div>
         {% endif %}
 
+        <!-- [MODIFIED v2.2] 驾驶员信息 -->
+        <div id="player-pilot-info" class="bg-gray-900 p-3 rounded-lg border border-blue-500">
+            {% if player_pilot %}
+                <h5 class="font-bold text-lg text-blue-300">{{ player_pilot.name }}</h5>
+                <p class="text-sm">链接值: <span class="font-bold text-white">{{ player_pilot.link_points }}</span></p>
+                <div class="text-xs grid grid-cols-2 gap-x-2 mt-1 text-gray-400">
+                    {% for stat_name, value in player_pilot.speed_stats.items() %}
+                    <span>{{ stat_name }}: {{ value }}</span>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <h5 class="font-bold text-lg text-gray-500">无驾驶员</h5>
+            {% endif %}
+        </div>
+
         <div style="display: flex; justify-content: space-around; text-align: center;">
             <div><div>行动时点 (AP)</div><div style="font-size: 2rem; font-weight: bold;">{{ player_mech.player_ap }}</div></div>
             <div><div>调整时点 (TP)</div><div style="font-size: 2rem; font-weight: bold;">{{ player_mech.player_tp }}</div></div>
@@ -520,6 +535,22 @@
     <!-- [右侧栏] -->
     <div class="sidebar panel">
         <h4>AI机甲状态</h4>
+
+        <!-- [MODIFIED v2.2] AI 驾驶员信息 -->
+        <div id="ai-pilot-info" class="bg-gray-900 p-3 rounded-lg border border-red-500 mb-4">
+            {% if ai_pilot %}
+                <h5 class="font-bold text-lg text-red-300">{{ ai_pilot.name }}</h5>
+                <p class="text-sm">链接值: <span class="font-bold text-white">{{ ai_pilot.link_points }}</span></p>
+                <div class="text-xs grid grid-cols-2 gap-x-2 mt-1 text-gray-400">
+                    {% for stat_name, value in ai_pilot.speed_stats.items() %}
+                    <span>{{ stat_name }}: {{ value }}</span>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <h5 class="font-bold text-lg text-gray-500">无驾驶员</h5>
+            {% endif %}
+        </div>
+
         <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
             <tbody>
                 {% if ai_mech %}

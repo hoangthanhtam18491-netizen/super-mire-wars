@@ -6,7 +6,7 @@ import random
 # 更新导入以使用相对路径 (..) 来引用根目录的 parts_database
 # 并使用相对路径 (.) 来引用此包中的 data_models
 from .data_models import (
-    Mech, Part, Action, GameEntity, Projectile, Drone
+    Mech, Part, Action, GameEntity, Projectile, Drone, Pilot  # [MODIFIED v2.2] 导入 Pilot
 )
 # [v_REFACTOR] 使用 '..' 访问上一级目录
 # [v_REFACTOR_FIX] 修复 ImportError。使用从项目根目录开始的绝对导入
@@ -286,11 +286,14 @@ def run_drone_logic(drone, game_state):
 
 # --- [v1.17] 实体创建函数 ---
 
-def create_mech_from_selection(name, selection, entity_id, controller):
+# [MODIFIED v2.2] 添加 pilot_name
+def create_mech_from_selection(name, selection, entity_id, controller, pilot_name=None):
     """
     [v1.23]
     根据机库页面的部件名称选择，从数据库动态创建一台机甲。
     现在需要 entity_id 和 controller。
+    [v2.2]
+    现在还会根据 pilot_name 加载 Pilot。
     """
     try:
         core_part = Part.from_dict(CORES[selection['core']].to_dict())
@@ -306,7 +309,24 @@ def create_mech_from_selection(name, selection, entity_id, controller):
         right_arm_part = Part.from_dict(list(RIGHT_ARMS.values())[0].to_dict())
         backpack_part = Part.from_dict(list(BACKPACKS.values())[0].to_dict())
 
+    pilot_obj = None
+    if pilot_name:
+        # [v2.2] 尝试加载 Pilot
+        # [v_REFACTOR_FIX] 修复导入错误。从 parts_database 导入
+        try:
+            from parts_database import PLAYER_PILOTS, AI_PILOTS
+            pilot_data_source = PLAYER_PILOTS if controller == 'player' else AI_PILOTS
+
+            if pilot_name in pilot_data_source:
+                # [MODIFIED v2.2] 从字典中获取 Pilot 对象
+                pilot_obj = pilot_data_source[pilot_name]
+            else:
+                print(f"警告: 找不到驾驶员 '{pilot_name}' (controller: {controller})。将不分配驾驶员。")
+        except ImportError:
+            print(f"警告: 无法从 parts_database 导入 PLAYER_PILOTS 或 AI_PILOTS。")
+
     # [v1.23 修复] 传递所有 GameEntity 所需的参数
+    # [MODIFIED v2.2] 传递 pilot_obj
     return Mech(
         id=entity_id,
         controller=controller,
@@ -317,7 +337,8 @@ def create_mech_from_selection(name, selection, entity_id, controller):
         legs=legs_part,
         left_arm=left_arm_part,
         right_arm=right_arm_part,
-        backpack=backpack_part
+        backpack=backpack_part,
+        pilot=pilot_obj
     )
 
 
@@ -345,7 +366,13 @@ def create_ai_mech(ai_loadout_key=None, entity_id="ai_1"):
             print(f"严重错误: 标准AI配置中的部件 {missing_standard_parts} 也不存在！请检查 parts_database.py。")
             return None
 
-    mech = create_mech_from_selection(name, selection, entity_id=entity_id, controller='ai')
+    mech = create_mech_from_selection(
+        name,
+        selection,
+        entity_id=entity_id,
+        controller='ai',
+        pilot_name=chosen_loadout.get("pilot")  # [MODIFIED v2.2] 从配置中获取 pilot
+    )
     return mech
 
 
@@ -355,7 +382,8 @@ class GameState:
     管理整个游戏的状态，现在基于实体字典。
     """
 
-    def __init__(self, player_mech_selection=None, ai_loadout_key=None, game_mode='duel'):
+    # [MODIFIED v2.2] 添加 player_pilot_name
+    def __init__(self, player_mech_selection=None, ai_loadout_key=None, game_mode='duel', player_pilot_name=None):
         self.board_width = 10
         self.board_height = 10
         self.entities = {}  # [v1.17] 核心状态：{ 'player_1': <Mech>, 'ai_1': <Mech>, 'proj_123': <Projectile> }
@@ -373,7 +401,11 @@ class GameState:
         # --- 初始化玩家机甲 ---
         if player_mech_selection:
             player_mech = create_mech_from_selection(
-                "玩家机甲", player_mech_selection, entity_id='player_1', controller='player'
+                "玩家机甲",
+                player_mech_selection,
+                entity_id='player_1',
+                controller='player',
+                pilot_name=player_pilot_name  # [MODIFIED v2.2]
             )
             # [v1.17] 初始化玩家机甲的弹药
             for part_slot, part in player_mech.parts.items():

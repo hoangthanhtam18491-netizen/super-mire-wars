@@ -1,6 +1,6 @@
 # [v_REFACTOR]
 # 更新导入，从新的 game_logic 包中导入
-from game_logic.data_models import Action, Part, Projectile # [v1.18] 导入 Projectile
+from game_logic.data_models import Action, Part, Projectile, Pilot # [MODIFIED v2.2] 导入 Pilot
 
 # --- 效果构建辅助函数 ---
 def build_effects(*effects_list):
@@ -263,6 +263,20 @@ GENERIC_ACTIONS = {
 # --- 通用动作结束 ---
 
 
+# --- [MODIFIED v2.2] 驾驶员数据库 ---
+# 定义【测试驾驶员】，使用 Pilot 类的默认值 (全 5 速度, 5 链接值)
+PILOT_TEST = Pilot(name="【测试驾驶员】")
+
+# 玩家可用的驾驶员 (目前为空，但为了让 game_logic.py 中的导入能工作)
+PLAYER_PILOTS = {
+    "【测试驾驶员】": PILOT_TEST # [MODIFIED v2.2] 添加测试驾驶员供玩家选择
+}
+
+# [MODIFIED v2.2 AI无驾驶员] AI不再需要驾驶员
+AI_PILOTS = {}
+# --- 驾驶员数据库结束 ---
+
+
 # --- 玩家可用部件 ---
 PLAYER_CORES = {
     'RT-06 "泥沼"核心': Part(name='RT-06 "泥沼"核心', armor=6, structure=2, electronics=2,
@@ -384,6 +398,7 @@ AI_ONLY_BACKPACKS = {
 # --- [v1.22 修复] AI 配置 ---
 # AI_LOADOUTS 字典现在被定义在这里
 
+# [MODIFIED v2.2 AI无驾驶员] 移除所有 'pilot' 键
 AI_LOADOUT_HEAVY = {
     'name': "AI机甲 (重火炮型)",
     'selection': {

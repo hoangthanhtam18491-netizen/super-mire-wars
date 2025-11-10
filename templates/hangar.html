@@ -481,6 +481,30 @@
 
             </div>
 
+            <!-- [NEW v2.2] 驾驶员选择 -->
+            <div class="mt-10">
+                <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">2. 选择你的驾驶员</h2>
+                <div class="flex justify-center flex-wrap gap-6">
+                    {% for name, pilot in player_pilots.items() %}
+                    <div class="mb-4">
+                        <input type="radio" id="pilot_{{ name }}" name="pilot" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
+                        <label for="pilot_{{ name }}" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-72">
+                            <h4 class="font-bold text-xl text-blue-300">{{ name }}</h4>
+                            <p class="text-sm mt-2">链接值: {{ pilot.link_points }}</p>
+                            <div class="text-sm grid grid-cols-2 gap-x-4">
+                                {% for stat_name, value in pilot.speed_stats.items() %}
+                                <span>{{ stat_name }}: {{ value }}</span>
+                                {% endfor %}
+                            </div>
+                        </label>
+                    </div>
+                    {% endfor %}
+                    {% if not player_pilots %}
+                    <p class="text-gray-400">当前没有可用的驾驶员。</p>
+                    {% endif %}
+                </div>
+            </div>
+
             <!-- AI 对手选择 -->
             <div class="mt-10">
                 <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">2. 选择初始对手</h2>
