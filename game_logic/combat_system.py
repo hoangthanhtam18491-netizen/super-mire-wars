@@ -83,6 +83,12 @@ def _resolve_effect_logic(log, defender_entity, target_part, overflow_hits, over
             target_part.status = 'destroyed'
             log.append(f"  > (毁伤) 部件 [{target_part.name}] 被 [摧毁]！")
 
+            # [v_NEW_RULE] 部件被破坏时，驾驶员失去链接值
+            if defender_entity.pilot and defender_entity.pilot.link_points > 0:
+                defender_entity.pilot.link_points -= 1
+                log.append(
+                    f"  > 驾驶员 [{defender_entity.pilot.name}] 失去 1 点链接值 (剩余: {defender_entity.pilot.link_points})！")
+
             # [BUG FIX] 检查被摧毁的是否为核心
             if target_part.name.endswith("核心"):  # 假设核心部件名称都包含 "核心"
                 defender_entity.status = 'destroyed'
@@ -149,7 +155,15 @@ def _resolve_effect_logic(log, defender_entity, target_part, overflow_hits, over
                     secondary_target.status = 'damaged'
                 elif secondary_status == 'damaged':
                     secondary_target.status = 'destroyed'
+
                 log.append(f"  > (霰射) 部件 [{secondary_target.name}] 状态变为 [{secondary_target.status}]！")
+
+                # [v_NEW_RULE] 部件被破坏时，驾驶员失去链接值
+                if secondary_target.status == 'destroyed':
+                    if defender_entity.pilot and defender_entity.pilot.link_points > 0:
+                        defender_entity.pilot.link_points -= 1
+                        log.append(
+                            f"  > 驾驶员 [{defender_entity.pilot.name}] 失去 1 点链接值 (剩余: {defender_entity.pilot.link_points})！")
 
                 # [BUG FIX] 检查被摧毁的是否为核心
                 if secondary_target.status == 'destroyed' and secondary_target.name.endswith("核心"):
@@ -222,7 +236,15 @@ def _resolve_effect_logic(log, defender_entity, target_part, overflow_hits, over
                     secondary_target.status = 'damaged'
                 elif secondary_status == 'damaged':
                     secondary_target.status = 'destroyed'
+
                 log.append(f"  > (顺劈) 部件 [{secondary_target.name}] 状态变为 [{secondary_target.status}]！")
+
+                # [v_NEW_RULE] 部件被破坏时，驾驶员失去链接值
+                if secondary_target.status == 'destroyed':
+                    if defender_entity.pilot and defender_entity.pilot.link_points > 0:
+                        defender_entity.pilot.link_points -= 1
+                        log.append(
+                            f"  > 驾驶员 [{defender_entity.pilot.name}] 失去 1 点链接值 (剩余: {defender_entity.pilot.link_points})！")
 
                 # [BUG FIX] 检查被摧毁的是否为核心
                 if secondary_target.status == 'destroyed' and secondary_target.name.endswith("核心"):
@@ -403,6 +425,14 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
             target_part.status = 'destroyed'
             log.append(f"  > 已破损的部件 [{target_part.name}] 被 [摧毁]！")
 
+        # [v_NEW_RULE] 部件被破坏时，驾驶员失去链接值
+        # [MODIFIED] 仅当目标是机甲且部件真的被摧毁时
+        if is_mech_defender and target_part.status == 'destroyed':
+            if defender_entity.pilot and defender_entity.pilot.link_points > 0:
+                defender_entity.pilot.link_points -= 1
+                log.append(
+                    f"  > 驾驶员 [{defender_entity.pilot.name}] 失去 1 点链接值 (剩余: {defender_entity.pilot.link_points})！")
+
         # [新增 v1.17] 如果被摧毁的是实体本身的核心，则将实体状态设为 'destroyed'
         if target_part.status == 'destroyed' and target_part_name == 'core':
             defender_entity.status = 'destroyed'
@@ -531,5 +561,3 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
             log.append(f"  > [抛射物] {attacker_entity.name} 在攻击后引爆并移除。")
 
         return log, "无效", None, dice_roll_details
-
-
