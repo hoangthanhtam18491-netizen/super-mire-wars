@@ -392,14 +392,26 @@ def handle_execute_attack(game_state, player_mech, data):
                 two_handed_sniper_active = True
                 log.append(f"> 动作效果【【双手】获得狙击】触发 (另一只手为【空手】)！")
 
+        # [新规则：宕机检查]
+        defender_is_downed = (defender_entity.stance == 'downed')
+
         if not target_part_slot:
-            if back_attack or two_handed_sniper_active:
-                log_msg = "> [背击] 玩家获得任意选择权！请选择目标部位。" if back_attack else "> [狙击效果] 玩家获得任意选择权！请选择目标部位。"
+            # [修改] 增加 defender_is_downed 条件
+            if back_attack or two_handed_sniper_active or defender_is_downed:
+                log_msg = ""
+                if back_attack:
+                    log_msg = "> [背击] 玩家获得任意选择权！请选择目标部位。"
+                elif two_handed_sniper_active:
+                    log_msg = "> [狙击效果] 玩家获得任意选择权！请选择目标部位。"
+                elif defender_is_downed:
+                    log_msg = "> [目标宕机] 玩家获得任意选择权！请选择目标部位。"
+
                 log.append(log_msg)
                 return game_state, log, None, {'action_required': 'select_part'}, None
 
             if isinstance(defender_entity, Mech):
-                if attack_action.action_type == '近战':
+                # [新规则：宕机检查] 宕机状态下无法招架
+                if attack_action.action_type == '近战' and defender_entity.stance != 'downed':
                     parry_parts = [(s, p) for s, p in defender_entity.parts.items() if
                                    p and p.parry > 0 and p.status != 'destroyed']
                     if parry_parts:

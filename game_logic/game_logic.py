@@ -59,6 +59,11 @@ def _is_tile_locked_by_opponent(game_state, tile_pos, a_mech, b_pos, b_mech):
     """
     if not b_mech or b_mech.status == 'destroyed':
         return False
+
+    # [新规则：宕机检查]
+    if b_mech.stance == 'downed':
+        return False  # 宕机单位无法锁定
+
     if not b_mech.has_melee_action():
         return False
     if not _is_adjacent(tile_pos, b_pos):

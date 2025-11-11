@@ -21,7 +21,8 @@ def parse_dice_string(dice_str):
 
 
 # [v_MODIFIED] 签名更新：添加了 attacker_entity, skip_reroll_phase, rerolled_defense_raw
-def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, overflow_hits, overflow_crits, chosen_effect,
+def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, overflow_hits, overflow_crits,
+                          chosen_effect,
                           skip_reroll_phase=False, rerolled_defense_raw=None):
     """
     [修改 v1.17]
@@ -32,7 +33,7 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
     它现在返回 (log, dice_roll_details_2, overflow_data)，其中 overflow_data 在重投时为 pending_data。
     """
 
-    # [新增 v1.17] 效果逻辑目前只对机甲有效
+    # [新增 v1.ISTATET] 效果逻辑目前只对机甲有效
     if not isinstance(defender_entity, Mech):
         log.append(f"  > [效果：{chosen_effect}] 触发，但目标不是机甲，效果跳过。")
         return log, None, None  # [MODIFIED] 返回 3 个值
@@ -131,11 +132,16 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
             target_part.status = 'destroyed'
             log.append(f"  > (毁伤) 部件 [{target_part.name}] 被 [摧毁]！")
 
-            # [v_NEW_RULE] 部件被破坏时，驾驶员失去链接值
+            # [新规则：宕机检查]
             if defender_entity.pilot and defender_entity.pilot.link_points > 0:
                 defender_entity.pilot.link_points -= 1
                 log.append(
                     f"  > 驾驶员 [{defender_entity.pilot.name}] 失去 1 点链接值 (剩余: {defender_entity.pilot.link_points})！")
+
+                # [新规则：宕机检查]
+                if defender_entity.pilot.link_points <= 0 and defender_entity.stance != 'downed':
+                    defender_entity.stance = 'downed'
+                    log.append(f"  > 驾驶员链接值归零！机甲 [{defender_entity.name}] 进入 [宕机姿态]！")
 
             # [BUG FIX] 检查被摧毁的是否为核心
             if target_part.name.endswith("核心"):  # 假设核心部件名称都包含 "核心"
@@ -246,12 +252,17 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
 
                 log.append(f"  > (霰射) 部件 [{secondary_target.name}] 状态变为 [{secondary_target.status}]！")
 
-                # [v_NEW_RULE] 部件被破坏时，驾驶员失去链接值
+                # [新规则：宕机检查]
                 if secondary_target.status == 'destroyed':
                     if defender_entity.pilot and defender_entity.pilot.link_points > 0:
                         defender_entity.pilot.link_points -= 1
                         log.append(
                             f"  > 驾驶员 [{defender_entity.pilot.name}] 失去 1 点链接值 (剩余: {defender_entity.pilot.link_points})！")
+
+                        # [新规则：宕机检查]
+                        if defender_entity.pilot.link_points <= 0 and defender_entity.stance != 'downed':
+                            defender_entity.stance = 'downed'
+                            log.append(f"  > 驾驶员链接值归零！机甲 [{defender_entity.name}] 进入 [宕机姿态]！")
 
                 # [BUG FIX] 检查被摧毁的是否为核心
                 if secondary_target.status == 'destroyed' and secondary_target.name.endswith("核心"):
@@ -367,12 +378,17 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
 
                 log.append(f"  > (顺劈) 部件 [{secondary_target.name}] 状态变为 [{secondary_target.status}]！")
 
-                # [v_NEW_RULE] 部件被破坏时，驾驶员失去链接值
+                # [新规则：宕机检查]
                 if secondary_target.status == 'destroyed':
                     if defender_entity.pilot and defender_entity.pilot.link_points > 0:
                         defender_entity.pilot.link_points -= 1
                         log.append(
                             f"  > 驾驶员 [{defender_entity.pilot.name}] 失去 1 点链接值 (剩余: {defender_entity.pilot.link_points})！")
+
+                        # [新规则：宕机检查]
+                        if defender_entity.pilot.link_points <= 0 and defender_entity.stance != 'downed':
+                            defender_entity.stance = 'downed'
+                            log.append(f"  > 驾驶员链接值归零！机甲 [{defender_entity.name}] 进入 [宕机姿态]！")
 
                 # [BUG FIX] 检查被摧毁的是否为核心
                 if secondary_target.status == 'destroyed' and secondary_target.name.endswith("核心"):
@@ -503,7 +519,8 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
     blue_dice_count = defender_entity.get_total_evasion() if defender_entity.stance == 'agile' else 0
 
     # [修改 v1.17] 招架只适用于机甲
-    if is_mech_defender and action.action_type == '近战' and target_part.parry > 0 and not is_back_attack:
+    # [新规则：宕机检查]
+    if is_mech_defender and action.action_type == '近战' and target_part.parry > 0 and not is_back_attack and defender_entity.stance != 'downed':
         white_dice_count += target_part.parry
         log.append(f"  > [招架] 额外增加 {target_part.parry} 个白骰 (总计 {white_dice_count} 白)。")
 
@@ -622,6 +639,11 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
                 defender_entity.pilot.link_points -= 1
                 log.append(
                     f"  > 驾驶员 [{defender_entity.pilot.name}] 失去 1 点链接值 (剩余: {defender_entity.pilot.link_points})！")
+
+                # [新规则：宕机检查]
+                if defender_entity.pilot.link_points <= 0 and defender_entity.stance != 'downed':
+                    defender_entity.stance = 'downed'
+                    log.append(f"  > 驾驶员链接值归零！机甲 [{defender_entity.name}] 进入 [宕机姿态]！")
 
         # [新增 v1.17] 如果被摧毁的是实体本身的核心，则将实体状态设为 'destroyed'
         if target_part.status == 'destroyed' and target_part_name == 'core':

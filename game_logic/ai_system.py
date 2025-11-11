@@ -335,10 +335,17 @@ def run_ai_turn(ai_mech, game_state):
     """
     log = []
 
-    # [BUG FIX] AI回合开始时，重置其AP和TP！
-    # 否则，它在第一回合后AP/TP会耗尽，导致后续回合无法行动。
-    ai_mech.player_ap = 2
-    ai_mech.player_tp = 1
+    # [新规则：宕机恢复检查]
+    if ai_mech.stance == 'downed':
+        log.append(f"> [AI系统] {ai_mech.name} 链接恢复。 [宕机姿态] 解除。")
+        log.append(f"> [AI警告] {ai_mech.name} 系统冲击！本回合 AP-1, TP-1！")
+        ai_mech.player_ap = 1
+        ai_mech.player_tp = 0
+        ai_mech.stance = 'defense' # 重置为默认姿态
+    else:
+        # 正常回合
+        ai_mech.player_ap = 2
+        ai_mech.player_tp = 1
 
     ap = ai_mech.player_ap
     tp = ai_mech.player_tp

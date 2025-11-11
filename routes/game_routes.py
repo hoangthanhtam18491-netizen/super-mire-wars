@@ -532,8 +532,20 @@ def run_projectile_phase():
 
         player_mech = game_state_obj.get_player_mech()  # [v1.28] 重新获取
         if player_mech:
-            player_mech.player_ap = 2
-            player_mech.player_tp = 1
+
+            # [新规则：宕机恢复检查]
+            if player_mech.stance == 'downed':
+                log.append("> [系统] 驾驶员链接恢复。机甲 [宕机姿态] 解除。")
+                log.append("> [警告] 系统冲击！本回合 AP-1, TP-1！")
+                player_mech.player_ap = 1  # 正常为 2
+                player_mech.player_tp = 0  # 正常为 1
+                player_mech.stance = 'defense'  # 重置为默认姿态
+            else:
+                # 正常回合
+                player_mech.player_ap = 2
+                player_mech.player_tp = 1
+
+            # 共同的重置逻辑
             player_mech.turn_phase = 'timing'
             player_mech.timing = None
             player_mech.opening_move_taken = False

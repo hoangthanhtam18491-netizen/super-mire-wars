@@ -402,7 +402,16 @@
         {% endif %}
 
         {% if player_mech %}
+
+        <!-- [新规则：宕机显示] -->
+        {% if player_mech.stance == 'downed' %}
+        <div class="phase-indicator" style="color: var(--status-destroyed); border-color: var(--status-destroyed); background-color: #4a2121;">
+            系统宕机！
+        </div>
+        {% else %}
         <div class="phase-indicator">阶段: {{ {'timing': '1. 选择时机', 'stance': '2. 选择姿态', 'adjustment': '3. 调整阶段', 'main': '4. 执行动作'}[player_mech.turn_phase] }}</div>
+        {% endif %}
+        <!-- [修改结束] -->
 
         {% if player_mech.pending_effect_data %}
         <div id="pending-effect-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
@@ -586,6 +595,14 @@
                 <h5 class="font-bold text-lg text-gray-500">无驾驶员</h5>
             {% endif %}
         </div>
+
+        <!-- [新规则：宕机显示] -->
+        {% if ai_mech and ai_mech.stance == 'downed' %}
+        <div class="phase-indicator" style="color: var(--status-destroyed); border-color: var(--status-destroyed); background-color: #4a2121; margin-bottom: 1rem;">
+            系统宕机！
+        </div>
+        {% endif %}
+        <!-- [修改结束] -->
 
         <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
             <tbody>
@@ -1056,6 +1073,27 @@
 
     function updateUIForPhase() {
         if (gameState.gameOver || !playerEntity.turn_phase) return;
+
+        // [新规则：宕机时禁用UI]
+        if (playerEntity.stance === 'downed') {
+            // 隐藏所有阶段控制
+            ['timing', 'stance', 'adjustment', 'main'].forEach(phase => {
+                const el = document.getElementById(`phase-${phase}-controls`);
+                if (el) el.style.display = 'none';
+            });
+            // 禁用结束回合按钮
+            const endTurnBtn = document.getElementById('end-turn-btn');
+            if(endTurnBtn) {
+                endTurnBtn.classList.add('disabled');
+                endTurnBtn.onclick = null;
+                endTurnBtn.title = '机甲宕机中，无法行动';
+                // 确保表单本身也无法提交
+                document.getElementById('end-turn-form').onsubmit = (e) => { e.preventDefault(); return false; };
+            }
+            return; // 停止执行此函数的其余部分
+        }
+        // [修改结束]
+
         ['timing', 'stance', 'adjustment', 'main'].forEach(phase => {
             const el = document.getElementById(`phase-${phase}-controls`);
             if (el) el.style.display = gameState.turnPhase === phase ? 'block' : 'none';
@@ -1720,9 +1758,9 @@
         let selections_defender = [];
 
         if (!isSkipping) {
-            // [BUG 修复] 修复了 CSS 选择器
             // 收集选中的攻击骰
-            document.querySelectorAll('#dice-roll-attacker-result .dice-reroll-group.clickable.selected').forEach(die => {
+            // [BUG 修复] 修正了类名选择器
+            document.querySelectorAll('#dice-roll-attacker-result .dice-reroll-group.selected').forEach(die => {
                 selections_attacker.push({
                     color: die.dataset.color,
                     index: parseInt(die.dataset.index, 10)
@@ -1730,7 +1768,8 @@
             });
 
             // 收集选中的防御骰
-            document.querySelectorAll('#dice-roll-defender-result .dice-reroll-group.clickable.selected').forEach(die => {
+            // [BUG 修复] 修正了类名选择器
+            document.querySelectorAll('#dice-roll-defender-result .dice-reroll-group.selected').forEach(die => {
                 selections_defender.push({
                     color: die.dataset.color,
                     index: parseInt(die.dataset.index, 10)
