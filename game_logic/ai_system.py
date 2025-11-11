@@ -9,7 +9,8 @@ from .game_logic import (
     _get_distance,
     # [v1.33] 导入拦截检查
     check_interception,
-    # [v_MODIFIED] run_projectile_logic, run_drone_logic 已移至 game_logic
+    # [MODIFIED] 导入 run_projectile_logic
+    run_projectile_logic,
 )
 from .data_models import Mech  # [v1.17] 导入 Mech
 
@@ -860,19 +861,21 @@ def run_ai_turn(ai_mech, game_state):
                     has_immediate_action = proj_obj.get_action_by_timing('立即')[0] is not None
 
                     # [v1.34 修复] 只有 '延迟' 抛射物 (如导弹) 才在发射时检查拦截
+                    # [MODIFIED] 拦截逻辑已更改。check_interception 现在直接结算。
                     if not has_immediate_action:
-                        intercept_log, intercept_attacks = check_interception(proj_obj, game_state)
-                        if intercept_attacks:
-                            log.extend(intercept_log)
-                            attacks_to_resolve_list.extend(intercept_attacks)
+                        check_interception(proj_obj, game_state, log)
+                        # [MODIFIED] 移除下面两行
+                        # intercept_log, intercept_attacks = check_interception(proj_obj, game_state)
+                        # if intercept_attacks:
+                        #     log.extend(intercept_log)
+                        #     attacks_to_resolve_list.extend(intercept_attacks)
 
 
                     # [v_MODIFIED] 3. 立即检查 '立即' 动作
                     log.append(f"> [AI] 检查 {proj_obj.name} (ID: {proj_id}) 是否有 '立即' 动作...")
 
-                    # [v_MODIFIED] 传入 '立即' 时机
-                    # [v1.34 修复] run_projectile_logic 已移至 game_logic
-                    from game_logic import run_projectile_logic
+                    # [v_MODIFIED] [IMPORT FIX] 移除本地导入
+                    # from game_logic import run_projectile_logic
                     proj_log, proj_attacks = run_projectile_logic(proj_obj, game_state, '立即')
 
                     if proj_attacks:

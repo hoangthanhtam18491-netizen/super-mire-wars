@@ -270,10 +270,13 @@ def handle_execute_attack(game_state, player_mech, data):
 
             has_immediate_action = projectile_obj.get_action_by_timing('立即')[0] is not None
             if not has_immediate_action:
-                intercept_log, intercept_attacks = check_interception(projectile_obj, game_state)
-                if intercept_attacks:
-                    log.extend(intercept_log)
-                    attacks_to_resolve_list.extend(intercept_attacks)
+                # [MODIFIED] 拦截现在立即结算
+                check_interception(projectile_obj, game_state, log)
+                # [MODIFIED] 移除旧的队列逻辑
+                # intercept_log, intercept_attacks = check_interception(projectile_obj, game_state)
+                # if intercept_attacks:
+                #     log.extend(intercept_log)
+                #     attacks_to_resolve_list.extend(intercept_attacks)
 
             entity_log, attacks = run_projectile_logic(projectile_obj, game_state, '立即')
             log.extend(entity_log)
@@ -615,8 +618,8 @@ def handle_resolve_effect_choice(game_state, player_mech, choice):
     log.append(
         f"> 玩家选择了【{'毁伤' if choice == 'devastating' else ('霰射' if choice == 'scattershot' else '顺劈')}】！")
 
-    log_ext_list, secondary_roll_details = _resolve_effect_logic(
-        log=log, defender_entity=target_entity, target_part=target_part,
+    log_ext_list, secondary_roll_details, overflow_data = _resolve_effect_logic(
+        log=log, attacker_entity=player_mech, defender_entity=target_entity, target_part=target_part,
         overflow_hits=overflow_hits, overflow_crits=overflow_crits, chosen_effect=choice
     )
 
@@ -671,10 +674,22 @@ def handle_resolve_reroll(game_state, player_mech, data):
     # 1. 恢复上下文
     attacker = game_state.get_entity_by_id(pending_data['attacker_id'])
     defender = game_state.get_entity_by_id(pending_data['defender_id'])
-    action = Action.from_dict(pending_data['action_dict'])
+
+    # [MODIFIED] 根据重投类型恢复 action
+    action = None
+    action_name_for_log = "Attack"
+    if pending_data['type'] == 'attack_reroll':
+        action = Action.from_dict(pending_data['action_dict'])
+        action_name_for_log = action.name
+    elif pending_data['type'] == 'effect_reroll':
+        # 效果重投（例如毁伤）没有 action_dict，我们从 chosen_effect 恢复
+        action_name_for_log = pending_data['chosen_effect'].capitalize()
 
     if not attacker or not defender:
         return game_state, log, None, "重投时找不到攻击者或防御者。"
+    # [MODIFIED] effect_reroll 时 action 为 None
+    # if not action:
+    #     return game_state, log, None, "重投时找不到动作。"
 
     # 2. 准备骰子
     new_attack_rolls = pending_data['attack_raw_rolls']
@@ -726,18 +741,59 @@ def handle_resolve_reroll(game_state, player_mech, data):
             defender.pending_reroll_data = None
 
     # 6. 恢复战斗 (跳过重投阶段)
-    attack_log, result, overflow_data, dice_roll_details = resolve_attack(
-        attacker_entity=attacker,
-        defender_entity=defender,
-        action=action,
-        target_part_name=pending_data['target_part_name'],
-        is_back_attack=pending_data['is_back_attack'],
-        chosen_effect=None,  # 重投后，效果选择重置
-        skip_reroll_phase=True,  # 关键：跳过下一次中断
-        rerolled_attack_raw=new_attack_rolls,  # 关键：传入新骰子
-        rerolled_defense_raw=new_defense_rolls  # 关键：传入新骰子
-    )
-    log.extend(attack_log)
+    # [MODIFIED] 根据重投类型选择恢复路径
+    result_data = None
+    dice_roll_details = None
+
+    if pending_data['type'] == 'attack_reroll':
+        attack_log, result, overflow_data, dice_roll_details = resolve_attack(
+            attacker_entity=attacker,
+            defender_entity=defender,
+            action=action,
+            target_part_name=pending_data['target_part_name'],
+            is_back_attack=pending_data['is_back_attack'],
+            chosen_effect=None,  # 重投后，效果选择重置
+            skip_reroll_phase=True,  # 关键：跳过下一次中断
+            rerolled_attack_raw=new_attack_rolls,  # 关键：传入新骰子
+            rerolled_defense_raw=new_defense_rolls  # 关键：传入新骰子
+        )
+        log.extend(attack_log)
+
+        # 7. [重要] 检查战斗恢复后是否需要 *另一次* 中断 (效果选择)
+        if result == "effect_choice_required":
+            if isinstance(attacker, Mech):
+                attacker.pending_effect_data = overflow_data
+            result_data = {
+                'action_required': 'select_effect',
+                'options': overflow_data['options'],
+            }
+            game_state.add_visual_event('effect_choice_required', details=result_data)
+            # [MODIFIED] 效果选择不需要 dice_details，但我们仍然需要添加 *攻击* 的掷骰结果
+
+    elif pending_data['type'] == 'effect_reroll':
+        # [MODIFIED] 恢复效果逻辑
+        target_part = defender.get_part_by_name(pending_data['target_part_name'])
+        if not target_part:
+            log.append(f"> [错误] 重投效果时找不到部件 {pending_data['target_part_name']}。")
+            return game_state, log, None, "重投效果时找不到部件"
+
+        attack_log_ext, secondary_roll_details, overflow_data_ext = _resolve_effect_logic(
+            log=log,
+            attacker_entity=attacker,
+            defender_entity=defender,
+            target_part=target_part,
+            overflow_hits=pending_data['overflow_hits'],
+            overflow_crits=pending_data['overflow_crits'],
+            chosen_effect=pending_data['chosen_effect'],
+            skip_reroll_phase=True,  # 关键：跳过
+            rerolled_defense_raw=new_defense_rolls  # 关键：传入
+        )
+
+        # [MODIFIED] 效果逻辑重投 *不会* 再次触发重投 (overflow_data_ext 应为 None)
+        # [MODIFIED] 效果逻辑返回的是 *次要* 掷骰，将其设为 *主要* 掷骰以便显示
+        dice_roll_details = secondary_roll_details
+        result = "击穿"  # 效果逻辑总是由“击穿”触发
+        # (log 已经被 _resolve_effect_logic 更新了)
 
     # [v_REROLL_FIX] 总是添加最终的掷骰结果事件
     if dice_roll_details:
@@ -745,28 +801,19 @@ def handle_resolve_reroll(game_state, player_mech, data):
             'dice_roll',
             attacker_name=attacker.name,
             defender_name=defender.name,
-            action_name=action.name,
+            action_name=action_name_for_log,
             details=dice_roll_details
         )
     game_state.add_visual_event('attack_result', defender_pos=defender.pos, result_text=result)
 
-    # 7. [重要] 检查战斗恢复后是否需要 *另一次* 中断 (效果选择)
-    result_data = None
-    if result == "effect_choice_required":
-        # [v_REROLL_FIX] 确保在正确的 mecha 上设置 pending_data
-        if isinstance(attacker, Mech):
-            attacker.pending_effect_data = overflow_data
-        result_data = {
-            'action_required': 'select_effect',
-            'options': overflow_data['options'],
-            # [v_REROLL_FIX] 确保 dice_roll_details 也被传递
+    if result_data:
+        # [MODIFIED] 如果触发了效果选择，将 dice_roll_details 添加到 result_data 中
+        result_data.update({
             'dice_details': dice_roll_details,
             'attacker_name': attacker.name,
             'defender_name': defender.name,
-            'action_name': action.name
-        }
-        # [v_REROLL_FIX] 添加视觉事件
-        game_state.add_visual_event('effect_choice_required', details=result_data)
+            'action_name': action_name_for_log
+        })
         return game_state, log, result_data, None
 
     # 8. 如果战斗结束，正常返回
@@ -795,3 +842,4 @@ def handle_resolve_reroll(game_state, player_mech, data):
             player_mech.pending_reroll_data = None  # 确保清除
 
     return game_state, log, result_data, None
+

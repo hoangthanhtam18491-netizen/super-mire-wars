@@ -15,6 +15,8 @@ from parts_database import (
     PROJECTILE_TEMPLATES,  # [v1.17] 导入抛射物模板
     AI_LOADOUTS  # [v1.22] 从 parts_database 导入
 )
+# [MODIFIED] 导入 resolve_attack 以便在 check_interception 中使用
+from .combat_system import resolve_attack
 
 
 # --- [v1.17] 辅助函数 ---
@@ -106,58 +108,96 @@ def get_ai_lock_status(game_state, ai_mech):
 
 # [v1.32 新增] 拦截检查辅助函数
 # [v1.33 修复] 重命名 (移除 _ ) 以便导入
-def check_interception(projectile, game_state):
+# [MODIFIED] 重写以实现“逐发结算”逻辑
+def check_interception(projectile, game_state, log):
     """
     检查是否有任何敌方单位可以拦截此抛射物（在它当前的位置）。
-    返回 (log_list, attacks_to_resolve_list)
+    [MODIFIED] 此函数现在会直接消耗弹药、调用 resolve_attack 并更新日志，
+    采用“逐发结算，失败重试”逻辑。
     """
-    log = []
-    attacks_to_resolve = []
     landing_pos = projectile.pos
 
+    # [MODIFIED] 按顺序检查拦截者
+    intercepting_entities = [
+        e for e in game_state.entities.values()
+        if e.controller != projectile.controller and e.entity_type == 'mech' and e.status != 'destroyed'
+    ]
+
     # 遍历所有实体，寻找拦截者
-    for entity in game_state.entities.values():
-        # 拦截者必须： 1. 是抛射物的敌人  2. 是机甲  3. 存活
-        if entity.controller != projectile.controller and entity.entity_type == 'mech' and entity.status != 'destroyed':
+    for entity in intercepting_entities:
+        # [MODIFIED] 检查此抛射物是否已被摧毁
+        if projectile.status == 'destroyed':
+            log.append(f"> [拦截] {projectile.name} 已被摧毁，{entity.name} 取消拦截。")
+            break  # 停止检查其他拦截者
 
-            interceptor_actions = entity.get_interceptor_actions()
-            if not interceptor_actions:
-                continue  # 这个机甲没有拦截系统
+        interceptor_actions = entity.get_interceptor_actions()
+        if not interceptor_actions:
+            continue  # 这个机甲没有拦截系统
 
-            # 遍历该机甲的所有拦截动作 (例如，如果它有2个AMS背包)
-            for intercept_action, part_slot in interceptor_actions:
-                # 检查射程
-                intercept_range = intercept_action.range_val
-                dist_to_landing = _get_distance(entity.pos, landing_pos)
+        # 遍历该机甲的所有拦截动作 (例如，如果它有2个AMS背包)
+        for intercept_action, part_slot in interceptor_actions:
+            # [MODIFIED] 再次检查抛射物状态
+            if projectile.status == 'destroyed':
+                log.append(f"> [拦截] {projectile.name} 已被摧毁，{entity.name} 的 [{intercept_action.name}] 取消拦截。")
+                break  # 停止检查此机甲的其他AMS
 
-                if dist_to_landing <= intercept_range:
-                    # 检查弹药
-                    ammo_key = (entity.id, part_slot, intercept_action.name)
-                    current_ammo = game_state.ammo_counts.get(ammo_key, 0)
+            # 检查射程
+            intercept_range = intercept_action.range_val
+            dist_to_landing = _get_distance(entity.pos, landing_pos)
 
-                    if current_ammo > 0:
+            if dist_to_landing <= intercept_range:
+                # 检查弹药
+                ammo_key = (entity.id, part_slot, intercept_action.name)
+                current_ammo = game_state.ammo_counts.get(ammo_key, 0)
+
+                if current_ammo > 0:
+                    log.append(
+                        f"> [拦截] {entity.name} 的 [{intercept_action.name}] 侦测到 {projectile.name} (在 {landing_pos})！")
+                    log.append(f"> [拦截] 距离 {dist_to_landing}格 (范围 {intercept_range}格)。")
+
+                    shots_fired = 0
+                    # [MODIFIED] 循环，直到弹药耗尽或目标被摧毁
+                    while current_ammo > 0 and projectile.status != 'destroyed':
+                        shots_fired += 1
                         log.append(
-                            f"> [拦截] {entity.name} 的 [{intercept_action.name}] 侦测到 {projectile.name} (在 {landing_pos})！")
-                        log.append(f"> [拦截] 距离 {dist_to_landing}格 (范围 {intercept_range}格)。")
+                            f"> [拦截] {entity.name} 消耗 1 弹药 (剩余 {current_ammo - 1}) 尝试第 {shots_fired} 次拦截...")
 
                         # 消耗弹药
                         game_state.ammo_counts[ammo_key] -= 1
-                        log.append(f"> [拦截] 消耗 1 弹药 (剩余 {game_state.ammo_counts[ammo_key]})。")
+                        current_ammo -= 1
 
-                        # [关键] 将拦截攻击添加到待处理队列
-                        attacks_to_resolve.append({
-                            'attacker': entity,  # 拦截者是攻击方
-                            'defender': projectile,  # 抛射物是防御方
-                            'action': intercept_action
-                        })
-                        log.append(f"> [拦截] {entity.name} 立即对 {projectile.name} 发动拦截攻击！")
+                        # [关键] 立即调用 resolve_attack，并传入 is_interception_attack=True 来禁用重投
+                        attack_log, result, overflow_data, dice_roll_details = resolve_attack(
+                            attacker_entity=entity,  # 拦截者是攻击方
+                            defender_entity=projectile,  # 抛射物是防御方
+                            action=intercept_action,
+                            target_part_name='core',  # 抛射物总是命中核心
+                            is_back_attack=False,
+                            chosen_effect=None,
+                            skip_reroll_phase=True,  # [v_REFACTOR] 为保险起见，跳过
+                            is_interception_attack=True  # [关键] 禁用重投
+                        )
 
-                        # [v1.32 修复] 移除 break。
-                        # 允许一个机甲使用多个拦截系统 (如果装备了多个) 拦截同一个抛射物。
-                    else:
-                        log.append(
-                            f"> [拦截] {entity.name} 侦测到 {projectile.name}，但 [{intercept_action.name}] 弹药耗尽。")
-    return log, attacks_to_resolve
+                        # 将拦截攻击的日志添加到主日志中
+                        log.extend(attack_log)
+
+                        # [v_REFACTOR] 即使 resolve_attack 返回 "reroll..." (理论上不应该)，
+                        # projectile.status 仍然是 'ok'，循环会继续（这可以防止游戏卡死）
+
+                        # 在循环的下一次迭代中，projectile.status 会被重新检查
+
+                    if shots_fired > 0:
+                        if projectile.status == 'destroyed':
+                            log.append(f"> [拦截] {entity.name} 在第 {shots_fired} 次射击后成功摧毁 {projectile.name}！")
+                        elif current_ammo == 0:
+                            log.append(
+                                f"> [拦截] {entity.name} 弹药耗尽 ({shots_fired} 次射击)，{projectile.name} 仍存活。")
+                else:
+                    log.append(
+                        f"> [拦截] {entity.name} 侦测到 {projectile.name}，但 [{intercept_action.name}] 弹药耗尽。")
+
+    # [MODIFIED] 此函数不再返回攻击队列
+    return
 
 
 def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
@@ -181,10 +221,14 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
         log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 立即执行 [{action_obj.name}]！")
 
         # [v1.32] 立即检查拦截 (例如，火箭弹发射时)
-        # 拦截攻击会优先于抛射物自己的攻击
-        intercept_log, intercept_attacks = check_interception(projectile, game_state)
-        log.extend(intercept_log)
-        attacks_to_resolve.extend(intercept_attacks)
+        # [MODIFIED] check_interception 现在直接处理拦截
+        check_interception(projectile, game_state, log)
+        # (attacks_to_resolve 现在只包含抛射物自己的攻击)
+
+        # [MODIFIED] 检查抛射物是否在拦截中存活
+        if projectile.status == 'destroyed':
+            log.append(f"> [抛射物] {projectile.name} 在引爆前被拦截摧毁！")
+            return log, attacks_to_resolve  # 返回空队列
 
         # 查找目标：在抛射物 *自己* 格子上的所有 *敌方* 单位
         targets = game_state.get_entities_at_pos(projectile.pos, exclude_id=projectile.id)
@@ -257,10 +301,14 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
                 log.append(f"> [抛射物] {projectile.name} 无法找到更近的位置，停留在 {projectile.pos}。")
 
         # 4. [v1.32] 检查拦截 (例如，导弹飞行后)
-        # 拦截攻击会优先于抛射物自己的攻击
-        intercept_log, intercept_attacks = check_interception(projectile, game_state)
-        log.extend(intercept_log)
-        attacks_to_resolve.extend(intercept_attacks)
+        # [MODIFIED] check_interception 现在直接处理拦截
+        check_interception(projectile, game_state, log)
+        # (attacks_to_resolve 现在只包含抛射物自己的攻击)
+
+        # [MODIFIED] 检查抛射物是否在拦截中存活
+        if projectile.status == 'destroyed':
+            log.append(f"> [抛射物] {projectile.name} 在引爆前被拦截摧毁！")
+            return log, attacks_to_resolve  # 返回空队列
 
         # 5. 在最终位置引爆 (如果自己还活着)
         # 查找目标：在抛射物 *自己* 格子上的所有 *敌方* 单位
@@ -402,6 +450,9 @@ class GameState:
 
         # [v1.26] 视觉事件
         self.visual_events = []
+
+        # [NEW] 持久化攻击队列，用于解决中断问题
+        self.pending_attack_queue = []
 
         # --- 初始化玩家机甲 ---
         if player_mech_selection:
@@ -670,6 +721,8 @@ class GameState:
             'game_over': self.game_over,
             'ammo_counts': self.ammo_counts,
             'visual_events': self.visual_events,  # [v1.26]
+            'pending_attack_queue': [atk.to_dict() if hasattr(atk, 'to_dict') else atk for atk in
+                                     self.pending_attack_queue],  # [MODIFIED] 序列化队列
         }
 
     @classmethod
@@ -691,6 +744,11 @@ class GameState:
         game_state.game_over = data.get('game_over', None)
         game_state.ammo_counts = data.get('ammo_counts', {})
         game_state.visual_events = data.get('visual_events', [])  # [v1.26]
+
+        # [MODIFIED] 反序列化队列
+        # 攻击数据（字典）不需要复杂的 'from_dict'，它们只是临时数据
+        game_state.pending_attack_queue = data.get('pending_attack_queue', [])
+
         return game_state
 
     def calculate_move_range(self, entity, move_distance, is_flight=False):

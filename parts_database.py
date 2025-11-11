@@ -93,6 +93,10 @@ EFFECT_SALVO_2 = {
     "logic": {"salvo": 2},
     "name": "【齐射2】"
 }
+EFFECT_SALVO_4 = {
+    "logic": {"salvo": 4},
+    "name": "【齐射4】"
+}
 # [新增] 曲射 (注意: 也在 Action 构造函数中设置 action_style)
 EFFECT_CURVED_FIRE = {
     "logic": {"action_style": "curved"},
@@ -163,7 +167,7 @@ ACTION_AUTO_INTERCEPT = Action(
     cost="",
     dice="3黄", # 拦截时投掷 3 个黄骰
     range_val=3, # 拦截触发范围
-    ammo=3,      # 每回合 3 次 (拦截3)
+    ammo=3,      # 一共 3 次 (拦截3)
     effects=build_effects(EFFECT_INTERCEPTOR_3)
 )
 
@@ -193,6 +197,18 @@ ACTION_LAUNCH_GUIDED_MISSILE = Action(
     effects=build_effects(EFFECT_SALVO_2, EFFECT_CURVED_FIRE) # 齐射2, 曲射
 )
 
+ACTION_LAUNCH_GUIDED_MISSILE_K = Action(
+    name="导弹(红隼)",
+    action_type="抛射",
+    cost="M",
+    dice="", # 发射动作本身不造成伤害
+    range_val=6, # 发射器射程 (玩家选择落点的范围)
+    action_style='curved', # 曲射
+    projectile_to_spawn='MR-10 RED KESTREL_MISSILE', # 要生成的实体
+    ammo=4, # 弹药量
+    effects=build_effects(EFFECT_SALVO_4, EFFECT_CURVED_FIRE) # 齐射4, 曲射
+)
+
 # --- [v1.17 新增] 抛射物“立即”动作 ---
 ACTION_IMMEDIATE_EXPLOSION = Action(
     name="多级串联战斗部",
@@ -209,6 +225,15 @@ ACTION_DELAYED_GUIDED_ATTACK = Action(
     action_type="延迟", # [新增] 新类型: '延迟'
     cost="",
     dice="1黄3红", # 爆炸伤害
+    range_val=0, # 攻击自己所在的格子
+    aoe_range=0 # 仅限本格
+)
+
+ACTION_DELAYED_GUIDED_ATTACK_K = Action(
+    name="制导攻击_红隼",
+    action_type="延迟", # [新增] 新类型: '延迟'
+    cost="",
+    dice="2红", # 爆炸伤害
     range_val=0, # 攻击自己所在的格子
     aoe_range=0 # 仅限本格
 )
@@ -240,6 +265,19 @@ PROJECTILE_TEMPLATES = {
         "life_span": 99, # 存活直到 '延迟' 动作被触发
         "actions": [ACTION_DELAYED_GUIDED_ATTACK.to_dict()],
         "move_range": 3 # 关键：导弹自己的移动力 (来自图片R3)
+    },
+
+    "MR-10 RED KESTREL_MISSILE": {
+        "name": "MR-10 “红隼”导弹",
+        "entity_type": "projectile",
+        "evasion": 4,
+        "electronics": 1,
+        "stance": "agile",
+        "structure": 1, # 1 点生命值
+        "armor": 0,
+        "life_span": 99, # 存活直到 '延迟' 动作被触发
+        "actions": [ACTION_DELAYED_GUIDED_ATTACK_K.to_dict()],
+        "move_range": 6 # 关键
     }
 }
 
@@ -373,6 +411,9 @@ PLAYER_BACKPACKS = {
     'LGP-80 长程火炮': Part(name='LGP-80 长程火炮', armor=3, structure=0, evasion=-2,
                                     actions=[ACTION_DIANSHE_HUOPAO],
                            image_url='static/images/parts/LGP-80.png'),
+    'ML-94 四联导弹包': Part(name='ML-94 四联导弹包', armor=3, structure=0, evasion=-2,
+                                    actions=[ACTION_LAUNCH_GUIDED_MISSILE_K],
+                           image_url='static/images/parts/ML-94.png'),
 }
 
 # --- AI 专用部件 ---

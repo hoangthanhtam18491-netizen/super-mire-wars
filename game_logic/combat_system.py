@@ -401,8 +401,10 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
 
 
 # [v_REROLL] 修改函数签名
+# [MODIFIED] 添加 is_interception_attack 参数
 def resolve_attack(attacker_entity, defender_entity, action, target_part_name, is_back_attack=False,
-                   chosen_effect=None, skip_reroll_phase=False, rerolled_attack_raw=None, rerolled_defense_raw=None):
+                   chosen_effect=None, skip_reroll_phase=False, rerolled_attack_raw=None, rerolled_defense_raw=None,
+                   is_interception_attack=False):
     """
     [v_MODIFIED v1.29]
     处理一次完整的攻击结算流程。
@@ -543,7 +545,8 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
         f"  > 防御方 (基于{log_dice_source}) 投掷 {white_dice_count}白 {blue_dice_count}蓝, 结果 (处理后): {defense_roll or '无'}")
 
     # 4. [v_REROLL] 专注重投检查
-    if not skip_reroll_phase:
+    # [MODIFIED] 拦截攻击 (is_interception_attack) 会跳过此检查
+    if not skip_reroll_phase and not is_interception_attack:
         # 检查是否*任何一方*是玩家机甲且有链接值
         player_is_attacker = (attacker_entity.controller == 'player')
         player_is_defender = (defender_entity.controller == 'player')
