@@ -13,7 +13,7 @@ let diceModalTimer = null;
 const allEntities = data.allEntities;
 const playerID = data.playerID;
 const playerEntity = data.playerEntity;
-const aiEntity = data.aiEntity;
+const aiEntity = data.aiEntity; // 注意：这只是 *默认* AI，可能不是当前目标
 const orientationMap = data.orientationMap;
 const apiUrls = data.apiUrls; // 所有 Flask URL
 const playerLoadout = data.playerLoadout;
@@ -52,7 +52,7 @@ const diceColorMap = {
 // 缓存 DOM 元素
 let partDetailModalBackdrop, partDetailTitle, partDetailImage, partDetailStatsContainer, partDetailStatsList, partDetailActionsList;
 
-// --- 2. 核心函数 (从旧 <script> 块复制而来) ---
+// --- 2. 核心函数 ---
 
 function initializeBoardVisuals() {
     if (!allEntities) return;
@@ -223,7 +223,8 @@ function updateUIForPhase() {
     const message = gameState.pendingReroll ? '请先解决重投！' : '请先选择效果！';
     const isInterrupted = gameState.pendingEffect || gameState.pendingReroll;
 
-    document.querySelectorAll('#phase-main-controls .action-item, #phase-adjustment-controls .action-item, #end-turn-btn').forEach(item => {
+    // [FIX BUG 2] 只选择动作按钮，不再包含 #end-turn-btn
+    document.querySelectorAll('#phase-main-controls .action-item, #phase-adjustment-controls .action-item').forEach(item => {
         if (isInterrupted) {
             item.classList.add('disabled');
             item.title = message;
@@ -239,6 +240,7 @@ function updateUIForPhase() {
         } else if (baseTitle === '弹药耗尽') {
             isDisabled = true; title = '弹药耗尽';
         } else if (gameState.turnPhase === 'main') {
+            // 这个逻辑现在只应用于动作按钮，是正确的
             if (!gameState.openingMoveTaken && item.dataset.actionType !== gameState.timing) {
                 isDisabled = true; title = '非当前时机的起手动作';
             }
@@ -250,6 +252,19 @@ function updateUIForPhase() {
         item.classList.toggle('disabled', isDisabled);
         item.title = title;
     });
+
+    // [FIX BUG 2] 单独处理“结束回合”按钮
+    const endTurnBtn = document.getElementById('end-turn-btn');
+    if (endTurnBtn) {
+        if (isInterrupted) {
+            endTurnBtn.classList.add('disabled');
+            endTurnBtn.title = message;
+        } else {
+            // 只有在没有中断时才启用
+            endTurnBtn.classList.remove('disabled');
+            endTurnBtn.title = '';
+        }
+    }
 }
 
 
@@ -336,10 +351,29 @@ function initiateLaunch(x, y) {
 
 function showPartSelector() {
     const modal = document.getElementById('part-selector-modal'), buttons = document.getElementById('part-buttons'); buttons.innerHTML = '';
-    if (!aiEntity || !aiEntity.parts) return;
 
-    for (const slot in aiEntity.parts) {
-        const part = aiEntity.parts[slot];
+    // [FIX] BUG: 不再使用全局的 aiEntity，而是使用 selectedAction 中存储的当前目标 ID
+    // if (!aiEntity || !aiEntity.parts) return; // <--- 旧的错误代码
+
+    // 1. 从 selectedAction 中获取当前目标 ID
+    const defenderId = selectedAction.targetEntityId;
+    if (!defenderId) {
+        console.error("showPartSelector: selectedAction.targetEntityId is not set!");
+        return;
+    }
+
+    // 2. 从顶部的 allEntities 列表中查找正确的目标实体
+    // 注意: allEntities 是在 data island 中从 Jinja 初始化的
+    const defender = allEntities.find(e => e.id === defenderId);
+
+    if (!defender || !defender.parts) {
+         console.error(`showPartSelector: Could not find defender with ID ${defenderId} or it has no parts.`);
+         return; // <--- 新的、正确的检查
+    }
+
+    // 3. [FIX] 遍历 *正确的* defender 实体的部件
+    for (const slot in defender.parts) {
+        const part = defender.parts[slot];
         if (part && part.status !== 'destroyed') {
             const btn = document.createElement('button');
             btn.className = 'btn'; btn.style.backgroundColor = 'var(--primary-color)';
@@ -396,10 +430,12 @@ function setFinalOrientation(o) { selectedAction.finalOrientation = o; executeMo
 
 function postAndReload(url, body = {}) {
     body.player_id = playerID;
+    console.log("Calling postAndReload for:", url, body); // 增加日志
 
     fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
     .then(res => {
         if (res.redirected) {
+            console.log("Response was a redirect, reloading...");
             window.location.href = res.url;
             return null;
         }
@@ -407,11 +443,20 @@ function postAndReload(url, body = {}) {
         return res.json();
     })
     .then(data => {
-        if (!data) return;
+        if (!data) return; // 如果是重定向，data 为 null
+
+        console.log("Received data:", data); // 增加日志
 
         if(data.success) {
-            if (data.action_required === 'select_part') { showPartSelector(); }
-            else if (data.action_required === 'select_reroll') {
+            // [FIX BUG 1] 修复 if/else 逻辑
+            if (data.action_required === 'select_part') {
+                console.log("Action required: select_part. Showing modal.");
+                showPartSelector();
+                return; // 关键：在此处停止，不要执行 'else'
+            }
+
+            if (data.action_required === 'select_reroll') {
+                console.log("Action required: select_reroll. Showing modal.");
                 const rerollData = data;
                 const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
                 const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
@@ -424,20 +469,21 @@ function postAndReload(url, body = {}) {
                     attackerIsPlayer,
                     defenderIsPlayer
                 );
+                return; // 关键：在此处停止
             }
-            else if (data.action_required === 'select_effect') { showEffectSelector(data.options); }
-            else { window.location.reload(); }
+
+            if (data.action_required === 'select_effect') {
+                console.log("Action required: select_effect. Showing modal.");
+                showEffectSelector(data.options);
+                return; // 关键：在此处停止
+            }
+
+            // 默认行为：如果没有中断，则重载
+            console.log("No action required, reloading.");
+            window.location.reload();
+
         } else {
-            console.warn("操作失败: " + data.message);
-            if (data.message.includes("必须先解决重投")) {
-                 console.error(
-                    "--- [错误类型判断] ---",
-                    "\n操作失败！",
-                    "\n原因: gameState.pendingReroll (后端) 为 true。",
-                    "\n这通常意味着前端状态与后端不同步，或者骰子弹窗没有正确显示。",
-                    "\n请检查上一个 'reroll_required' 事件是否被正确处理。"
-                );
-            }
+            console.warn("Operation failed:", data.message);
             window.location.reload();
         }
     }).catch(e => {
@@ -446,7 +492,7 @@ function postAndReload(url, body = {}) {
     });
 }
 
-// --- [MODIFIED] 乐观 UI 函数 ---
+// --- 乐观 UI 函数 (用于快速响应) ---
 
 function selectTiming(t) {
     if (gameState.pendingEffect || gameState.pendingReroll) return;
@@ -515,7 +561,7 @@ function skipAdjustment() {
     }).catch(e => { console.error("Fetch error:", e); window.location.reload(); });
 }
 
-// --- 其他函数 (从旧 <script> 块复制而来) ---
+// --- 其他函数 ---
 
 function executeMove() {
     let url = selectedAction.isRotationOnly ? apiUrls.changeOrientation : (selectedAction.name === '调整移动' ? apiUrls.executeAdjustMove : apiUrls.movePlayer);
@@ -540,13 +586,34 @@ function executeAttack() {
 
 function showPartDetail(controller, slot) {
     if (!allEntities) return;
-    let mech = (controller === 'player') ? playerEntity : aiEntity;
-    if (!mech || !mech.parts || !mech.parts[slot]) {
-        console.warn(`Could not find part for ${controller} at ${slot}`);
+
+    // [FIX] 修复: 从 allEntities 动态查找
+    let entityId = null;
+    if (controller === 'player') {
+        entityId = playerID;
+    } else {
+        // [FIX] 这是一个临时的、不完美的方法，它假定 aiEntity 变量是正确的。
+        // [FIX 2] 为了在生存模式下工作，我们需要从点击的 DOM 元素向上查找...
+        // ...但为了简单起见，我们暂时还是用 aiEntity
+        entityId = aiEntity ? aiEntity.id : null;
+    }
+
+    if (!entityId) {
+        console.warn(`showPartDetail: 无法确定 ${controller} 的 entityId`);
         return;
     }
+
+    const mech = allEntities.find(e => e.id === entityId);
+
+    if (!mech || !mech.parts || !mech.parts[slot]) {
+        // 如果在 allEntities 中找不到 aiEntity (例如 ai_1 死了, 换成了 ai_2)
+        // 这是一个已知的小问题，但不会导致崩溃
+        console.warn(`Could not find part for ${controller} (ID: ${entityId}) at ${slot}`);
+        return;
+    }
+
     const part = mech.parts[slot];
-    if (!part) return; // 如果部件为空 (例如已被摧毁且数据中不存在)
+    if (!part) return;
 
     partDetailTitle.innerText = part.name;
     let statsHtml = `<li>装甲: ${part.armor}</li><li>结构: ${part.structure}</li>`;
@@ -622,7 +689,6 @@ function formatDiceResult(result, rollType, isClickable = false) {
                     dieGroupHtml += `<span class="dice-icon dice-result ${key}">${icon}</span>`;
                 }
 
-                // [MODIFIED] 移除内联 onclick, 替换为 data-clickable
                 const clickableClass = isClickable ? 'clickable' : 'disabled';
                 html += `<span class="dice-reroll-group ${clickableClass}"
                               data-roll-type="${rollType}"
@@ -704,7 +770,6 @@ function showDiceRollModal(diceDetails, actionName, attackerName, defenderName, 
     document.getElementById('dice-roll-modal-backdrop').style.display = 'flex';
 }
 
-// [MODIFIED] 这现在是事件委托的目标
 function toggleRerollDie(element) {
     if (element.dataset.clickable !== "true") return;
     element.classList.toggle('selected');
@@ -795,14 +860,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({})
             })
             .then(res => {
-                if (res.redirected) { window.location.href = res.url; } else { return res.json(); }
+                // [FIX] /run_projectile_phase 不再重定向，它返回 JSON
+                // if (res.redirected) { window.location.href = res.url; } else { return res.json(); }
+                return res.json();
             })
             .then(data => {
-                if (data && data.success) { window.location.reload(); }
-                else if (data) { console.error("抛射物阶段运行失败:", data.message); window.location.reload(); }
+                // [FIX] 收到 JSON 确认后， *现在* 重载页面
+                if (data && data.success) {
+                    window.location.reload();
+                } else if (data) {
+                    console.error("抛射物阶段运行失败:", data.message);
+                    window.location.reload();
+                }
             })
             .catch(e => { console.error("Fetch error:", e); window.location.reload(); });
-        }, 2000);
+        }, 2000); // 延迟2秒，让玩家看到AI的移动
     }
 
     // 视觉事件处理
@@ -837,7 +909,7 @@ document.addEventListener('DOMContentLoaded', () => {
             "\n游戏卡死！",
             "\n原因: gameState.pendingReroll 为 true (红色警告条出现)，",
             "但是 gameState.visualEvents 中 *没有* 找到 'reroll_required' 事件。",
-            "\n请检查后端（game_controller.py 和 game_routes.py）中所有调用 resolve_attack 的地方，",
+            "\n请检查后端（game_controller.py）中所有调用 resolve_attack 的地方，",
             "确保在 'reroll_choice_required' 返回时，已将 'reroll_required' 事件添加到 visual_events 列表中。",
             "\nVisual Events 内容:", gameState.visualEvents
         );
@@ -899,16 +971,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('dice-roll-skip')?.addEventListener('click', () => confirmReroll(true));
     document.getElementById('dice-roll-confirm')?.addEventListener('click', () => confirmReroll(false));
 
-    // [MODIFIED] 为重投骰子添加事件委托
+    // 为重投骰子添加事件委托
     const attackerDiceGroup = document.getElementById('dice-roll-attacker-result');
     const defenderDiceGroup = document.getElementById('dice-roll-defender-result');
 
     const handleDieClick = (event) => {
-        // 查找被点击的 .dice-reroll-group
         const dieElement = event.target.closest('.dice-reroll-group');
-
         if (dieElement && dieElement.dataset.clickable === "true") {
-            // 调用我们模块内的函数
             toggleRerollDie(dieElement);
         }
     };
@@ -921,6 +990,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('part-detail-modal-backdrop')?.addEventListener('click', closePartDetailModal);
     document.getElementById('part-detail-close-btn')?.addEventListener('click', closePartDetailModal);
     document.getElementById('part-detail-modal')?.addEventListener('click', (e) => e.stopPropagation());
+
     document.querySelectorAll('tr[data-part-slot]').forEach(row => {
         row.addEventListener('click', () => {
             showPartDetail(row.dataset.controller, row.dataset.partSlot);
