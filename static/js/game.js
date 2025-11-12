@@ -54,6 +54,34 @@ let partDetailModalBackdrop, partDetailTitle, partDetailImage, partDetailStatsCo
 
 // --- 2. 核心函数 ---
 
+/**
+ * [NEW] 显示一个包含错误信息并停止自动重载的弹窗。
+ * @param {string} title - 弹窗的标题.
+ * @param {string} message - 要显示的错误信息.
+ */
+function showErrorModal(title, message) {
+    const backdrop = document.getElementById('error-modal-backdrop');
+    const titleEl = document.getElementById('error-title');
+    const messageEl = document.getElementById('error-message');
+
+    if (backdrop && titleEl && messageEl) {
+        titleEl.innerText = title || '发生未知错误';
+        messageEl.innerText = message || '请检查控制台并刷新页面。';
+        backdrop.style.display = 'flex';
+    } else {
+        // 作为最终的后备，如果弹窗HTML不存在，则使用 alert
+        console.error("CRITICAL: Error modal HTML elements not found.");
+        alert(`发生严重错误:\nTitle: ${title}\nMessage: ${message}\n自动重载已停止。`);
+    }
+    // 冻结游戏UI，防止进一步操作
+    document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
+        if (!el.closest('#error-modal')) {
+            el.disabled = true;
+        }
+    });
+}
+
+
 function initializeBoardVisuals() {
     if (!allEntities) return;
     const wrappers = document.querySelectorAll('.mech-icon-wrapper');
@@ -428,24 +456,39 @@ function showOrientationSelector(x, y, isRotationOnly = false) {
 
 function setFinalOrientation(o) { selectedAction.finalOrientation = o; executeMove(); }
 
+// [MODIFIED] postAndReload 函数已修改，以捕获错误并显示弹窗
 function postAndReload(url, body = {}) {
     body.player_id = playerID;
-    console.log("Calling postAndReload for:", url, body); // 增加日志
+    console.log("Calling postAndReload for:", url, body);
 
     fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
-    .then(res => {
+    .then(async res => { // [MODIFIED] 标记为 async 以便读取 .json()
         if (res.redirected) {
             console.log("Response was a redirect, reloading...");
             window.location.href = res.url;
             return null;
         }
-        if (!res.ok) { throw new Error(`HTTP error! status: ${res.status}`); }
+        if (!res.ok) {
+            // [MODIFIED] 尝试从错误的响应中解析 JSON 消息
+            let errorMsg = `HTTP 错误! 状态: ${res.status} ${res.statusText}`;
+            try {
+                // 尝试解析JSON体以获取更详细的错误
+                const errData = await res.json();
+                if (errData && errData.message) {
+                    errorMsg = errData.message;
+                }
+            } catch (e) {
+                // 响应不是JSON，或者解析失败，使用默认的 statusText
+            }
+            // [MODIFIED] 抛出这个更详细的错误
+            throw new Error(errorMsg);
+        }
         return res.json();
     })
     .then(data => {
         if (!data) return; // 如果是重定向，data 为 null
 
-        console.log("Received data:", data); // 增加日志
+        console.log("Received data:", data);
 
         if(data.success) {
             // [FIX BUG 1] 修复 if/else 逻辑
@@ -483,14 +526,21 @@ function postAndReload(url, body = {}) {
             window.location.reload();
 
         } else {
+            // [MODIFIED] API 调用成功，但业务逻辑失败 (e.g., AP不足)
             console.warn("Operation failed:", data.message);
-            window.location.reload();
+            // [MODIFIED] 不再自动重载，而是显示错误
+            showErrorModal('操作失败', data.message || '后端返回了一个错误，但没有提供详情。');
+            // window.location.reload(); // <--- [REMOVED]
         }
     }).catch(e => {
-        console.error("Fetch error:", e);
-        window.location.reload();
+        // [MODIFIED] 捕获 fetch 错误 (e.g., HTTP 500, 网络中断)
+        console.error("Fetch error:", e.message);
+        // [MODIFIED] 不再自动重载，而是显示错误
+        showErrorModal('后端通信错误', e.message || '一个未知的fetch错误发生了。');
+        // window.location.reload(); // <--- [REMOVED]
     });
 }
+
 
 // --- 乐观 UI 函数 (用于快速响应) ---
 
@@ -595,7 +645,10 @@ function showPartDetail(controller, slot) {
         // [FIX] 这是一个临时的、不完美的方法，它假定 aiEntity 变量是正确的。
         // [FIX 2] 为了在生存模式下工作，我们需要从点击的 DOM 元素向上查找...
         // ...但为了简单起见，我们暂时还是用 aiEntity
-        entityId = aiEntity ? aiEntity.id : null;
+        // [FIX 3] 在生存模式下, aiEntity 可能是 ai_1, 但我们需要 ai_2
+        // 我们应该从 allEntities 查找第一个 'ai'
+        const currentAi = allEntities.find(e => e.controller === 'ai' && e.status !== 'destroyed');
+        entityId = currentAi ? currentAi.id : null;
     }
 
     if (!entityId) {
@@ -848,7 +901,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // AI 回合暂停逻辑
     if (gameState.runProjectilePhase && !gameState.gameOver && !gameState.pendingEffect && !gameState.pendingReroll) {
         document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
-            if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal')) {
+            if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal') && !el.closest('#error-modal-backdrop')) { // [MODIFIED] 排除错误弹窗
                 el.disabled = true;
                 el.style.cursor = 'wait';
             }
@@ -861,7 +914,6 @@ document.addEventListener('DOMContentLoaded', () => {
             })
             .then(res => {
                 // [FIX] /run_projectile_phase 不再重定向，它返回 JSON
-                // if (res.redirected) { window.location.href = res.url; } else { return res.json(); }
                 return res.json();
             })
             .then(data => {
@@ -870,10 +922,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.location.reload();
                 } else if (data) {
                     console.error("抛射物阶段运行失败:", data.message);
-                    window.location.reload();
+                    // [MODIFIED] 显示错误弹窗而不是重载
+                    showErrorModal('抛射物阶段失败', data.message || '后端未能运行抛射物阶段。');
+                    // window.location.reload(); // <--- [REMOVED]
                 }
             })
-            .catch(e => { console.error("Fetch error:", e); window.location.reload(); });
+            .catch(e => {
+                console.error("Fetch error:", e);
+                // [MODIFIED] 显示错误弹窗而不是重载
+                showErrorModal('抛射物阶段Fetch失败', e.message || '无法连接到服务器以运行抛射物阶段。');
+                // window.location.reload(); // <--- [REMOVED]
+            });
         }, 2000); // 延迟2秒，让玩家看到AI的移动
     }
 

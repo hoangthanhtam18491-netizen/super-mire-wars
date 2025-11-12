@@ -30,13 +30,13 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
     现在接收一个通用的 defender_entity。
     [v_NEXT_REROLL_FIX]
     此函数现在支持专注重投中断。
-    它现在返回 (log, dice_roll_details_2, overflow_data)，其中 overflow_data 在重投时为 pending_data。
+    它现在返回 (log, dice_roll_details_2, overflow_data, result_code)，其中 overflow_data 在重投时为 pending_data。
     """
 
     # [新增 v1.ISTATET] 效果逻辑目前只对机甲有效
     if not isinstance(defender_entity, Mech):
         log.append(f"  > [效果：{chosen_effect}] 触发，但目标不是机甲，效果跳过。")
-        return log, None, None  # [MODIFIED] 返回 3 个值
+        return log, None, None, None  # [MODIFIED] 返回 4 个值
 
     dice_roll_details_2 = None
     pending_reroll_data = None  # [NEW]
@@ -91,8 +91,8 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
                     'player_is_attacker': False,
                     'player_is_defender': True,
                 }
-                # 返回中断信号和数据
-                return log, "reroll_choice_required", pending_reroll_data, dice_roll_details_2
+                # [MODIFIED] 返回 4 个值 (log, details, pending_data, result_code)
+                return log, dice_roll_details_2, pending_reroll_data, "reroll_choice_required"
         # --- [END NEW REROLL BLOCK] ---
 
         # [修改] 使用新的 roll_dice 和 process_rolls
@@ -207,7 +207,8 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
                         'player_is_attacker': False,
                         'player_is_defender': True,
                     }
-                    return log, "reroll_choice_required", pending_reroll_data, dice_roll_details_2
+                    # [MODIFIED] 返回 4 个值
+                    return log, dice_roll_details_2, pending_reroll_data, "reroll_choice_required"
             # --- [END NEW REROLL BLOCK] ---
 
             # [修改] 使用新的 roll_dice 和 process_rolls
@@ -331,7 +332,8 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
                         'player_is_attacker': False,
                         'player_is_defender': True,
                     }
-                    return log, "reroll_choice_required", pending_reroll_data, dice_roll_details_2
+                    # [MODIFIED] 返回 4 个值
+                    return log, dice_roll_details_2, pending_reroll_data, "reroll_choice_required"
             # --- [END NEW REROLL BLOCK] ---
 
             # [修改] 使用新的 roll_dice 和 process_rolls
@@ -397,7 +399,7 @@ def _resolve_effect_logic(log, attacker_entity, defender_entity, target_part, ov
             else:
                 log.append(f"  > [顺劈结算] 第二个部件抵消了所有溢出伤害。")
 
-    return log, dice_roll_details_2, None  # [MODIFIED] 返回 3 个值
+    return log, dice_roll_details_2, None, None  # [MODIFIED] 返回 4 个值
 
 
 # [v_REROLL] 修改函数签名
@@ -542,7 +544,6 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
     )
     dice_roll_details['defense_dice_result'] = processed_defense_rolls  # [修改] 发送处理后的分组结果
 
-    # defense_lightning = defense_roll.get('闪电', 0) # [REMOVED] 震撼效果不再使用此
     log.append(
         f"  > 防御方 (基于{log_dice_source}) 投掷 {white_dice_count}白 {blue_dice_count}蓝, 结果 (处理后): {defense_roll or '无'}")
 
@@ -783,35 +784,34 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
         # --- 效果执行 ---
         secondary_roll_details = None
         if chosen_effect == 'devastating' and devastating_conditions_met:
-            # [MODIFIED] 传入 attacker_entity, 并准备接收 3 个返回值
-            log_ext, secondary_roll_details, overflow_data = _resolve_effect_logic(
+            # [MODIFIED] 接收 4 个返回值 (log, details, pending_data, result_code)
+            log_ext, secondary_roll_details, overflow_data, result_code = _resolve_effect_logic(
                 log, attacker_entity, defender_entity, target_part,
                 overflow_hits_for_effects, overflow_crits_for_effects, 'devastating',
-                skip_reroll_phase=skip_reroll_phase  # [MODIFIED] 传递 skip 标志
+                skip_reroll_phase=skip_reroll_phase
             )
-            # [MODIFIED] log_ext 已经是 log 本身
             # [MODIFIED] 检查效果是否触发了重投
-            if overflow_data:
+            if result_code == "reroll_choice_required":
                 return log, "reroll_choice_required", overflow_data, secondary_roll_details
 
         elif chosen_effect == 'scattershot' and scattershot_conditions_met:
-            # [MODIFIED] 传入 attacker_entity, 并准备接收 3 个返回值
-            log_ext, secondary_roll_details, overflow_data = _resolve_effect_logic(
+            # [MODIFIED] 接收 4 个返回值
+            log_ext, secondary_roll_details, overflow_data, result_code = _resolve_effect_logic(
                 log, attacker_entity, defender_entity, target_part,
                 overflow_hits_for_effects, overflow_crits_for_effects, 'scattershot',
                 skip_reroll_phase=skip_reroll_phase
             )
-            if overflow_data:
+            if result_code == "reroll_choice_required":
                 return log, "reroll_choice_required", overflow_data, secondary_roll_details
 
         elif chosen_effect == 'cleave' and cleave_conditions_met:
-            # [MODIFIED] 传入 attacker_entity, 并准备接收 3 个返回值
-            log_ext, secondary_roll_details, overflow_data = _resolve_effect_logic(
+            # [MODIFIED] 接收 4 个返回值
+            log_ext, secondary_roll_details, overflow_data, result_code = _resolve_effect_logic(
                 log, attacker_entity, defender_entity, target_part,
                 overflow_hits_for_effects, overflow_crits_for_effects, 'cleave',
                 skip_reroll_phase=skip_reroll_phase
             )
-            if overflow_data:
+            if result_code == "reroll_choice_required":
                 return log, "reroll_choice_required", overflow_data, secondary_roll_details
 
         if secondary_roll_details:

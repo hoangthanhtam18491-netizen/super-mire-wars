@@ -443,7 +443,6 @@ def handle_execute_attack(game_state, player_mech, data):
                     else:
                         log.append(f"> 目标为非机甲单位，自动命中 [核心]。")
 
-        # --- [BUG 修复] 移除错误的抛射物逻辑 ---
         # 1. 消耗 AP/TP
         game_state, action_log, success, message = _execute_main_action(game_state, player_mech, attack_action,
                                                                         action_name, part_slot)
@@ -485,7 +484,7 @@ def handle_execute_attack(game_state, player_mech, data):
             game_state.add_visual_event('reroll_required', details=result_data)
             return game_state, log, None, result_data, None
 
-        # 5. 处理中断：效果选择
+        # 5. [FIX] 处理中断：效果选择
         if result == "effect_choice_required":
             player_mech.pending_effect_data = {
                 'action_dict': attack_action.to_dict(),
@@ -494,12 +493,28 @@ def handle_execute_attack(game_state, player_mech, data):
                 'target_entity_id': defender_entity.id,
                 'target_part_name': target_part_slot,
                 'is_back_attack': back_attack,
-                'choice': None
+                'choice': None,
+                # [FIX] 在 pending_data 中存储初始掷骰结果
+                'initial_dice_roll_details': dice_roll_details
             }
-            result_data = {'action_required': 'select_effect', 'options': overflow_data['options']}
+            result_data = {
+                'action_required': 'select_effect',
+                'options': overflow_data['options'],
+                # [FIX] 将初始掷骰结果传递给客户端
+                'dice_details': dice_roll_details,
+                'attacker_name': player_mech.name,
+                'defender_name': defender_entity.name,
+                'action_name': attack_action.name
+            }
+            # [FIX] 立即添加掷骰事件，以便在选择效果之前显示
+            game_state.add_visual_event(
+                'dice_roll',
+                attacker_name=player_mech.name,
+                defender_name=defender_entity.name,
+                action_name=attack_action.name,
+                details=dice_roll_details
+            )
             return game_state, log, None, result_data, None
-
-        player_mech.pending_effect_data = None
 
         # 6. 检查游戏是否结束
         ai_was_defeated = (defender_entity.controller == 'ai' and
@@ -515,8 +530,6 @@ def handle_execute_attack(game_state, player_mech, data):
             log.append(f"> [警告] 新的敌人出现: {ai_mech.name}！")
 
         return game_state, log, None, None, None
-
-    # --- [BUG 修复] 结束 ---
 
     return game_state, log, None, None, "无效的动作类型"
 
@@ -588,6 +601,12 @@ def handle_resolve_effect_choice(game_state, player_mech, choice):
         log.append(f"> [错误] {error}")
         return game_state, log, None, None, error
 
+    # [FIX] 从 pending_data 中检索初始掷骰结果
+    initial_dice_roll_details = pending_data.get('initial_dice_roll_details')
+
+    # [BUG FIX] 立即清除待处理的效果状态，无论后续发生什么。
+    player_mech.pending_effect_data = None
+
     if choice not in pending_data.get('options', []):
         error = f"无效的选择: {choice}"
         log.append(f"> [错误] {error}")
@@ -618,21 +637,51 @@ def handle_resolve_effect_choice(game_state, player_mech, choice):
     log.append(
         f"> 玩家选择了【{'毁伤' if choice == 'devastating' else ('霰射' if choice == 'scattershot' else '顺劈')}】！")
 
-    # 调用效果结算逻辑
-    log_ext_list, secondary_roll_details, overflow_data = _resolve_effect_logic(
+    log_ext_list, secondary_roll_details, overflow_data, result_code = _resolve_effect_logic(
         log=log, attacker_entity=player_mech, defender_entity=target_entity, target_part=target_part,
-        overflow_hits=overflow_hits, overflow_crits=overflow_crits, chosen_effect=choice
+        overflow_hits=overflow_hits, overflow_crits=overflow_crits, chosen_effect=choice,
+        skip_reroll_phase=False
     )
 
+    # --- [NEW FIX] 合并初始掷骰和次要掷骰 ---
+    # 复制初始掷骰详情 (如果存在)，否则创建一个空字典
+    final_dice_details = initial_dice_roll_details.copy() if initial_dice_roll_details else {}
+
     if secondary_roll_details:
+        # [FIX] 这就是关键：将次要掷骰结果附加到 'secondary_roll' 键
+        final_dice_details['secondary_roll'] = secondary_roll_details
+
+    # [FIX] 将 *合并后* 的掷骰详情添加到视觉事件
+    if final_dice_details:
+        action_name = "Attack"
+        try:
+            # 尝试从 pending_data 中获取原始动作名称
+            action_name = Action.from_dict(pending_data['action_dict']).name
+        except:
+            pass  # 如果失败，保留 "Attack"
+
         game_state.add_visual_event(
-            'dice_roll', attacker_name=player_mech.name, defender_name=target_entity.name,
-            action_name=choice.capitalize(), details=secondary_roll_details
+            'dice_roll',
+            attacker_name=player_mech.name,
+            defender_name=target_entity.name,
+            action_name=action_name,  # [FIX] 使用原始动作名称
+            details=final_dice_details  # [FIX] 传递合并后的详情
         )
+
     game_state.add_visual_event('attack_result', defender_pos=target_entity.pos, result_text='击穿')
 
-    # 清除中断状态
-    player_mech.pending_effect_data = None
+    if result_code == "reroll_choice_required":
+        player_mech.pending_reroll_data = overflow_data
+        result_data = {
+            'action_required': 'select_reroll',
+            # [FIX] 确保传递的是 *次要* 掷骰详情，因为这才是需要重投的
+            'dice_details': secondary_roll_details,
+            'attacker_name': player_mech.name,
+            'defender_name': target_entity.name,
+            'action_name': choice.capitalize()
+        }
+        game_state.add_visual_event('reroll_required', details=result_data)
+        return game_state, log, None, result_data, None
 
     # 检查游戏是否结束
     ai_was_defeated = (target_entity.controller == 'ai' and
@@ -664,6 +713,20 @@ def handle_resolve_reroll(game_state, player_mech, data):
 
     if not pending_data:
         return game_state, log, None, None, "找不到待处理的重投数据！"
+
+    # --- [关键修复 v2.4] ---
+    # 在 *读取* 完 pending_data 之后，再清除所有实体上的标志。
+    # 这可以防止 "pending_data" 变量自身被清除。
+    for entity in game_state.entities.values():
+        if isinstance(entity, Mech):
+            # [关键修复] *同时* 清除 effect 和 reroll 标志，打破一切循环
+            if entity.pending_effect_data:
+                log.append(f"> [系统] 在 {entity.name} 上检测到残留的 '效果' 标志，已强制清除。")
+                entity.pending_effect_data = None
+            if entity.pending_reroll_data:
+                log.append(f"> [系统] 在 {entity.name} 上检测到残留的 '重投' 标志，已强制清除。")
+                entity.pending_reroll_data = None
+    # --- [修复结束] ---
 
     # 1. 恢复上下文
     attacker = game_state.get_entity_by_id(pending_data['attacker_id'])
@@ -718,13 +781,7 @@ def handle_resolve_reroll(game_state, player_mech, data):
     elif is_skipping:
         log.append("  > 玩家跳过重投。")
 
-    # 5. 清除中断状态
-    if pending_data['player_is_attacker']:
-        if isinstance(attacker, Mech):
-            attacker.pending_reroll_data = None
-    if pending_data['player_is_defender']:
-        if isinstance(defender, Mech):
-            defender.pending_reroll_data = None
+    # 5. [已移动] 清除中断状态的逻辑已被移至上面的新修复块中
 
     # 6. 恢复战斗 (跳过重投阶段)
     result_data = None
@@ -748,11 +805,35 @@ def handle_resolve_reroll(game_state, player_mech, data):
         # 检查是否需要 *另一次* 中断 (效果选择)
         if result == "effect_choice_required":
             if isinstance(attacker, Mech):
-                attacker.pending_effect_data = overflow_data
+                # [FIX] 构建一个 *完整* 的 pending_effect_data
+                attacker.pending_effect_data = {
+                    'action_dict': pending_data.get('action_dict'),
+                    'overflow_data': {'hits': overflow_data['hits'], 'crits': overflow_data['crits']},
+                    'options': overflow_data['options'],
+                    'target_entity_id': pending_data.get('defender_id'),
+                    'target_part_name': pending_data.get('target_part_name'),
+                    'is_back_attack': pending_data.get('is_back_attack', False),
+                    'choice': None,
+                    # [FIX] 存储重投后的掷骰结果
+                    'initial_dice_roll_details': dice_roll_details
+                }
             result_data = {
                 'action_required': 'select_effect',
                 'options': overflow_data['options'],
+                # [FIX] 将掷骰结果传递给客户端
+                'dice_details': dice_roll_details,
+                'attacker_name': attacker.name,
+                'defender_name': defender.name,
+                'action_name': action_name_for_log
             }
+            # [FIX] 立即添加掷骰事件
+            game_state.add_visual_event(
+                'dice_roll',
+                attacker_name=attacker.name,
+                defender_name=defender.name,
+                action_name=action_name_for_log,
+                details=dice_roll_details
+            )
             game_state.add_visual_event('effect_choice_required', details=result_data)
 
     elif pending_data['type'] == 'effect_reroll':
@@ -761,7 +842,8 @@ def handle_resolve_reroll(game_state, player_mech, data):
             log.append(f"> [错误] 重投效果时找不到部件 {pending_data['target_part_name']}。")
             return game_state, log, None, None, "重投效果时找不到部件"
 
-        attack_log_ext, secondary_roll_details, overflow_data_ext = _resolve_effect_logic(
+        # [MODIFIED] 接收 4 个返回值
+        attack_log_ext, secondary_roll_details, overflow_data_ext, result_code = _resolve_effect_logic(
             log=log,
             attacker_entity=attacker,
             defender_entity=defender,
@@ -775,25 +857,54 @@ def handle_resolve_reroll(game_state, player_mech, data):
         dice_roll_details = secondary_roll_details
         result = "击穿"
 
-    # 7. 添加最终的视觉事件
-    if dice_roll_details:
-        game_state.add_visual_event(
-            'dice_roll',
-            attacker_name=attacker.name,
-            defender_name=defender.name,
-            action_name=action_name_for_log,
-            details=dice_roll_details
-        )
-    game_state.add_visual_event('attack_result', defender_pos=defender.pos, result_text=result)
+        # [FIX] 如果效果重投 *没有* 触发另一次重投，我们需要显示合并的掷骰结果
+        if result_code != "reroll_choice_required":
+            # 尝试从 pending_data 中获取 *初始* 掷骰结果 (虽然在效果重投时可能没有)
+            initial_dice_roll_details = pending_data.get('initial_dice_roll_details', {})
+            if initial_dice_roll_details:
+                final_dice_details = initial_dice_roll_details.copy()
+                final_dice_details['secondary_roll'] = secondary_roll_details
+                dice_roll_details = final_dice_details  # 使用合并后的详情
+            else:
+                #  fallback: 仅显示次要掷骰 (这会导致图1的bug, 但pending_data中没有初始数据)
+                # [FIX v3] 我们需要从 attacker_entity (玩家) 那里获取... 但它已经被清除了。
+                # 这是一个更深层次的问题，暂时先这样处理
+                dice_roll_details = secondary_roll_details
+
+        # [MODIFIED] 检查效果的重投是否触发了 *另一次* 重投 (理论上不应该，但作为安全措施)
+        if result_code == "reroll_choice_required":
+            if isinstance(defender, Mech):  # 防御方 (玩家)
+                defender.pending_reroll_data = overflow_data_ext
+            result_data = {
+                'action_required': 'select_reroll',
+                'dice_details': secondary_roll_details,  # 仅传递次要掷骰
+                'attacker_name': attacker.name,
+                'defender_name': defender.name,
+                'action_name': action_name_for_log
+            }
+            game_state.add_visual_event('reroll_required', details=result_data)
+
+    # 7. 添加最终的视觉事件 (仅当没有触发效果选择时)
+    if not result_data or result_data.get('action_required') != 'select_effect':
+        if dice_roll_details:
+            game_state.add_visual_event(
+                'dice_roll',
+                attacker_name=attacker.name,
+                defender_name=defender.name,
+                action_name=action_name_for_log,
+                details=dice_roll_details
+            )
+        game_state.add_visual_event('attack_result', defender_pos=defender.pos, result_text=result)
 
     if result_data:
-        # 如果触发了效果选择，将 dice_roll_details 添加到 result_data 中
-        result_data.update({
-            'dice_details': dice_roll_details,
-            'attacker_name': attacker.name,
-            'defender_name': defender.name,
-            'action_name': action_name_for_log
-        })
+        # 如果触发了效果选择，确保 dice_roll_details 存在
+        if 'dice_details' not in result_data:
+            result_data.update({
+                'dice_details': dice_roll_details,
+                'attacker_name': attacker.name,
+                'defender_name': defender.name,
+                'action_name': action_name_for_log
+            })
         return game_state, log, None, result_data, None
 
     # 8. [MODIFIED] 检查是否有待处理的 AI 攻击队列
@@ -803,9 +914,7 @@ def handle_resolve_reroll(game_state, player_mech, data):
     if queued_attacks and not result_data:  # 仅当没有触发效果选择时才继续
         log.append(f"> [系统] 玩家重投已解决。正在恢复 AI 的攻击队列... ({len(queued_attacks)} 个动作)")
 
-        # [MODIFIED] 这是一个简化的攻击循环，来自 handle_end_turn
-        # 它必须能够处理 *另一次* 重投中断
-        for i, attack_data in enumerate(queued_attacks):  # Renamed 'attack' to 'attack_data'
+        for i, attack_data in enumerate(queued_attacks):
             if game_ended_mid_turn:
                 log.append(
                     f"> [结算] 攻击 {attack_data.get('action_dict', {}).get('name', '未知')} 被暂停，等待玩家重投。")
@@ -813,7 +922,6 @@ def handle_resolve_reroll(game_state, player_mech, data):
 
             if not isinstance(attack_data, dict): continue
 
-            # [MODIFIED] Re-fetch entities and action from serialized data
             attacker_entity = game_state.get_entity_by_id(attack_data.get('attacker_id'))
             defender_entity = game_state.get_entity_by_id(attack_data.get('defender_id'))
             attack_action_dict = attack_data.get('action_dict')
@@ -834,7 +942,7 @@ def handle_resolve_reroll(game_state, player_mech, data):
 
             log.append(f"--- 攻击结算 ({attacker_entity.name} -> {attack_action.name}) ---")
 
-            # AI 攻击的部位判定 (Copied from handle_end_turn)
+            # AI 攻击的部位判定
             back_attack = False
             if isinstance(defender_entity, Mech):
                 if isinstance(attacker_entity, Mech):
@@ -913,9 +1021,8 @@ def handle_resolve_reroll(game_state, player_mech, data):
             # 处理中断：重投
             if result == "reroll_choice_required":
                 if isinstance(defender_entity, Mech):  # 玩家机甲
-                    # [MODIFIED] Store remaining attacks inside the reroll data
                     overflow_data['remaining_attacks'] = queued_attacks[
-                        i + 1:]  # Store remaining *serializable* attacks
+                        i + 1:]
                     defender_entity.pending_reroll_data = overflow_data
                     log.append(
                         f"> [系统] AI 攻击队列已暂停，剩余 {len(overflow_data['remaining_attacks'])} 个动作待处理。")
@@ -929,7 +1036,7 @@ def handle_resolve_reroll(game_state, player_mech, data):
                 }
                 game_state.add_visual_event('reroll_required', details=result_data)
                 game_ended_mid_turn = True
-                break  # Stop processing the *queued* attacks
+                break
 
             game_is_over = game_state.check_game_over()
             if game_is_over and game_state.game_over == 'ai_win':
@@ -937,14 +1044,12 @@ def handle_resolve_reroll(game_state, player_mech, data):
                 if game_state.game_mode == 'horde':
                     log.append(f"> [生存模式] 最终击败数: {game_state.ai_defeat_count}")
                 game_ended_mid_turn = True
-                break  # Stop processing the *queued* attacks
+                break
 
         if game_ended_mid_turn:
-            # A reroll was triggered *inside* the reroll handler.
-            # We must return the new result_data.
             return game_state, log, None, result_data, None
 
-    # 9. 检查游戏是否结束 (original step 8)
+    # 9. 检查游戏是否结束
     game_is_over = game_state.check_game_over()
 
     return game_state, log, None, result_data, None
@@ -996,7 +1101,7 @@ def handle_end_turn(game_state):
                     log.extend(entity_log)
 
                     # 结算此 AI 机甲的攻击
-                    for i, attack in enumerate(attacks):  # [MODIFIED] Add enumerate
+                    for i, attack in enumerate(attacks):
                         if game_ended_mid_turn:
                             log.append(
                                 f"> [结算] 攻击 {attack.get('action').name if attack.get('action') else ''} 被暂停，等待玩家重投。")
@@ -1102,8 +1207,6 @@ def handle_end_turn(game_state):
                         # 处理中断：重投
                         if result == "reroll_choice_required":
                             if isinstance(defender_entity, Mech):  # 玩家机甲
-                                # [MODIFIED] Store remaining attacks inside the reroll data
-
                                 # [NEW - FIX] Serialize the remaining attacks to prevent recursion
                                 remaining_attacks_serializable = []
                                 for atk in attacks[i + 1:]:
@@ -1128,7 +1231,7 @@ def handle_end_turn(game_state):
                             }
                             game_state.add_visual_event('reroll_required', details=result_data)
                             game_ended_mid_turn = True
-                            break  # [MODIFIED] Re-add the break, it's correct now
+                            break
 
                         game_is_over = game_state.check_game_over()
                         if game_is_over and game_state.game_over == 'ai_win':
@@ -1144,9 +1247,6 @@ def handle_end_turn(game_state):
                 log.extend(entity_log)
                 # (如果无人机有攻击，也应在此处结算)
 
-    # [FIX]
-    # 无论回合是否被中断 (game_ended_mid_turn)，
-    # 我们 *总是* 应该设置 'run_projectile_phase' 标志。
     if not game_ended_mid_turn:
         log.append("--- AI 机甲阶段结束 ---")
 
@@ -1180,7 +1280,7 @@ def handle_run_projectile_phase(game_state):
             log.extend(entity_log)
 
             # 结算此抛射物的攻击
-            for i, attack in enumerate(attacks):  # [MODIFIED] Add enumerate
+            for i, attack in enumerate(attacks):
                 if game_ended_mid_turn:
                     log.append(
                         f"> [结算] 攻击 {attack.get('action').name if attack.get('action') else ''} 被暂停，等待玩家重投。")
@@ -1263,8 +1363,6 @@ def handle_run_projectile_phase(game_state):
                 if result == "reroll_choice_required":
                     player_mech = game_state.get_player_mech()
                     if player_mech:
-                        # [MODIFIED] Store remaining attacks inside the reroll data
-
                         # [NEW - FIX] Serialize the remaining attacks
                         remaining_attacks_serializable = []
                         for atk in attacks[i + 1:]:
