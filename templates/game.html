@@ -103,6 +103,7 @@
 
         .orientation-arrow { position: absolute; font-size: 14px; color: white; top: 50%; left: 50%; transform: translate(-50%, -50%); }
         .orientation-selector { position: absolute; z-index: 10; display: none; flex-direction: column; background-color: rgba(0,0,0,0.8); border-radius: 50%; }
+        /* [MODIFIED] 为方向按钮添加 ID */
         .orientation-button { background: none; border: none; color: white; font-size: 24px; cursor: pointer; width: 40px; height: 40px; }
 
         @keyframes damage-popup {
@@ -278,8 +279,8 @@
 
         table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--border-color); }
         h4 { margin-top: 0; border-bottom: 2px solid var(--primary-color); padding-bottom: 0.5rem; }
+        /* [MODIFIED] 移除 .action-item:hover, JS 将处理 'disabled' 类 */
         .action-item { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-radius: 0.25rem; margin-bottom: 0.5rem; cursor: pointer; transition: background-color 0.2s; }
-        .action-item:hover { background-color: #4a5568; }
         .action-item.disabled, button.disabled { background-color: var(--bg-color) !important; color: var(--disabled-color) !important; cursor: not-allowed !important; border-color: var(--disabled-color) !important; }
         .action-cost { font-weight: bold; color: var(--primary-color); }
         .btn { width: 100%; padding: 0.75rem; border: none; border-radius: 0.25rem; font-size: 1rem; font-weight: bold; cursor: pointer; }
@@ -448,8 +449,8 @@
         <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
             <tbody>
                 {% for slot, part in player_mech.parts.items() %}
-                <!-- [修改] 添加了 cursor 和 onclick -->
-                <tr style="cursor: pointer;" onclick="showPartDetail('player', '{{ slot }}')">
+                <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
+                <tr style="cursor: pointer;" data-controller="player" data-part-slot="{{ slot }}">
                     <td>{{ slot }}</td>
                     <td>{{ part.name if part else 'N/A' }}</td>
                     <td class="status-{{ part.status if part else 'destroyed' }}">{{ part.status if part else 'destroyed' }}</td>
@@ -457,10 +458,10 @@
                 {% endfor %}
             </tbody>
         </table>
-        <!-- [MODIFIED] 添加了 '快速' 动作 -->
-        <div id="phase-timing-controls"><h4>选择时机</h4><div class="selector-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"><button id="timing-近战" onclick="selectTiming('近战')">近战</button><button id="timing-射击" onclick="selectTiming('射击')">射击</button><button id="timing-移动" onclick="selectTiming('移动')">移动</button><button id="timing-抛射" onclick="selectTiming('抛射')">抛射</button><button id="timing-快速" onclick="selectTiming('快速')" style="grid-column: span 2;">快速</button></div><button class="btn" style="margin-top: 1rem; background-color: var(--primary-color);" onclick="confirmTiming()">确认时机</button></div>
-        <div id="phase-stance-controls"><h4>姿态选择</h4><div class="selector-group" style="display: flex;"><button id="stance-defense" class="{{ 'active' if player_mech.stance == 'defense' else '' }}" onclick="changeStance('defense')">防御</button><button id="stance-agile" class="{{ 'active' if player_mech.stance == 'agile' else '' }}" onclick="changeStance('agile')">机动</button><button id="stance-attack" class="{{ 'active' if player_mech.stance == 'attack' else '' }}" onclick="changeStance('attack')">攻击</button></div><button class="btn" style="margin-top: 1rem; background-color: var(--primary-color);" onclick="confirmStance()">确认姿态</button></div>
-        <div id="phase-adjustment-controls"><h4>调整时点动作 (TP)</h4><div id="action-adjust-move" class="action-item" onclick="selectAction('调整移动', 0, 'TP', '', 'system')"><span>调整移动</span><span class="action-cost">1 TP</span></div><div id="action-change-orientation" class="action-item" onclick="selectAction('仅转向', 0, 'TP', '', 'system')"><span>仅转向</span><span class="action-cost">1 TP</span></div><button class="btn" style="margin-top: 1rem;" onclick="skipAdjustment()">跳过调整</button></div>
+        <!-- [MODIFIED] 移除 onclick, 添加 ID -->
+        <div id="phase-timing-controls"><h4>选择时机</h4><div class="selector-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"><button id="timing-近战">近战</button><button id="timing-射击">射击</button><button id="timing-移动">移动</button><button id="timing-抛射">抛射</button><button id="timing-快速" style="grid-column: span 2;">快速</button></div><button class="btn" id="confirm-timing-btn" style="margin-top: 1rem; background-color: var(--primary-color);">确认时机</button></div>
+        <div id="phase-stance-controls"><h4>姿态选择</h4><div class="selector-group" style="display: flex;"><button id="stance-defense" class="{{ 'active' if player_mech.stance == 'defense' else '' }}">防御</button><button id="stance-agile" class="{{ 'active' if player_mech.stance == 'agile' else '' }}">机动</button><button id="stance-attack" class="{{ 'active' if player_mech.stance == 'attack' else '' }}">攻击</button></div><button class="btn" id="confirm-stance-btn" style="margin-top: 1rem; background-color: var(--primary-color);">确认姿态</button></div>
+        <div id="phase-adjustment-controls"><h4>调整时点动作 (TP)</h4><div id="action-adjust-move" class="action-item"><span>调整移动</span><span class="action-cost">1 TP</span></div><div id="action-change-orientation" class="action-item"><span>仅转向</span><span class="action-cost">1 TP</span></div><button class="btn" id="skip-adjustment-btn" style="margin-top: 1rem;">跳过调整</button></div>
         <div id="phase-main-controls"><h4>行动时点动作 (AP)</h4>
             {% for action, part_slot in player_mech.get_all_actions() %}
             {% if action.action_type != '被动' %}
@@ -474,19 +475,15 @@
             {% set out_of_ammo = (action.ammo > 0 and current_ammo <= 0) %}
             <!-- [MODIFIED] 弃置动作的特殊处理 -->
             {% set is_jettison = action.name == '【弃置】' %}
-            {% set jettison_target_slot = part_slot %} <!-- 弃置动作总是针对它所在的部件 -->
+            <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
             <div class="action-item {{ 'disabled' if is_used or out_of_ammo else '' }}"
                  id="action-{{ action.name }}-{{ part_slot }}"
+                 data-action-name="{{ action.name }}"
+                 data-action-range="{{ action.range_val }}"
                  data-action-type="{{ action.action_type }}"
-                 {% if not is_used and not out_of_ammo %}
-                    {% if is_jettison %}
-                        onclick="initiateJettison('{{ jettison_target_slot }}')"
-                        data-original-onclick="initiateJettison('{{ jettison_target_slot }}')"
-                    {% else %}
-                        onclick="selectAction('{{ action.name }}', {{ action.range_val }}, '{{ action.action_type }}', '{{ action.cost }}', '{{ part_slot }}')"
-                        data-original-onclick="selectAction('{{ action.name }}', {{ action.range_val }}, '{{ action.action_type }}', '{{ action.cost }}', '{{ part_slot }}')"
-                    {% endif %}
-                 {% endif %}
+                 data-action-cost="{{ action.cost }}"
+                 data-part-slot="{{ part_slot }}"
+                 data-is-jettison="{{ 'true' if is_jettison else 'false' }}"
                  title="{{ '本回合已使用' if is_used else ('弹药耗尽' if out_of_ammo else '') }}">
                 <span>
                     {{ action.name }} ({{ part_slot }})
@@ -507,9 +504,9 @@
         <div class="phase-indicator" style="color: var(--status-destroyed);">玩家机甲未加载</div>
         {% endif %}
 
-        <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->
+        <!-- [MODIFIED] 移除 onclick -->
         <form id="end-turn-form" action="{{ url_for('game.end_turn') }}" method="POST" style="display: none;"><button type="submit"></button></form>
-        <button id="end-turn-btn" class="btn" style="background-color: #c53030;" onclick="document.getElementById('end-turn-form').submit();">结束回合</button>
+        <button id="end-turn-btn" class="btn" style="background-color: #c53030;">结束回合</button>
     </div>
 
     <!-- [棋盘] -->
@@ -574,7 +571,13 @@
         </div>
         {% endfor %}
 
-        <div id="orientation-selector" class="orientation-selector"><button class="orientation-button" onclick="setFinalOrientation('N')">⬆</button><button class="orientation-button" onclick="setFinalOrientation('E')">➡</button><button class="orientation-button" onclick="setFinalOrientation('S')">⬇</button><button class="orientation-button" onclick="setFinalOrientation('W')">⬅</button></div>
+        <!-- [MODIFIED] 为方向按钮添加 ID -->
+        <div id="orientation-selector" class="orientation-selector">
+            <button class="orientation-button" id="orientation-N">⬆</button>
+            <button class="orientation-button" id="orientation-E">➡</button>
+            <button class="orientation-button" id="orientation-S">⬇</button>
+            <button class="orientation-button" id="orientation-W">⬅</button>
+        </div>
     </div>
 
     <!-- [右侧栏] -->
@@ -608,8 +611,8 @@
             <tbody>
                 {% if ai_mech %}
                 {% for slot, part in ai_mech.parts.items() %}
-                <!-- [修改] 添加了 cursor 和 onclick -->
-                <tr style="cursor: pointer;" onclick="showPartDetail('ai', '{{ slot }}')">
+                <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
+                <tr style="cursor: pointer;" data-controller="ai" data-part-slot="{{ slot }}">
                     <td>{{ slot }}</td>
                     <td>{{ part.name if part else 'N/A' }}</td>
                     <td class="status-{{ part.status if part else 'destroyed' }}">{{ part.status if part else 'destroyed' }}</td>
@@ -625,7 +628,8 @@
     </div>
 
     <!-- [弹窗] -->
-    <div id="part-selector-modal"><h4>选择攻击部位</h4><div id="part-buttons" style="display: flex; flex-direction: column; gap: 1rem;"></div><button class="btn" style="margin-top: 1rem; background-color: #c53030;" onclick="closePartSelector()">取消</button></div>
+    <!-- [MODIFIED] 为取消按钮添加 ID -->
+    <div id="part-selector-modal"><h4>选择攻击部位</h4><div id="part-buttons" style="display: flex; flex-direction: column; gap: 1rem;"></div><button class="btn" id="part-selector-cancel-btn" style="margin-top: 1rem; background-color: #c53030;">取消</button></div>
 
     <div id="effect-selector-modal">
         <h4>选择触发效果</h4>
@@ -684,13 +688,13 @@
                  <div class="dice-group" id="dice-roll-secondary-result"></div>
             </div>
 
-            <!-- [v_REROLL] 修改按钮 -->
+            <!-- [MODIFIED] 移除 onclick, 添加 ID -->
             <div id="dice-roll-buttons-default">
-                <button class="btn" id="dice-roll-close" onclick="closeDiceRollModal()" style="width: auto; padding: 0.5rem 1rem; float: right; margin-top: 1rem; background-color: var(--border-color);">关闭</button>
+                <button class="btn" id="dice-roll-close" style="width: auto; padding: 0.5rem 1rem; float: right; margin-top: 1rem; background-color: var(--border-color);">关闭</button>
             </div>
             <div id="dice-roll-buttons-reroll" class="reroll-hidden" style="display: flex; gap: 1rem; margin-top: 1rem;">
-                <button class="btn" id="dice-roll-skip" onclick="confirmReroll(true)" style="background-color: var(--border-color); flex: 1;">跳过</button>
-                <button class="btn" id="dice-roll-confirm" onclick="confirmReroll(false)" style="background-color: var(--primary-color); flex: 2;">
+                <button class="btn" id="dice-roll-skip" style="background-color: var(--border-color); flex: 1;">跳过</button>
+                <button class="btn" id="dice-roll-confirm" style="background-color: var(--primary-color); flex: 2;">
                     确认重投 (<span id="reroll-link-cost">1</span> 链接值)
                 </button>
             </div>
@@ -698,10 +702,10 @@
     </div>
 
     <!-- [新增] 部件详情弹窗 -->
-    <div id="part-detail-modal-backdrop" onclick="closePartDetailModal()">
+    <div id="part-detail-modal-backdrop">
         <!-- 阻止点击内容区域关闭模态框 -->
-        <div id="part-detail-modal" onclick="event.stopPropagation()">
-            <button id="part-detail-close-btn" onclick="closePartDetailModal()">&times;</button>
+        <div id="part-detail-modal">
+            <button id="part-detail-close-btn">&times;</button>
             <h3 id="part-detail-title">部件详情</h3>
 
             <!-- 图像区域 -->
@@ -725,1094 +729,53 @@
         </div>
     </div>
 
-<script>
-    let selectedAction = {};
-    const CELL_SIZE_PX = 51; // 50px + 1px gap
-    let diceModalTimer = null; // [修改] 为掷骰弹窗的自动关闭计时器
+<!-- [MODIFIED] 移除巨型 <script> 块... -->
 
-    // [v1.23] 状态现在从 allEntities 中查找
-    const allEntities = {{ game.get_all_entities_as_dict() | tojson | safe }};
-    const playerID = '{{ player_mech.id if player_mech else "" }}';
-    // [v_REROLL] playerEntity 现在包含 pilot 数据
-    const playerEntity = allEntities.find(e => e.id === playerID) || {};
-    // [新增] 查找AI实体
-    const aiEntity = allEntities.find(e => e.controller === 'ai' && e.entity_type === 'mech' && e.status !== 'destroyed');
-
-    // [NEW] 从模板中获取分析数据
-    const playerLoadout = {{ player_loadout | tojson | safe }};
-    const aiOpponentName = {{ ai_opponent_name | tojson | safe }};
-
-    const gameState = {
-        turnPhase: playerEntity.turn_phase || 'timing',
-        timing: playerEntity.timing || null,
-        openingMoveTaken: playerEntity.opening_move_taken || false,
-        isPlayerLocked: {{ 'true' if is_player_locked else 'false' }},
-        gameOver: '{{ game.game_over or "" }}',
-        pendingEffect: playerEntity.pending_effect_data ? true : false,
-        pendingReroll: playerEntity.pending_reroll_data ? true : false, // [v_REROLL] 新增
-        visualEvents: {{ visual_feedback_events | tojson | safe }},
-        runProjectilePhase: {{ 'true' if run_projectile_phase else 'false' }} // [新增] AI回合暂停标志
-    };
-    const gameMode = '{{ game_mode }}';
-    const defeatCount = {{ ai_defeat_count }};
-
-    // [v1.23 修复] JS 的 orientationMap (用于客户端逻辑，如仅转向)
-    const orientationMap = {
-        'N': '↑', 'S': '↓', 'E': '→', 'W': '←', 'NONE': ''
-    };
-
-    const effectDescriptions = {
-        'devastating': { title: '【毁伤】', text: '对目标结构造成二次伤害', style: 'background-color: var(--status-damaged);' },
-        'scattershot': { title: '【霰射】', text: '对随机部件造成溢出伤害', style: 'background-color: var(--status-destroyed);' },
-        'cleave': { title: '【顺劈】', text: '对随机部件造成溢出伤害', style: 'background-color: #805ad5;' }
-    };
-    const diceIconMap = {
-        '重击': 'H', '轻击': 'L', '防御': 'D', '闪避': 'E',
-        '空心重击': 'h', '空心轻击': 'l', '空心防御': 'd',
-        '闪电': '⚡', '眼睛': '👁', '空白': ' '
-    };
-    const diceColorMap = {
-        'yellow_count': 'yellow', 'red_count': 'red', 'white_count': 'white', 'blue_count': 'blue'
-    };
-
-    // [新增] 声明弹窗元素
-    let partDetailModalBackdrop, partDetailTitle, partDetailImage, partDetailStatsContainer, partDetailStatsList, partDetailActionsList;
-
-    document.addEventListener('DOMContentLoaded', () => {
-        updateUIForPhase();
-        // [朝向] 替换旧的 positionAllEntities 和 handleMoveAnimations
-        initializeBoardVisuals();
-
-        if (gameState.gameOver) {
-            showGameOverModal(gameState.gameOver);
-        }
-
-        if (gameState.pendingEffect) {
-            const pendingOptions = (playerEntity.pending_effect_data && playerEntity.pending_effect_data.options) ? playerEntity.pending_effect_data.options : [];
-            showEffectSelector(pendingOptions);
-        }
-
-        const log = document.querySelector('.combat-log');
-        log.scrollTop = log.scrollHeight;
-
-        // --- [新增] AI 回合暂停逻辑 ---
-        // 检查是否刚刚完成了 AI 机甲阶段
-        if (gameState.runProjectilePhase && !gameState.gameOver && !gameState.pendingEffect && !gameState.pendingReroll) { // [v_REROLL] 增加检查
-            // 禁用所有 UI，等待抛射物阶段
-            document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
-                if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal')) {
-                    el.disabled = true;
-                    el.style.cursor = 'wait';
-                }
-            });
-
-            // 等待 2 秒 (让 AI 机甲的移动动画播放完毕)，然后请求服务器运行抛射物阶段
-            setTimeout(() => {
-                // [v_REFACTOR_FIX] 修复 fetch URL
-                fetch('{{ url_for("game.run_projectile_phase") }}', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({}) // session 中存有状态
-                })
-                .then(res => {
-                    // [v_REFACTOR_FIX] 检查重定向
-                    if (res.redirected) {
-                        window.location.href = res.url;
-                    } else {
-                        return res.json();
-                    }
-                })
-                .then(data => {
-                    // [v_REFACTOR_FIX] 如果没有重定向，则检查 JSON 响应
-                    if (data && data.success) {
-                        window.location.reload(); // 重新加载页面以显示抛射物阶段的结果
-                    } else if (data) {
-                        console.error("抛射物阶段运行失败:", data.message);
-                        window.location.reload(); // 失败也重载
-                    }
-                    // 如果 res.redirected 为 true, data 将为 undefined, 此时不应执行任何操作
-                })
-                .catch(e => {
-                    console.error("Fetch error:", e);
-                    window.location.reload(); // 网络错误也重载
-                });
-            }, 2000); // 2 秒暂停
-        }
-        // --- [暂停逻辑结束] ---
-
-        // [v_REROLL] 修改事件检查顺序
-        const rerollEvent = gameState.visualEvents.find(e => e.type === 'reroll_required');
-        const diceRollEvent = gameState.visualEvents.find(e => e.type === 'dice_roll');
-        const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
-
-        if (rerollEvent) {
-            // [v_REROLL_FIX] 修复 TypeError
-            const rerollData = rerollEvent.details; // rerollData 是 { action_required, dice_details, attacker_name, ... }
-            const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
-            const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
-            // [v_REROLL_FIX] 将所有需要的参数传递给 modal
-            showDiceRollModal(
-                rerollData.dice_details, // 1. 骰子详情
-                rerollData.action_name,  // 2. 动作名称
-                rerollData.attacker_name,// 3. 攻击方名称
-                rerollData.defender_name,// 4. 防御方名称
-                true, // 5. isInteractive
-                attackerIsPlayer,      // 6.
-                defenderIsPlayer       // 7.
-            );
-        } else if (diceRollEvent) {
-            // 玩家攻击了 AI (或重投完成), 正常显示
-            const eventData = diceRollEvent; // eventData 是 { type: 'dice_roll', details, attacker_name, ... }
-            // [v_REROLL_FIX] 将所有需要的参数传递给 modal
-            showDiceRollModal(
-                eventData.details,
-                eventData.action_name,
-                eventData.attacker_name,
-                eventData.defender_name,
-                false // isInteractive
-            );
-            diceModalTimer = setTimeout(() => {
-                closeDiceRollModal(); // 5秒后自动关闭
-            }, 5000);
-        } else if (firstAttackResult) {
-            showAttackEffect(firstAttackResult.defender_pos, firstAttackResult.result_text); // [MODIFIED]
-        }
-
-        // [v_REROLL_DEBUG] 新增：判断错误类型的日志
-        if (gameState.pendingReroll && !rerollEvent) {
-            console.error(
-                "--- [错误类型判断] ---",
-                "\n游戏卡死！",
-                "\n原因: gameState.pendingReroll 为 true (红色警告条出现)，",
-                "但是 gameState.visualEvents 中 *没有* 找到 'reroll_required' 事件。",
-                "\n这导致骰子弹窗 (dice-roll-modal) 无法被触发。",
-                "\n请检查后端（game_controller.py 和 game_routes.py）中所有调用 resolve_attack 的地方，",
-                "确保在 'reroll_choice_required' 返回时，已将 'reroll_required' 事件添加到 visual_events 列表中。",
-                "\nVisual Events 内容:", gameState.visualEvents
-            );
-        }
-
-
-        // [新增] 绑定部件详情弹窗
-        partDetailModalBackdrop = document.getElementById('part-detail-modal-backdrop');
-        partDetailTitle = document.getElementById('part-detail-title');
-        partDetailImage = document.getElementById('part-detail-image');
-        partDetailStatsContainer = document.getElementById('part-detail-stats-container');
-        partDetailStatsList = document.getElementById('part-detail-stats-list');
-        partDetailActionsList = document.getElementById('part-detail-actions-list');
-
-        // [新增] 关闭事件
-        // (关闭按钮和背景的 onclick 已在HTML中设置)
-        document.getElementById('part-detail-modal').addEventListener('click', (e) => e.stopPropagation());
-    });
-
-    // [朝向] 新函数：合并了定位、移动画和朝向翻转
-    function initializeBoardVisuals() {
-        if (!allEntities) return;
-
-        const wrappers = document.querySelectorAll('.mech-icon-wrapper');
-
-        wrappers.forEach(wrapper => {
-            try {
-                // 1. 获取实体数据
-                const entityId = wrapper.id.replace('entity-', '').replace('-wrapper', '');
-                const entityData = allEntities.find(e => e.id === entityId);
-                if (!entityData) return;
-
-                const img = document.getElementById(`img-${entityId}`);
-                if (!img) return;
-
-                const lastPos = JSON.parse(wrapper.dataset.lastPos);
-                const currentPos = JSON.parse(wrapper.dataset.currentPos);
-
-                // 2. [朝向] 设置翻转和旋转
-                // [AI 朝向修复]
-                // 玩家默认朝右 (scaleX = 1)
-                // AI 默认朝左 (scaleX = -1)
-                const defaultScaleX = (entityData.controller === 'ai') ? -1 : 1;
-                let desiredScaleX = defaultScaleX;
-                let desiredRotation = 0;
-                const orientation = entityData.orientation;
-
-                if (orientation === 'W') {
-                    desiredScaleX = -1; // 玩家和AI都强制朝左
-                } else if (orientation === 'E') {
-                    desiredScaleX = 1;  // 玩家和AI都强制朝右
-                } else if (orientation === 'N') {
-                    desiredScaleX = defaultScaleX; // 保持默认 (Player=1, AI=-1)
-                    // [AI 朝向修复] 双方都逆时针转90度 (都朝上)
-                    desiredRotation = -90;
-                } else if (orientation === 'S') {
-                    desiredScaleX = defaultScaleX; // 保持默认 (Player=1, AI=-1)
-                    // [AI 朝向修复] 双方都顺时针转90度 (都朝下)
-                    desiredRotation = 90;
-                }
-                // 'NONE' (e.g., projectiles) will use default scaleX and 0 rotation
-
-                const finalTransform = `scaleX(${desiredScaleX}) rotate(${desiredRotation}deg)`;
-
-                // 3. 设置位置和动画
-                const finalLeft = `${(currentPos[0] - 1) * CELL_SIZE_PX}px`;
-                const finalTop = `${(currentPos[1] - 1) * CELL_SIZE_PX}px`;
-
-                // 检查是否有有效的 lastPos 并且位置发生了变化
-                if (lastPos && (lastPos[0] !== currentPos[0] || lastPos[1] !== currentPos[1])) {
-                    // [翻转修复] 播放移动画
-                    const startLeft = `${(lastPos[0] - 1) * CELL_SIZE_PX}px`;
-                    const startTop = `${(lastPos[1] - 1) * CELL_SIZE_PX}px`;
-
-                    wrapper.style.transition = 'none'; // 先去掉动画，设置起始位置
-                    img.style.transition = 'transform 0.3s ease'; // [翻转修复] 确保图片朝向动画开启
-                    img.style.transform = finalTransform; // [翻转修复] 设置最终朝向
-
-                    wrapper.style.left = startLeft;
-                    wrapper.style.top = startTop;
-
-                    wrapper.offsetHeight; // 强制浏览器重绘
-
-                    // 添加动画并移动到最终位置
-                    // [MODIFIED] 抛射物移动动画更快
-                    if (entityData.entity_type === 'projectile') {
-                        wrapper.style.transition = 'left 0.8s linear, top 0.8s linear'; // [修改] 延长抛射物移动动画
-                    } else {
-                        wrapper.style.transition = 'left 0.4s ease-out, top 0.4s ease-out';
-                    }
-
-                    wrapper.style.left = finalLeft;
-                    wrapper.style.top = finalTop;
-                } else {
-                    // [翻转修复] 没有 lastPos 或位置未变，立即设置到最终位置（无动画）
-                    wrapper.style.transition = 'none';
-                    img.style.transition = 'none'; // [翻转修复] 禁用图片朝向动画
-
-                    wrapper.style.left = finalLeft;
-                    wrapper.style.top = finalTop;
-                    img.style.transform = finalTransform; // [翻转修复] 立即设置朝向
-
-                    wrapper.offsetHeight; // 强制浏览器重绘
-
-                    // 恢复动画属性
-                    if (entityData.entity_type === 'projectile') {
-                        wrapper.style.transition = 'left 0.8s linear, top 0.8s linear'; // [修改] 延长抛射物移动动画
-                    } else {
-                        wrapper.style.transition = 'left 0.4s ease-out, top 0.4s ease-out';
-                    }
-                    img.style.transition = 'transform 0.3s ease'; // [翻转修复] 重新启用图片朝向动画
-                }
-            } catch (e) {
-                console.error("解析或定位实体时出错:", e, wrapper.id);
-            }
-        });
+<!-- [MODIFIED] ...并替换为 "数据岛" 和模块加载器 -->
+<script id="game-data" type="application/json">
+{
+    "allEntities": {{ game.get_all_entities_as_dict() | tojson | safe }},
+    "playerID": "{{ player_mech.id if player_mech else '' }}",
+    "playerEntity": {% if player_mech %}{{ player_mech.to_dict() | tojson | safe }}{% else %}null{% endif %},
+    "aiEntity": {% if ai_mech %}{{ ai_mech.to_dict() | tojson | safe }}{% else %}null{% endif %},
+    "isPlayerLocked": {{ 'true' if is_player_locked else 'false' }},
+    "gameOver": "{{ game.game_over or '' }}",
+    "visualEvents": {{ visual_feedback_events | tojson | safe }},
+    "runProjectilePhase": {{ 'true' if run_projectile_phase else 'false' }},
+    "gameMode": "{{ game_mode }}",
+    "defeatCount": {{ ai_defeat_count }},
+    "orientationMap": {{ orientationMap | tojson | safe }},
+    "playerLoadout": {{ player_loadout | tojson | safe }},
+    "aiOpponentName": {{ ai_opponent_name | tojson | safe }},
+    "apiUrls": {
+        "runProjectilePhase": "{{ url_for('game.run_projectile_phase') }}",
+        "resetGame": "{{ url_for('game.reset_game') }}",
+        "respawnAi": "{{ url_for('game.respawn_ai') }}",
+        "endTurn": "{{ url_for('game.end_turn') }}",
+        "selectTiming": "{{ url_for('api.select_timing') }}",
+        "confirmTiming": "{{ url_for('api.confirm_timing') }}",
+        "changeStance": "{{ url_for('api.change_stance') }}",
+        "confirmStance": "{{ url_for('api.confirm_stance') }}",
+        "skipAdjustment": "{{ url_for('api.skip_adjustment') }}",
+        "jettisonPart": "{{ url_for('api.jettison_part') }}",
+        "resolveEffectChoice": "{{ url_for('api.resolve_effect_choice') }}",
+        "resolveReroll": "{{ url_for('api.resolve_reroll') }}",
+        "getMoveRange": "{{ url_for('api.get_move_range') }}",
+        "getAttackRange": "{{ url_for('api.get_attack_range') }}",
+        "executeAdjustMove": "{{ url_for('api.execute_adjust_move') }}",
+        "changeOrientation": "{{ url_for('api.change_orientation') }}",
+        "movePlayer": "{{ url_for('api.move_player') }}",
+        "executeAttack": "{{ url_for('api.execute_attack') }}"
     }
-
-
-    // [MODIFIED] 重命名并添加爆炸效果
-    function showAttackEffect(pos, text) {
-        const [x, y] = pos;
-        const cell = document.getElementById(`cell-${x}-${y}`);
-        if (!cell) return;
-
-        // 1. [新增] 在“击穿”时显示爆炸
-        if (text === '击穿' || text === 'effect_choice_required') {
-            const explosion = document.createElement('div');
-            explosion.className = 'explosion-effect';
-            cell.appendChild(explosion);
-            // 动画时长为 0.8s (匹配CSS)
-            setTimeout(() => { if (explosion.parentNode) { explosion.parentNode.removeChild(explosion); } }, 800); // [修改]
-        }
-
-        // 2. 显示文字提示
-        const indicator = document.createElement('div');
-        indicator.className = 'damage-indicator';
-        if (text === '击穿') {
-            indicator.innerText = '击穿!';
-            indicator.classList.add('hit');
-        } else if (text === '无效') {
-            indicator.innerText = '无效';
-            indicator.classList.add('miss');
-        } else {
-             // 不要为 'effect_choice_required' 或其他文本显示文字
-        }
-
-        // 仅当 indicator 有内容时才添加
-        if (indicator.innerText) {
-            cell.appendChild(indicator);
-            // 动画时长为 1.2s
-            setTimeout(() => { if (indicator.parentNode) { indicator.parentNode.removeChild(indicator); } }, 1200);
-        }
-    }
-
-    function showGameOverModal(status) {
-         // [MODIFIED] 调用 Firebase 分析函数，并传递所需数据
-         if (window.recordGameOutcome) {
-            window.recordGameOutcome(status, playerLoadout, aiOpponentName);
-         }
-
-         let modal;
-         if (status === 'ai_defeated_in_range') {
-             modal = document.getElementById('range-continue-modal');
-         } else {
-             modal = document.getElementById('game-over-modal');
-             const title = document.getElementById('game-over-title');
-             if (status === 'player_win') {
-                 title.innerText = '胜利！';
-                 title.style.color = 'var(--status-ok)';
-             } else {
-                 title.innerText = '失败！';
-                 if (gameMode === 'horde') { title.innerText = `结束\n最终击败数: ${defeatCount}`; }
-                 title.style.color = 'var(--status-destroyed)';
-             }
-         }
-         if (modal) { modal.style.display = 'block'; }
-         document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
-             if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal')) {
-                 el.disabled = true;
-             }
-         });
-     }
-
-    function updateUIForPhase() {
-        if (gameState.gameOver || !playerEntity.turn_phase) return;
-
-        // [新规则：宕机时禁用UI]
-        if (playerEntity.stance === 'downed') {
-            // 隐藏所有阶段控制
-            ['timing', 'stance', 'adjustment', 'main'].forEach(phase => {
-                const el = document.getElementById(`phase-${phase}-controls`);
-                if (el) el.style.display = 'none';
-            });
-            // 禁用结束回合按钮
-            const endTurnBtn = document.getElementById('end-turn-btn');
-            if(endTurnBtn) {
-                endTurnBtn.classList.add('disabled');
-                endTurnBtn.onclick = null;
-                endTurnBtn.title = '机甲宕机中，无法行动';
-                // 确保表单本身也无法提交
-                document.getElementById('end-turn-form').onsubmit = (e) => { e.preventDefault(); return false; };
-            }
-            return; // 停止执行此函数的其余部分
-        }
-        // [修改结束]
-
-        ['timing', 'stance', 'adjustment', 'main'].forEach(phase => {
-            const el = document.getElementById(`phase-${phase}-controls`);
-            if (el) el.style.display = gameState.turnPhase === phase ? 'block' : 'none';
-        });
-        if (gameState.turnPhase === 'timing') {
-            document.querySelectorAll('#phase-timing-controls button').forEach(btn => {
-                // [BUG 修复] 检查 playerEntity.timing (来自JS状态) 而不是 gameState.timing
-                // [MODIFIED] 修正 textContent/innerText
-                btn.classList.toggle('active', btn.textContent === playerEntity.timing);
-            });
-        }
-        if (gameState.turnPhase === 'stance') {
-            document.querySelectorAll('#phase-stance-controls button').forEach(btn => {
-                btn.classList.toggle('active', btn.id.includes(playerEntity.stance));
-            });
-        }
-
-        // [v_REROLL] 增加 pendingReroll 检查
-        if (gameState.pendingEffect || gameState.pendingReroll) {
-            const message = gameState.pendingReroll ? '请先解决重投！' : '请先选择效果！';
-            document.querySelectorAll('#phase-main-controls .action-item, #phase-adjustment-controls .action-item, #end-turn-btn').forEach(item => {
-                item.classList.add('disabled');
-                item.onclick = null;
-                item.title = message;
-            });
-            return;
-        }
-
-        if (gameState.turnPhase === 'main') {
-            document.querySelectorAll('#phase-main-controls .action-item').forEach(item => {
-                let isDisabled = false; let title = '';
-                if (item.classList.contains('disabled') && item.title === '本回合已使用') {
-                    isDisabled = true; title = '本回合已使用';
-                } else if (item.classList.contains('disabled') && item.title === '弹药耗尽') {
-                    isDisabled = true; title = '弹药耗尽';
-                } else {
-                    // [BUG 修复] 检查 playerEntity.timing (来自JS状态)
-                    if (!gameState.openingMoveTaken && item.dataset.actionType !== playerEntity.timing) {
-                        isDisabled = true; title = '非当前时机的起手动作';
-                    }
-                    if (gameState.isPlayerLocked && item.dataset.actionType === '射击') {
-                        isDisabled = true; title = '被近战锁定，无法射击';
-                    }
-                    // [v1.17] 抛射物不被锁定
-                }
-                if(isDisabled) {
-                    item.classList.add('disabled'); item.onclick = null; item.title = title;
-                } else {
-                    if (!item.title) { // 仅在没有 '已使用' 或 '没弹药' 标题时恢复
-                        item.classList.remove('disabled'); item.title = '';
-                        const originalOnclick = item.getAttribute('data-original-onclick');
-                        if (originalOnclick) { item.onclick = () => eval(originalOnclick); }
-                    }
-                }
-            });
-        }
-    }
-
-    function clearHighlights() {
-        document.querySelectorAll('.grid-cell').forEach(c => {
-            c.classList.remove('highlight-move', 'highlight-attack', 'highlight-launch');
-            c.onclick = null;
-        });
-        const orientationSelector = document.getElementById('orientation-selector');
-        if (orientationSelector.parentElement !== document.body) {
-             document.body.appendChild(orientationSelector); // 将其移回 body
-        }
-        orientationSelector.style.display = 'none';
-    }
-
-    function selectAction(name, range, type, cost, partSlot) {
-        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
-        clearHighlights();
-        selectedAction = { name, range, type, cost, slot: partSlot, player_id: playerID };
-
-        // [v_REFACTOR_FIX] 所有 API 调用现在都需要 /api/ 前缀
-        let url = '', body = { action_name: name, part_slot: partSlot, player_id: playerID };
-
-        if (type === '移动' || name === '调整移动') {
-            url = '/api/get_move_range';
-        }
-        // [MODIFIED] 添加 '快速' 动作
-        else if (type === '近战' || type === '射击' || type === '抛射' || type === '快速') {
-            url = '/api/get_attack_range';
-        }
-        else if (name === '仅转向') {
-            showOrientationSelector(playerEntity.pos[0], playerEntity.pos[1], true);
-            return;
-        }
-
-        if(url) {
-            fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
-            .then(res => res.json())
-            .then(data => {
-                // 1. 高亮移动格
-                if(data.valid_moves) data.valid_moves.forEach(([x,y]) => {
-                    const c = document.getElementById(`cell-${x}-${y}`);
-                    c.classList.add('highlight-move');
-                    c.onclick = () => showOrientationSelector(x,y);
-                });
-                // 2. 高亮攻击目标
-                if(data.valid_targets) data.valid_targets.forEach(t => {
-                    const [x,y] = t.pos;
-                    const c = document.getElementById(`cell-${x}-${y}`);
-                    c.classList.add('highlight-attack');
-                    c.onclick = () => initiateAttack(t.entity_id, x, y, t.is_back_attack);
-                });
-                // 3. 高亮发射格 [v1.21]
-                if(data.valid_launch_cells) data.valid_launch_cells.forEach(([x,y]) => {
-                    const c = document.getElementById(`cell-${x}-${y}`);
-                    c.classList.add('highlight-launch');
-                    // [v1.23 修复] 发射动作现在可以同时以实体或地块为目标
-                    // 检查这格上是否已经有 'highlight-attack' (即有一个敌人在那里)
-                    if (!c.classList.contains('highlight-attack')) {
-                        // 如果没有敌人，点击地块
-                        c.onclick = () => initiateLaunch(x, y);
-                    }
-                });
-            });
-        }
-    }
-
-    // [MODIFIED] 添加弃置动作的专用处理函数
-    function initiateJettison(partSlot) {
-        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
-        clearHighlights();
-
-        // [v_REFACTOR_FIX] 添加 /api/ 前缀
-        postAndReload('/api/jettison_part', {
-            action_name: '【弃置】',
-            part_slot: partSlot
-        });
-    }
-
-    // [v1.23] 区分 '攻击' (以实体为目标) 和 '发射' (以地块为目标)
-    function initiateAttack(entityId, x, y, isBackAttack) {
-        selectedAction.targetEntityId = entityId;
-        selectedAction.targetPos = [x, y]; // [v1.23] 同时也设置位置
-        executeAttack();
-    }
-
-    function initiateLaunch(x, y) {
-        selectedAction.targetEntityId = null; // [v1.23] 明确设置目标实体为 null
-        selectedAction.targetPos = [x, y];
-        executeAttack(); // '抛射' 动作也走 executeAttack 路由
-    }
-
-    function showPartSelector() {
-        const modal = document.getElementById('part-selector-modal'), buttons = document.getElementById('part-buttons'); buttons.innerHTML = '';
-        const aiMech = allEntities.find(e => e.controller === 'ai' && e.entity_type === 'mech');
-        if (!aiMech || !aiMech.parts) return;
-
-        for (const slot in aiMech.parts) {
-            const part = aiMech.parts[slot];
-            if (part && part.status !== 'destroyed') {
-                const btn = document.createElement('button');
-                btn.className = 'btn'; btn.style.backgroundColor = 'var(--primary-color)';
-                btn.innerText = `${part.name} (${slot})`;
-                btn.onclick = () => confirmPartSelection(slot);
-                buttons.appendChild(btn);
-            }
-        }
-        modal.style.display = 'block';
-    }
-
-    function closePartSelector() { document.getElementById('part-selector-modal').style.display = 'none'; clearHighlights(); }
-
-    function confirmPartSelection(partSlot) {
-        selectedAction.targetPartName = partSlot;
-        closePartSelector();
-        executeAttack(); // [v1.23] executeAttack 现在会从 selectedAction 中获取所有数据
-    }
-
-    function showEffectSelector(options) {
-        const buttonsDiv = document.getElementById('effect-buttons'); buttonsDiv.innerHTML = '';
-        if (!options || options.length === 0) { console.error("showEffectSelector 被调用，但没有提供选项！"); return; }
-        options.forEach(optionKey => {
-            const desc = effectDescriptions[optionKey];
-            if (desc) {
-                const btn = document.createElement('button'); btn.className = 'btn'; btn.style.cssText = desc.style || 'background-color: var(--primary-color);';
-                btn.innerHTML = `<strong>${desc.title}</strong><br><small>${desc.text}</small>`;
-                btn.onclick = () => confirmEffectChoice(optionKey);
-                buttonsDiv.appendChild(btn);
-            } else { console.warn(`未知的效果键: ${optionKey}`); }
-        });
-        document.getElementById('effect-selector-modal').style.display = 'block';
-    }
-
-    function confirmEffectChoice(choice) {
-        document.getElementById('effect-selector-modal').style.display = 'none';
-        // [v_REFACTOR_FIX] 添加 /api/ 前缀
-        postAndReload('/api/resolve_effect_choice', { choice: choice, player_id: playerID });
-    }
-
-    function showOrientationSelector(x, y, isRotationOnly = false) {
-        const cell = document.getElementById(`cell-${x}-${y}`);
-        const s = document.getElementById('orientation-selector');
-        if (cell) {
-            cell.appendChild(s);
-        } else {
-            document.getElementById('game-board').appendChild(s); // 后备
-        }
-        s.style.display = 'flex';
-        selectedAction.targetPos = [x, y];
-        selectedAction.isRotationOnly = isRotationOnly;
-    }
-
-    function setFinalOrientation(o) { selectedAction.finalOrientation = o; executeMove(); }
-
-    function postAndReload(url, body = {}) {
-        // [v1.17] 确保 player_id 总是被发送
-        body.player_id = playerID;
-
-        fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
-        .then(res => {
-            // [v_REFACTOR_FIX] 检查 Flask 重定向
-            if (res.redirected) {
-                window.location.href = res.url;
-                return null; // 停止处理
-            }
-            if (!res.ok) { throw new Error(`HTTP error! status: ${res.status}`); }
-            return res.json();
-        })
-        .then(data => {
-            if (!data) return; // 如果发生了重定向，则 data 为 null
-
-            if(data.success) {
-                if (data.action_required === 'select_part') { showPartSelector(); }
-                // [v_REROLL] 新增检查
-                else if (data.action_required === 'select_reroll') {
-                    // [v_REROLL_FIX] 修复 TypeError
-                    const rerollData = data; // data 是 { action_required, dice_details, attacker_name, ... }
-                    const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
-                    const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
-                    // [v_REROLL_FIX] 将所有需要的参数传递给 modal
-                    showDiceRollModal(
-                        rerollData.dice_details, // 1. 骰子详情
-                        rerollData.action_name,  // 2. 动作名称
-                        rerollData.attacker_name,// 3. 攻击方名称
-                        rerollData.defender_name,// 4. 防御方名称
-                        true, // 5. isInteractive
-                        attackerIsPlayer,      // 6.
-                        defenderIsPlayer       // 7.
-                    );
-                    // 保持UI禁用，因为模态框现在是激活的
-                }
-                else if (data.action_required === 'select_effect') { showEffectSelector(data.options); }
-                else { window.location.reload(); }
-            } else {
-                console.warn("操作失败: " + data.message);
-                // [v_REROLL_DEBUG] 新增：判断错误类型的日志
-                if (data.message.includes("必须先解决重投")) {
-                     console.error(
-                        "--- [错误类型判断] ---",
-                        "\n操作失败！",
-                        "\n原因: gameState.pendingReroll (后端) 为 true。",
-                        "\n这通常意味着前端状态与后端不同步，或者骰子弹窗没有正确显示。",
-                        "\n请检查上一个 'reroll_required' 事件是否被正确处理。"
-                    );
-                }
-                window.location.reload(); // 即使失败也重载以同步状态
-            }
-        }).catch(e => {
-            console.error("Fetch error:", e);
-            window.location.reload(); // 网络错误时也重载
-        });
-    }
-
-    // --- [BUG 修复：替换以下5个函数] ---
-
-    function selectTiming(t) {
-        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
-
-        // 1. 立即在本地更新状态 (Optimistic UI Update)
-        gameState.timing = t;
-        playerEntity.timing = t;
-        updateUIForPhase(); // 这会立即更新 'active' 按钮
-
-        // 2. 在后台与服务器同步，但不刷新页面
-        // [v_REFACTOR_FIX] 添加 /api/ 前缀
-        fetch('/api/select_timing', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ timing: t, player_id: playerID })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (!data.success) {
-                console.warn('时机同步失败, 强制刷新。');
-                window.location.reload(); // 如果失败，才刷新
-            }
-            // 成功则什么也不做，UI已经更新了
-        }).catch(e => {
-            console.error("Fetch error:", e);
-            window.location.reload(); // 出现网络错误时刷新
-        });
-    }
-
-    function confirmTiming() {
-        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
-
-        // 1. 在后台与服务器同步
-        // [v_REFACTOR_FIX] 添加 /api/ 前缀
-        fetch('/api/confirm_timing', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ player_id: playerID })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                // 2. 成功后，在本地更新状态并切换UI
-                gameState.turnPhase = 'stance';
-                playerEntity.turn_phase = 'stance';
-                updateUIForPhase();
-            } else {
-                console.warn('确认时机失败, 强制刷新。');
-                window.location.reload();
-            }
-        }).catch(e => {
-            console.error("Fetch error:", e);
-            window.location.reload();
-        });
-    }
-
-    function changeStance(s) {
-        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
-
-        // 1. 立即在本地更新状态 (Optimistic UI Update)
-        playerEntity.stance = s; // 更新本地姿态
-        updateUIForPhase(); // 这会立即更新 'active' 按钮
-
-        // 2. 在后台与服务器同步，但不刷新页面
-        // [v_REFACTOR_FIX] 添加 /api/ 前缀
-        fetch('/api/change_stance', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ stance: s, player_id: playerID })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (!data.success) {
-                console.warn('姿态同步失败, 强制刷新。');
-                window.location.reload();
-            }
-            // 成功则什么也不做，UI已经更新了
-        }).catch(e => {
-            console.error("Fetch error:", e);
-            window.location.reload();
-        });
-    }
-
-    function confirmStance() {
-        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
-
-        // 1. 在后台与服务器同步
-        // [v_REFACTOR_FIX] 添加 /api/ 前缀
-        fetch('/api/confirm_stance', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ player_id: playerID })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                // 2. 成功后，在本地更新状态并切换UI
-                gameState.turnPhase = 'adjustment';
-                playerEntity.turn_phase = 'adjustment';
-                updateUIForPhase();
-            } else {
-                console.warn('确认姿态失败, 强制刷新。');
-                window.location.reload();
-            }
-        }).catch(e => {
-            console.error("Fetch error:", e);
-            window.location.reload();
-        });
-    }
-
-    function skipAdjustment() {
-        if (gameState.pendingEffect || gameState.pendingReroll) return; // [v_REROLL] 增加检查
-
-        // 1. 在后台与服务器同步
-        // [v_REFACTOR_FIX] 添加 /api/ 前缀
-        fetch('/api/skip_adjustment', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ player_id: playerID })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                // 2. 成功后，在本地更新状态并切换UI
-                gameState.turnPhase = 'main';
-                playerEntity.turn_phase = 'main';
-                updateUIForPhase();
-            } else {
-                console.warn('跳过调整失败, 强制刷新。');
-                window.location.reload();
-            }
-        }).catch(e => {
-            console.error("Fetch error:", e);
-            window.location.reload();
-        });
-    }
-
-    // --- [BUG 修复结束] ---
-
-    function executeMove() {
-        // [v_REFACTOR_FIX] 添加 /api/ 前缀
-        let url = selectedAction.isRotationOnly ? '/api/change_orientation' : (selectedAction.name === '调整移动' ? '/api/execute_adjust_move' : '/api/move_player');
-        postAndReload(url, {
-            action_name: selectedAction.name,
-            target_pos: selectedAction.targetPos,
-            final_orientation: selectedAction.finalOrientation,
-            part_slot: selectedAction.slot
-        });
-    }
-
-    function executeAttack() {
-        let body = {
-            action_name: selectedAction.name,
-            part_slot: selectedAction.slot,
-            target_entity_id: selectedAction.targetEntityId,
-            target_pos: selectedAction.targetPos,
-            target_part_name: selectedAction.targetPartName
-        };
-        // [v_REFACTOR_FIX] 添加 /api/ 前缀
-        postAndReload('/api/execute_attack', body);
-    }
-
-    // [新增] 显示部件详情的函数
-    function showPartDetail(controller, slot) {
-        if (!allEntities) return;
-
-        let mech;
-        if (controller === 'player') {
-            mech = playerEntity;
-        } else {
-            mech = aiEntity; // aiEntity 是在顶部定义的
-        }
-
-        if (!mech || !mech.parts || !mech.parts[slot]) {
-            console.warn(`Could not find part for ${controller} at ${slot}`);
-            return;
-        }
-
-        const part = mech.parts[slot];
-        if (!part) return; // 如果部件为空 (例如已被摧毁且数据中不存在)
-
-        // 1. 填充标题
-        partDetailTitle.innerText = part.name;
-
-        // 2. 准备属性列表 (用于回退)
-        let statsHtml = `
-            <li>装甲: ${part.armor}</li>
-            <li>结构: ${part.structure}</li>
-        `;
-        if (part.evasion) statsHtml += `<li>闪避: ${part.evasion}</li>`;
-        if (part.electronics) statsHtml += `<li>电子: ${part.electronics}</li>`;
-        if (part.parry) statsHtml += `<li>招架: ${part.parry}</li>`;
-        if (part.adjust_move) statsHtml += `<li>调整移动: ${part.adjust_move}</li>`;
-        partDetailStatsList.innerHTML = statsHtml;
-
-        // 3. 准备动作列表
-        let actionsHtml = '';
-        if (part.actions && part.actions.length > 0) {
-            part.actions.forEach(action => {
-                let costStr = '';
-                if (action.cost === 'L') costStr = '2 AP + 1 TP';
-                else if (action.cost === 'M') costStr = '2 AP';
-                else if (action.cost === 'S') costStr = '1 AP';
-                else if (action.action_type === '被动') costStr = '被动';
-                else costStr = action.cost;
-
-                let details = `(${action.action_type}, ${costStr})`;
-                if (action.dice) details += `, ${action.dice}`;
-                if (action.range_val > 0) details += `, R: ${action.range_val}`;
-
-                actionsHtml += `
-                    <div class="part-detail-action">
-                        <strong>${action.name}</strong>
-                        <small>${details}</small>
-                    </div>`;
-            });
-        } else {
-            actionsHtml = '<span>无</span>';
-        }
-        partDetailActionsList.innerHTML = actionsHtml;
-
-        // 4. 处理图像
-        if (part.image_url) {
-            partDetailImage.src = part.image_url;
-            partDetailImage.style.display = 'block';
-            partDetailStatsContainer.style.display = 'none'; // 隐藏属性列表
-        } else {
-            partDetailImage.style.display = 'none';
-            partDetailStatsContainer.style.display = 'block'; // 显示属性列表
-        }
-
-        // 5. 显示弹窗
-        partDetailModalBackdrop.style.display = 'flex';
-    }
-
-    // [新增] 关闭部件详情的函数
-    function closePartDetailModal() {
-        if (partDetailModalBackdrop) {
-            partDetailModalBackdrop.style.display = 'none';
-        }
-    }
-
-    function formatDiceInput(input) {
-        let html = ''; if (!input) return '<span>无</span>';
-        for (const key in input) {
-            const color = diceColorMap[key]; const count = input[key];
-            if (count > 0 && color) {
-                for(let i=0; i < count; i++) { html += `<span class="dice-icon dice-input ${color}">${key.charAt(0).toUpperCase()}</span>`; }
-            }
-        }
-        return html || '<span>无</span>';
-    }
-
-    // [v_REROLL] 修改函数签名
-    function formatDiceResult(result, rollType, isClickable = false) {
-        // [v_MODIFIED] 重写以按“颗”来分隔
-        let html = '';
-        // result 现在的结构是: {'yellow': [['轻击', '轻击'], ['空白']], 'red': [['重击']]}
-
-        if (!result || Object.keys(result).length === 0) return '<span>无结果</span>';
-
-        const color_order = ['yellow', 'red', 'white', 'blue'];
-        let total_dice_groups_rendered = 0; // 用于跟踪我们是否渲染了任何骰子，以便添加分隔符
-
-        for (const color_key of color_order) {
-            const dice_groups = result[color_key]; // e.g., [['轻击', '轻击'], ['空白']]
-
-            if (dice_groups && dice_groups.length > 0) {
-
-                // [v_REROLL_FIX] 使用 .entries() 来获取索引
-                for (const [die_index, die_results] of dice_groups.entries()) { // e.g., [0, ['轻击', '轻击']]
-
-                    if (total_dice_groups_rendered > 0) {
-                         html += `<span style="border-left: 2px solid var(--border-color); margin: 0 0.5rem; height: 1.5rem;"></span>`;
-                    }
-
-                    let dieGroupHtml = '';
-                    // 迭代那 *一颗* 骰子产生的所有结果 (例如 'light_hit_2' 会产生两个)
-                    for (const key of die_results) { // e.g., '轻击'
-                        const icon = diceIconMap[key] || '?';
-                        // [修改] 我们现在总是渲染图标，包括 '空白'
-                        dieGroupHtml += `<span class="dice-icon dice-result ${key}">${icon}</span>`;
-                    }
-
-                    // [v_REROLL] Wrap in clickable/non-clickable span
-                    const clickableClass = isClickable ? 'clickable' : 'disabled';
-                    html += `<span class="dice-reroll-group ${clickableClass}"
-                                  data-roll-type="${rollType}"
-                                  data-color="${color_key}"
-                                  data-index="${die_index}"
-                                  ${isClickable ? `onclick="toggleRerollDie(this)"` : ''}>
-                              ${dieGroupHtml}
-                             </span>`;
-
-                    total_dice_groups_rendered++;
-                }
-            }
-        }
-
-        return html || '<span>无结果</span>';
-    }
-
-
-    // [v_REROLL] 修改函数签名
-    function showDiceRollModal(diceDetails, actionName, attackerName, defenderName, isInteractive = false, attackerIsPlayer = false, defenderIsPlayer = false) {
-        // 1. [修改] 清除自动关闭的计时器
-        if (diceModalTimer) {
-            clearTimeout(diceModalTimer);
-            diceModalTimer = null;
-        }
-
-        // [v_REROLL_FIX] 使用传入的参数设置标题
-        document.getElementById('dice-roll-title').innerText = `掷骰结算: ${actionName || 'Attack'}`;
-        document.getElementById('dice-roll-attacker-name').innerText = attackerName || '攻击方';
-        document.getElementById('dice-roll-defender-name').innerText = defenderName || '防御方';
-
-        // [v_REROLL_FIX] 使用 diceDetails
-        const details = diceDetails;
-
-        document.getElementById('dice-roll-attacker-input').innerHTML = formatDiceInput(details.attack_dice_input);
-        // [v_REROLL_FIX] 传递 isClickable
-        document.getElementById('dice-roll-attacker-result').innerHTML = formatDiceResult(details.attack_dice_result, 'attacker', isInteractive && attackerIsPlayer);
-
-        document.getElementById('dice-roll-defender-input').innerHTML = formatDiceInput(details.defense_dice_input);
-        // [v_REROLL_FIX] 传递 isClickable
-        document.getElementById('dice-roll-defender-result').innerHTML = formatDiceResult(details.defense_dice_result, 'defender', isInteractive && defenderIsPlayer);
-
-        const secondarySection = document.getElementById('dice-roll-secondary-section');
-        if (details.secondary_roll) {
-            const secondary = details.secondary_roll;
-            let title = "效果结算";
-            if (secondary.type === 'devastating_roll') title = "【毁伤】结算";
-            if (secondary.type === 'scattershot_roll') title = "【霰射】结算";
-            if (secondary.type === 'cleave_roll') title = "【顺劈】结算";
-            document.getElementById('dice-roll-secondary-title').innerText = title;
-            // [v_REROLL_FIX] 确保 secondary_roll 也使用 diceDetails
-            document.getElementById('dice-roll-secondary-input').innerHTML = formatDiceInput(secondary.defense_dice_input);
-            document.getElementById('dice-roll-secondary-result').innerHTML = formatDiceResult(secondary.defense_dice_result, 'secondary', false); // 第二阶段不可重投
-            secondarySection.style.display = 'block';
-        } else {
-            secondarySection.style.display = 'none';
-        }
-
-        // [v_REROLL_FIX] 检查玩家是否有链接值
-        const playerLinkPoints = (playerEntity && playerEntity.pilot) ? playerEntity.pilot.link_points : 0;
-        const canReroll = playerLinkPoints > 0;
-
-        const rerollButtons = document.getElementById('dice-roll-buttons-reroll');
-        const closeButton = document.getElementById('dice-roll-buttons-default');
-        const confirmButton = document.getElementById('dice-roll-confirm');
-        const skipButton = document.getElementById('dice-roll-skip');
-
-        if (isInteractive) {
-            rerollButtons.classList.remove('reroll-hidden');
-            closeButton.classList.add('reroll-hidden');
-
-            if (canReroll) {
-                confirmButton.classList.remove('disabled');
-                confirmButton.disabled = false;
-                document.getElementById('reroll-link-cost').innerText = '1';
-            } else {
-                confirmButton.classList.add('disabled');
-                confirmButton.disabled = true;
-                document.getElementById('reroll-link-cost').innerText = '0';
-            }
-
-            // [v_REROLL_FIX] 确保跳过按钮总是可用的
-            skipButton.classList.remove('disabled');
-            skipButton.disabled = false;
-
-        } else {
-            rerollButtons.classList.add('reroll-hidden');
-            closeButton.classList.remove('reroll-hidden');
-
-            // 只有在不是重投时才自动关闭
-            diceModalTimer = setTimeout(() => {
-                closeDiceRollModal(); // 5秒后自动关闭
-            }, 5000);
-        }
-
-        document.getElementById('dice-roll-modal-backdrop').style.display = 'flex';
-    }
-
-    // [v_REROLL] 新增
-    function toggleRerollDie(element) {
-        if (element.classList.contains('disabled')) return;
-        element.classList.toggle('selected');
-    }
-
-    // [v_REROLL] 新增
-    function confirmReroll(isSkipping = false) {
-        let selections_attacker = [];
-        let selections_defender = [];
-
-        if (!isSkipping) {
-            // 收集选中的攻击骰
-            // [BUG 修复] 修正了类名选择器
-            document.querySelectorAll('#dice-roll-attacker-result .dice-reroll-group.selected').forEach(die => {
-                selections_attacker.push({
-                    color: die.dataset.color,
-                    index: parseInt(die.dataset.index, 10)
-                });
-            });
-
-            // 收集选中的防御骰
-            // [BUG 修复] 修正了类名选择器
-            document.querySelectorAll('#dice-roll-defender-result .dice-reroll-group.selected').forEach(die => {
-                selections_defender.push({
-                    color: die.dataset.color,
-                    index: parseInt(die.dataset.index, 10)
-                });
-            });
-        }
-
-        // 关闭模态框
-        closeDiceRollModal();
-
-        // 发送重投请求 (即使是空的)
-        // postAndReload 会自动处理UI禁用和重载
-        postAndReload('/api/resolve_reroll', {
-            reroll_selections_attacker: selections_attacker,
-            reroll_selections_defender: selections_defender
-            // player_id 会被 postAndReload 自动添加
-        });
-    }
-
-
-    function closeDiceRollModal() {
-        // 1. [修改] 清除自动关闭的计时器
-        if (diceModalTimer) {
-            clearTimeout(diceModalTimer);
-            diceModalTimer = null;
-        }
-
-        // 2. 隐藏弹窗
-        document.getElementById('dice-roll-modal-backdrop').style.display = 'none';
-
-        // 3. [MODIFIED] 触发攻击动画
-        // [v_REROLL_FIX] 只有在 *不是* 重投中断时才触发
-        if (!gameState.pendingReroll) {
-            const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
-            if (firstAttackResult && !gameState.runProjectilePhase) { // 不在AI回合暂停期间触发
-                showAttackEffect(firstAttackResult.defender_pos, firstAttackResult.result_text);
-            }
-        }
-    }
-
+}
 </script>
 
-<!-- [MODIFIED] Firebase Analytics 脚本 -->
+<!-- [NEW] 加载新的 JS 模块 -->
+<!-- [v_REFACTOR_FIX] 修复 Flask 的 url_for 语法 -->
+<script type="module" src="{{ url_for('static', filename='js/game.js') }}"></script>
+
+
+<!-- [MODIFIED] Firebase Analytics 脚本 (保持不变) -->
 <script type="module">
     // 导入 Firebase 模块
     import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -1930,5 +893,6 @@
         }
     };
 </script>
+
 </body>
 </html>
