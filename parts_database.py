@@ -1,9 +1,13 @@
-# [v_REFACTOR]
-# 更新导入，从新的 game_logic 包中导入
-from game_logic.data_models import Action, Part, Projectile, Pilot # [MODIFIED v2.2] 导入 Pilot
+# 导入数据模型
+from game_logic.data_models import Action, Part, Projectile, Pilot
 
-# --- 效果构建辅助函数 ---
+# === 效果构建辅助函数 ===
+
 def build_effects(*effects_list):
+    """
+    一个辅助函数，用于将多个效果字典合并为一个统一的 effects 对象。
+    它会合并所有 "logic" 字典，并收集所有 "name" 到 "display_effects" 列表中。
+    """
     final_effects = {}
     display_list = []
     for effect in effects_list:
@@ -15,8 +19,9 @@ def build_effects(*effects_list):
     return final_effects
 
 
+# === 效果定义 (Effect Library) ===
+# 定义所有游戏中可能出现的特殊效果，以便复用。
 
-# --- 效果库 (Effect Library) ---
 EFFECT_AP_1 = {
     "logic": {"armor_piercing": 1},
     "name": "【穿甲1】"
@@ -83,12 +88,10 @@ EFFECT_FLIGHT_MOVEMENT = {
     "logic": {"flight_movement": True},
     "name": "【空中移动】"
 }
-# [新增] 弃置效果
 EFFECT_JETTISON = {
     "logic": {"jettison_part": True},
     "name": "【弃置】"
 }
-# [新增] 抛射效果
 EFFECT_SALVO_2 = {
     "logic": {"salvo": 2},
     "name": "【齐射2】"
@@ -97,27 +100,29 @@ EFFECT_SALVO_4 = {
     "logic": {"salvo": 4},
     "name": "【齐射4】"
 }
-# [新增] 曲射 (注意: 也在 Action 构造函数中设置 action_style)
 EFFECT_CURVED_FIRE = {
     "logic": {"action_style": "curved"},
     "name": "【曲射】"
 }
-# [新增] 拦截效果
 EFFECT_INTERCEPTOR_3 = {
     "logic": {"interceptor": 3, "intercept_range": 3},
     "name": "【拦截3】"
 }
-# [新增] 震撼效果
 EFFECT_SHOCK = {
     "logic": {"shock": True},
     "name": "【震撼】"
 }
-# --- 效果库结束 ---
+
+# [新增] 喷射冲刺效果
+EFFECT_JET_SPRINT = {
+    "logic": {"straight_line_bonus": 2}, # 赋予 API 检查的逻辑密钥
+    "name": "【直线移动】+2移动距离" # 赋予前端显示的名称
+}
 
 
-# --- 动作库 ---
+# === 动作定义 (Action Library) ===
 
-# 近战 (Melee)
+# --- 近战 (Melee) ---
 ACTION_CIJI = Action(name="刺击", action_type="近战", cost="S", dice="3黄1红", range_val=1)
 ACTION_JINGJU = Action(name='近距开火', action_type='近战', cost='S', dice='5黄', range_val=1)
 ACTION_HUIZHAN = Action(name='挥斩', action_type='近战', cost='S', dice='4黄1红', range_val=1,
@@ -129,9 +134,9 @@ ACTION_PIKAN = Action(name='劈砍', action_type='近战', cost='S', dice='3黄1
 ACTION_HUIZHAN_ZHONG = Action(name='挥斩【重】', action_type='近战', cost='M', dice='2黄4红', range_val=1,
                         effects=build_effects(EFFECT_STROBE_WEAPON, EFFECT_CLEAVE, EFFECT_TWO_HANDED_DEVASTATING))
 ACTION_DUNJI = Action(name="盾击", action_type="近战", cost="S", dice="5黄", range_val=1,
-                        effects=build_effects(EFFECT_SHOCK)) # [MODIFIED] 添加震撼效果
+                        effects=build_effects(EFFECT_SHOCK))
 
-# 射击 (Ranged)
+# --- 射击 (Ranged) ---
 ACTION_DIANSHE = Action(name="点射", action_type="射击", cost="M", dice="1黄3红", range_val=6,
                         effects=build_effects(EFFECT_TWO_HANDED_RANGE_2))
 ACTION_DIANSHE_CI = Action(name="点射【磁】", action_type="射击", cost="S", dice="3红", range_val=6,
@@ -150,146 +155,149 @@ ACTION_SUSHE = Action(name="速射", action_type="射击", cost="M", dice="4黄1
                         effects=build_effects(EFFECT_TWO_HANDED_RANGE_2))
 ACTION_DIANSHE_ZHAN = Action(name="点射(战)", action_type="射击", cost="S", dice="1黄2红", range_val=6)
 
-# [新增] 快速动作 (Quick)
+# --- 快速 (Quick) ---
 ACTION_JETTISON = Action(name="【弃置】", action_type="快速", cost="S", dice="", range_val=0,
                          effects=build_effects(EFFECT_JETTISON))
 
-# 移动 (Movement)
+# --- 移动 (Movement) ---
 ACTION_BENPAO = Action(name="奔跑", action_type="移动", cost="M", dice="", range_val=4)
 ACTION_TIAOYUE = Action(name="跳跃", action_type="移动", cost="S", dice="", range_val=2,
                         effects=build_effects(EFFECT_FLIGHT_MOVEMENT))
 ACTION_BENPAO_MA = Action(name="奔跑（马）", action_type="移动", cost="M", dice="", range_val=5)
 
+# [新增] 喷射冲刺动作
+ACTION_JET_SPRINT = Action(
+    name="喷射冲刺",
+    action_type="移动",
+    cost="M",
+    dice="",
+    range_val=3, # 基础移动 3 格
+    effects=build_effects(EFFECT_JET_SPRINT) # 关联直线移动效果
+)
 
-# 被动 (Passive)
+# --- 被动 (Passive) ---
 ACTION_NONE = Action(name="无动作", action_type="被动", cost="", dice="", range_val=0)
 ACTION_ENHANCED_COOLING = Action(name="增强冷却", action_type="被动", cost="", dice="", range_val=0,
                                  effects=build_effects(EFFECT_PASSIVE_COOLING))
 
-# [新增] 拦截动作
+# --- 拦截 (Interceptor) ---
 ACTION_AUTO_INTERCEPT = Action(
     name="自动拦截",
-    action_type="被动",
+    action_type="被动", # 拦截动作是被动触发的
     cost="",
     dice="3黄", # 拦截时投掷 3 个黄骰
     range_val=3, # 拦截触发范围
-    ammo=3,      # 一共 3 次 (拦截3)
+    ammo=3,      # 弹药量
     effects=build_effects(EFFECT_INTERCEPTOR_3)
 )
 
-
-# --- [v1.17 新增] 抛射物动作 ---
+# --- 抛射物发射 (Projectile Launch) ---
 ACTION_LAUNCH_ROCKET = Action(
     name="火箭弹",
-    action_type="抛射", # [v1.17] 新类型
+    action_type="抛射",
     cost="M",
-    dice="", # 发射动作本身不造成伤害
+    dice="",
     range_val=12,
-    action_style='direct', # 直射
-    projectile_to_spawn='RA_81_ROCKET', # 要生成的实体
-    ammo=2 # 弹药量
+    action_style='direct',
+    projectile_to_spawn='RA_81_ROCKET',
+    ammo=2
 )
-
-# [新增] 延迟-制导导弹（发射动作）
 ACTION_LAUNCH_GUIDED_MISSILE = Action(
     name="导弹",
     action_type="抛射",
     cost="M",
-    dice="", # 发射动作本身不造成伤害
-    range_val=3, # 发射器射程 (玩家选择落点的范围)
-    action_style='curved', # 曲射
-    projectile_to_spawn='MC_3_SWORD_MISSILE', # 要生成的实体
-    ammo=2, # 弹药量
-    effects=build_effects(EFFECT_SALVO_2, EFFECT_CURVED_FIRE) # 齐射2, 曲射
+    dice="",
+    range_val=3,
+    action_style='curved',
+    projectile_to_spawn='MC_3_SWORD_MISSILE',
+    ammo=2,
+    effects=build_effects(EFFECT_SALVO_2, EFFECT_CURVED_FIRE)
 )
-
 ACTION_LAUNCH_GUIDED_MISSILE_K = Action(
     name="导弹(红隼)",
     action_type="抛射",
     cost="M",
-    dice="", # 发射动作本身不造成伤害
-    range_val=6, # 发射器射程 (玩家选择落点的范围)
-    action_style='curved', # 曲射
-    projectile_to_spawn='MR-10 RED KESTREL_MISSILE', # 要生成的实体
-    ammo=4, # 弹药量
-    effects=build_effects(EFFECT_SALVO_4, EFFECT_CURVED_FIRE) # 齐射4, 曲射
+    dice="",
+    range_val=6,
+    action_style='curved',
+    projectile_to_spawn='MR-10 RED KESTREL_MISSILE',
+    ammo=4,
+    effects=build_effects(EFFECT_SALVO_4, EFFECT_CURVED_FIRE)
 )
 
-# --- [v1.17 新增] 抛射物“立即”动作 ---
+# --- 抛射物内部动作 (Immediate / Delayed) ---
 ACTION_IMMEDIATE_EXPLOSION = Action(
     name="多级串联战斗部",
-    action_type="立即", # [v1.17] 新类型: '立即'
-    cost="", # 立即动作无消耗
-    dice="3红", # 伤害
-    range_val=0, # 总是 0, 攻击自己所在的格子
-    aoe_range=0 # 仅限本格
+    action_type="立即",
+    cost="",
+    dice="3红",
+    range_val=0,
+    aoe_range=0
 )
-
-# [新增] 抛射物“延迟”动作
 ACTION_DELAYED_GUIDED_ATTACK = Action(
     name="制导攻击",
-    action_type="延迟", # [新增] 新类型: '延迟'
+    action_type="延迟",
     cost="",
-    dice="1黄3红", # 爆炸伤害
-    range_val=0, # 攻击自己所在的格子
-    aoe_range=0 # 仅限本格
+    dice="1黄3红",
+    range_val=0,
+    aoe_range=0
 )
-
 ACTION_DELAYED_GUIDED_ATTACK_K = Action(
     name="制导攻击_红隼",
-    action_type="延迟", # [新增] 新类型: '延迟'
+    action_type="延迟",
     cost="",
-    dice="2红", # 爆炸伤害
-    range_val=0, # 攻击自己所在的格子
-    aoe_range=0 # 仅限本格
+    dice="2红",
+    range_val=0,
+    aoe_range=0
 )
 
 
-# --- [v1.17 新增] 抛射物模板库 ---
+# === 抛射物模板 (Projectile Templates) ===
+# 定义所有抛射物实体的数据
+
 PROJECTILE_TEMPLATES = {
     "RA_81_ROCKET": {
         "name": "RA-81火箭弹",
         "entity_type": "projectile",
         "evasion": 4,
-        "stance": "agile", # 处于机动姿态
-        "structure": 1, # 1 点生命值 (用于被拦截)
+        "stance": "agile",
+        "structure": 1,
         "armor": 0,
-        "life_span": 1, # '立即' 动作会在 1 回合内结算
-        "actions": [ACTION_IMMEDIATE_EXPLOSION.to_dict()], # 携带的动作
+        "life_span": 1,
+        "actions": [ACTION_IMMEDIATE_EXPLOSION.to_dict()],
         "electronics": 0,
-        "move_range": 0 # 不会移动
+        "move_range": 0
     },
-    # [新增] MC-3 利剑导弹
     "MC_3_SWORD_MISSILE": {
         "name": "MC-3 “利剑”导弹",
         "entity_type": "projectile",
         "evasion": 6,
         "electronics": 1,
         "stance": "agile",
-        "structure": 1, # 1 点生命值
+        "structure": 1,
         "armor": 0,
-        "life_span": 99, # 存活直到 '延迟' 动作被触发
+        "life_span": 99,
         "actions": [ACTION_DELAYED_GUIDED_ATTACK.to_dict()],
-        "move_range": 3 # 关键：导弹自己的移动力 (来自图片R3)
+        "move_range": 3
     },
-
     "MR-10 RED KESTREL_MISSILE": {
         "name": "MR-10 “红隼”导弹",
         "entity_type": "projectile",
         "evasion": 4,
         "electronics": 1,
         "stance": "agile",
-        "structure": 1, # 1 点生命值
+        "structure": 1,
         "armor": 0,
-        "life_span": 99, # 存活直到 '延迟' 动作被触发
+        "life_span": 99,
         "actions": [ACTION_DELAYED_GUIDED_ATTACK_K.to_dict()],
-        "move_range": 6 # 关键
+        "move_range": 6
     }
 }
 
 
-# --- [新增] 通用动作 (Generic Actions) ---
-# [v_MODIFIED] 动作定义移回 parts_database.py
+# === 通用动作 (Generic Actions) ===
+# 定义所有机甲都能使用的基础动作
+
 ACTION_PUNCH_KICK = Action(
     name="拳打脚踢",
     action_type="近战",
@@ -298,34 +306,32 @@ ACTION_PUNCH_KICK = Action(
     range_val=1
 )
 
-# 定义通用动作及其解锁所需的部件槽位
-# 格式: {ActionObject: ['required_slot_1', 'required_slot_2', ...]}
-# 机甲 *至少需要一个* 列表中的部件 (且未被摧毁) 才能使用该动作。
+# GENERIC_ACTIONS 定义了哪些部件槽位可以激活这些动作
 GENERIC_ACTIONS = {
     ACTION_PUNCH_KICK: ['left_arm', 'right_arm', 'legs']
 }
-# --- 通用动作结束 ---
 
 
-# --- [MODIFIED v2.2] 驾驶员数据库 ---
-# 定义【测试驾驶员】，使用 Pilot 类的默认值 (全 5 速度, 5 链接值)
-PILOT_TEST = Pilot(name="【测试驾驶员】")
+# === 驾驶员数据库 (Pilot Database) ===
 
-# 玩家可用的驾驶员 (目前为空，但为了让 game_logic.py 中的导入能工作)
+PILOT_TEST = Pilot(name="【测试驾驶员】") # 默认测试驾驶员
+
 PLAYER_PILOTS = {
-    "【测试驾驶员】": PILOT_TEST # [MODIFIED v2.2] 添加测试驾驶员供玩家选择
+    "【测试驾驶员】": PILOT_TEST
 }
 
-# [MODIFIED v2.2 AI无驾驶员] AI不再需要驾驶员
-AI_PILOTS = {}
-# --- 驾驶员数据库结束 ---
+AI_PILOTS = {} # AI 目前不使用驾驶员
 
 
-# --- 玩家可用部件 ---
+# === 玩家部件 - 核心 (Player Cores) ===
+
 PLAYER_CORES = {
     'RT-06 "泥沼"核心': Part(name='RT-06 "泥沼"核心', armor=6, structure=2, electronics=2,
                             image_url='static/images/parts/RT-06.png'),
 }
+
+# === 玩家部件 - 下肢 (Player Legs) ===
+
 PLAYER_LEGS = {
     'RL-06 标准下肢': Part(name='RL-06 标准下肢', armor=5, structure=0, evasion=3, adjust_move=1,
                            actions=[ACTION_BENPAO],
@@ -333,10 +339,15 @@ PLAYER_LEGS = {
     'RL-03D “快马”高速下肢': Part(name='RL-03D “快马”高速下肢', armor=4, structure=0, evasion=4, adjust_move=2,
                                   actions=[ACTION_BENPAO_MA],
                            image_url='static/images/parts/RL-03D.png'),
+    # [修改] RL-08 重甲下肢
     'RL-08 重甲下肢': Part(name='RL-08 重甲下肢', armor=6, structure=1, evasion=3, adjust_move=1,
-                            actions=[ACTION_BENPAO],
+                            # [修改] 动作从 ACTION_BENPAO 替换为 ACTION_JET_SPRINT
+                            actions=[ACTION_JET_SPRINT],
                            image_url='static/images/parts/RL-08.png'),
 }
+
+# === 玩家部件 - 左臂 (Player Left Arms) ===
+
 PLAYER_LEFT_ARMS = {
     'ML-32 双联发射器 + CC-3 格斗刀': Part(name='ML-32 双联发射器 + CC-3 格斗刀', armor=4, structure=0, parry=1,
                        actions=[ACTION_CIJI, ACTION_LAUNCH_GUIDED_MISSILE],  tags=["【空手】"],
@@ -369,6 +380,9 @@ PLAYER_LEFT_ARMS = {
                        tags=["【空手】"],
                            image_url='static/images/parts/GAC-6Q.png'),
 }
+
+# === 玩家部件 - 右臂 (Player Right Arms) ===
+
 PLAYER_RIGHT_ARMS = {
     'AC-32 自动步枪': Part(name='AC-32 自动步枪', armor=4, structure=0, actions=[ACTION_DIANSHE, ACTION_JETTISON],
                          tags=["【手持】"],
@@ -405,6 +419,9 @@ PLAYER_RIGHT_ARMS = {
                          actions=[ACTION_SAOSHE],tags=["【空手】"],
                            image_url='static/images/parts/CC-90Q.png'),
 }
+
+# === 玩家部件 - 背包 (Player Backpacks) ===
+
 PLAYER_BACKPACKS = {
     'AMS-190 主动防御': Part(name='AMS-190 主动防御', armor=3, structure=0, electronics=1,actions=[ACTION_AUTO_INTERCEPT],
                            image_url='static/images/parts/AMS-190.png'),
@@ -422,30 +439,42 @@ PLAYER_BACKPACKS = {
                            image_url='static/images/parts/ML-94.png'),
 }
 
-# --- AI 专用部件 ---
+# === AI专用部件 - 核心 ===
+
 AI_ONLY_CORES = {
     'GK-09 "壁垒"核心': Part(name='GK-09 "壁垒"核心', armor=8, structure=3, electronics=1),
     'GK-08 "哨兵"核心': Part(name='GK-08 "哨兵"核心', armor=5, structure=1, electronics=1, evasion=3),
 }
+
+# === AI专用部件 - 下肢 ===
+
 AI_ONLY_LEGS = {
     'TK-05 坦克履带': Part(name='TK-05 坦克履带', armor=6, structure=3, evasion=0, adjust_move=1,
                            actions=[ACTION_BENPAO]),
 }
+
+# === AI专用部件 - 左臂 ===
+
 AI_ONLY_LEFT_ARMS = {
     'LH-8 早期型霰弹破片炮': Part(name='LH-8 早期型霰弹破片炮', armor=5, structure=0, parry=0, actions=[ACTION_JINGJU]),
 }
+
+# === AI专用部件 - 右臂 ===
+
 AI_ONLY_RIGHT_ARMS = {
     'LGP-80 长程火炮': Part(name='LGP-80 长程火炮', armor=3, structure=0, actions=[ACTION_PAOJI]),
 }
+
+# === AI专用部件 - 背包 ===
+
 AI_ONLY_BACKPACKS = {
     'EB-03 扩容电池': Part(name='EB-03 扩容电池', armor=2, structure=0, electronics=3),
 }
 
 
-# --- [v1.22 修复] AI 配置 ---
-# AI_LOADOUTS 字典现在被定义在这里
+# === AI 配置 (AI Loadouts) ===
+# 定义 AI 对手的预设配置
 
-# [MODIFIED v2.2 AI无驾驶员] 移除所有 'pilot' 键
 AI_LOADOUT_HEAVY = {
     'name': "AI机甲 (重火炮型)",
     'selection': {
@@ -456,7 +485,6 @@ AI_LOADOUT_HEAVY = {
         'backpack': 'EB-03 扩容电池'
     }
 }
-
 AI_LOADOUT_STANDARD = {
     'name': "AI机甲 (标准泥沼型)",
     'selection': {
@@ -467,7 +495,6 @@ AI_LOADOUT_STANDARD = {
         'backpack': 'AMS-190 主动防御'
     }
 }
-
 AI_LOADOUT_LIGHTA = {
     'name': "AI机甲 (高速射手型)",
     'selection': {
@@ -478,7 +505,6 @@ AI_LOADOUT_LIGHTA = {
         'backpack': 'TB-600 跳跃背包'
     }
 }
-
 AI_LOADOUT_LIGHTB = {
     'name': "AI机甲 (高速近战型)",
     'selection': {
@@ -490,20 +516,23 @@ AI_LOADOUT_LIGHTB = {
     }
 }
 
+# AI 加载项的主字典
 AI_LOADOUTS = {
     "heavy": AI_LOADOUT_HEAVY,
     "standard": AI_LOADOUT_STANDARD,
     "lighta": AI_LOADOUT_LIGHTA,
     "lightb": AI_LOADOUT_LIGHTB,
 }
-# --- AI 配置结束 ---
 
 
-# --- 合并字典 ---
+# === 最终部件数据库 ===
+# 将玩家部件和 AI 专用部件合并为供游戏逻辑使用的总字典
+
 CORES = {**PLAYER_CORES, **AI_ONLY_CORES}
 LEGS = {**PLAYER_LEGS, **AI_ONLY_LEGS}
 LEFT_ARMS = {**PLAYER_LEFT_ARMS, **AI_ONLY_LEFT_ARMS}
 RIGHT_ARMS = {**PLAYER_RIGHT_ARMS, **AI_ONLY_RIGHT_ARMS}
 BACKPACKS = {**PLAYER_BACKPACKS, **AI_ONLY_BACKPACKS}
 
+# ALL_PARTS 字典包含了游戏中所有可用的部件
 ALL_PARTS = {**CORES, **LEGS, **LEFT_ARMS, **RIGHT_ARMS, **BACKPACKS}
