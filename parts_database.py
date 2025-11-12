@@ -107,6 +107,11 @@ EFFECT_INTERCEPTOR_3 = {
     "logic": {"interceptor": 3, "intercept_range": 3},
     "name": "【拦截3】"
 }
+# [新增] 震撼效果
+EFFECT_SHOCK = {
+    "logic": {"shock": True},
+    "name": "【震撼】"
+}
 # --- 效果库结束 ---
 
 
@@ -123,7 +128,8 @@ ACTION_PIKAN = Action(name='劈砍', action_type='近战', cost='S', dice='3黄1
                         )
 ACTION_HUIZHAN_ZHONG = Action(name='挥斩【重】', action_type='近战', cost='M', dice='2黄4红', range_val=1,
                         effects=build_effects(EFFECT_STROBE_WEAPON, EFFECT_CLEAVE, EFFECT_TWO_HANDED_DEVASTATING))
-ACTION_DUNJI = Action(name="盾击", action_type="近战", cost="S", dice="5黄", range_val=1)
+ACTION_DUNJI = Action(name="盾击", action_type="近战", cost="S", dice="5黄", range_val=1,
+                        effects=build_effects(EFFECT_SHOCK)) # [MODIFIED] 添加震撼效果
 
 # 射击 (Ranged)
 ACTION_DIANSHE = Action(name="点射", action_type="射击", cost="M", dice="1黄3红", range_val=6,

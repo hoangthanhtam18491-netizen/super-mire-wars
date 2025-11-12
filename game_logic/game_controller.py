@@ -796,11 +796,156 @@ def handle_resolve_reroll(game_state, player_mech, data):
         })
         return game_state, log, None, result_data, None
 
-    # 8. 检查游戏是否结束
-    game_is_over = game_state.check_game_over()
+    # 8. [MODIFIED] 检查是否有待处理的 AI 攻击队列
+    queued_attacks = pending_data.get('remaining_attacks')
+    game_ended_mid_turn = False  # 重置标志，用于队列处理
 
-    # [FIX] 移除此处的 "if (not game_is_over...)" 逻辑块。
-    # handle_resolve_reroll 不应该负责重置玩家回合。
+    if queued_attacks and not result_data:  # 仅当没有触发效果选择时才继续
+        log.append(f"> [系统] 玩家重投已解决。正在恢复 AI 的攻击队列... ({len(queued_attacks)} 个动作)")
+
+        # [MODIFIED] 这是一个简化的攻击循环，来自 handle_end_turn
+        # 它必须能够处理 *另一次* 重投中断
+        for i, attack_data in enumerate(queued_attacks):  # Renamed 'attack' to 'attack_data'
+            if game_ended_mid_turn:
+                log.append(
+                    f"> [结算] 攻击 {attack_data.get('action_dict', {}).get('name', '未知')} 被暂停，等待玩家重投。")
+                continue
+
+            if not isinstance(attack_data, dict): continue
+
+            # [MODIFIED] Re-fetch entities and action from serialized data
+            attacker_entity = game_state.get_entity_by_id(attack_data.get('attacker_id'))
+            defender_entity = game_state.get_entity_by_id(attack_data.get('defender_id'))
+            attack_action_dict = attack_data.get('action_dict')
+
+            if not attacker_entity or not defender_entity or not attack_action_dict:
+                log.append(f"> [严重错误] AI 队列攻击数据不完整: {attack_data}")
+                continue
+
+            attack_action = Action.from_dict(attack_action_dict)
+
+            if attacker_entity.status == 'destroyed':
+                log.append(f"> [结算] 攻击者 {attacker_entity.name} 已被摧毁，攻击取消！")
+                continue
+
+            if defender_entity.status == 'destroyed':
+                log.append(f"> [AI] {attacker_entity.name} 的目标 {defender_entity.name} 已被摧毁。")
+                continue
+
+            log.append(f"--- 攻击结算 ({attacker_entity.name} -> {attack_action.name}) ---")
+
+            # AI 攻击的部位判定 (Copied from handle_end_turn)
+            back_attack = False
+            if isinstance(defender_entity, Mech):
+                if isinstance(attacker_entity, Mech):
+                    back_attack = is_back_attack(attacker_entity.pos, defender_entity.pos,
+                                                 defender_entity.orientation)
+                elif isinstance(defender_entity, Projectile):
+                    back_attack = False
+
+            target_part_slot = None
+            if isinstance(defender_entity, Mech):
+                if attack_action.action_type == '近战' and not back_attack and defender_entity.stance != 'downed':
+                    parry_parts = [(s, p) for s, p in defender_entity.parts.items() if
+                                   p and p.parry > 0 and p.status != 'destroyed']
+                    if parry_parts:
+                        target_part_slot, best_parry_part = max(parry_parts, key=lambda item: item[1].parry)
+                        log.append(f"> 玩家决定用 [{best_parry_part.name}] 进行招架！")
+
+                if not target_part_slot:
+                    hit_roll_result = roll_black_die()
+                    log.append(f"> AI 投掷部位骰结果: 【{hit_roll_result}】")
+                    if hit_roll_result == 'any' or back_attack:
+                        if back_attack:
+                            log.append("> [背击] AI 获得任意选择权！")
+                        else:
+                            log.append("> AI 获得任意选择权！")
+                        damaged_parts = [s for s, p in defender_entity.parts.items() if
+                                         p and p.status == 'damaged']
+                        if damaged_parts:
+                            target_part_slot = random.choice(damaged_parts)
+                            log.append(f"> AI 优先攻击已受损部件: [{target_part_slot}]。")
+                        elif defender_entity.parts.get('core') and defender_entity.parts[
+                            'core'].status != 'destroyed':
+                            target_part_slot = 'core'
+                            log.append("> AI 决定攻击 [核心]。")
+                        else:
+                            valid_parts = [s for s, p in defender_entity.parts.items() if
+                                           p and p.status != 'destroyed']
+                            target_part_slot = random.choice(valid_parts) if valid_parts else 'core'
+                    elif defender_entity.parts.get(hit_roll_result) and defender_entity.parts[
+                        hit_roll_result].status != 'destroyed':
+                        target_part_slot = hit_roll_result
+                    else:
+                        target_part_slot = 'core'
+                        log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
+            else:
+                target_part_slot = 'core'
+                log.append(f"> 攻击自动瞄准 [{defender_entity.name}] 的核心。")
+
+            # 结算攻击
+            attack_log, result, overflow_data, dice_roll_details = resolve_attack(
+                attacker_entity=attacker_entity,
+                defender_entity=defender_entity,
+                action=attack_action,
+                target_part_name=target_part_slot,
+                is_back_attack=back_attack,
+                chosen_effect=None,
+                skip_reroll_phase=False  # 允许玩家被AI攻击时重投
+            )
+            log.extend(attack_log)
+
+            if dice_roll_details:
+                game_state.add_visual_event(
+                    'dice_roll',
+                    attacker_name=attacker_entity.name,
+                    defender_name=defender_entity.name,
+                    action_name=attack_action.name,
+                    details=dice_roll_details
+                )
+
+            game_state.add_visual_event(
+                'attack_result',
+                defender_pos=defender_entity.pos,
+                result_text=result
+            )
+
+            # 处理中断：重投
+            if result == "reroll_choice_required":
+                if isinstance(defender_entity, Mech):  # 玩家机甲
+                    # [MODIFIED] Store remaining attacks inside the reroll data
+                    overflow_data['remaining_attacks'] = queued_attacks[
+                        i + 1:]  # Store remaining *serializable* attacks
+                    defender_entity.pending_reroll_data = overflow_data
+                    log.append(
+                        f"> [系统] AI 攻击队列已暂停，剩余 {len(overflow_data['remaining_attacks'])} 个动作待处理。")
+
+                result_data = {
+                    'action_required': 'select_reroll',
+                    'dice_details': dice_roll_details,
+                    'attacker_name': attacker_entity.name,
+                    'defender_name': defender_entity.name,
+                    'action_name': attack_action.name
+                }
+                game_state.add_visual_event('reroll_required', details=result_data)
+                game_ended_mid_turn = True
+                break  # Stop processing the *queued* attacks
+
+            game_is_over = game_state.check_game_over()
+            if game_is_over and game_state.game_over == 'ai_win':
+                log.append(f"> 玩家机甲已被摧毁！")
+                if game_state.game_mode == 'horde':
+                    log.append(f"> [生存模式] 最终击败数: {game_state.ai_defeat_count}")
+                game_ended_mid_turn = True
+                break  # Stop processing the *queued* attacks
+
+        if game_ended_mid_turn:
+            # A reroll was triggered *inside* the reroll handler.
+            # We must return the new result_data.
+            return game_state, log, None, result_data, None
+
+    # 9. 检查游戏是否结束 (original step 8)
+    game_is_over = game_state.check_game_over()
 
     return game_state, log, None, result_data, None
 
@@ -851,7 +996,7 @@ def handle_end_turn(game_state):
                     log.extend(entity_log)
 
                     # 结算此 AI 机甲的攻击
-                    for attack in attacks:
+                    for i, attack in enumerate(attacks):  # [MODIFIED] Add enumerate
                         if game_ended_mid_turn:
                             log.append(
                                 f"> [结算] 攻击 {attack.get('action').name if attack.get('action') else ''} 被暂停，等待玩家重投。")
@@ -957,7 +1102,23 @@ def handle_end_turn(game_state):
                         # 处理中断：重投
                         if result == "reroll_choice_required":
                             if isinstance(defender_entity, Mech):  # 玩家机甲
+                                # [MODIFIED] Store remaining attacks inside the reroll data
+
+                                # [NEW - FIX] Serialize the remaining attacks to prevent recursion
+                                remaining_attacks_serializable = []
+                                for atk in attacks[i + 1:]:
+                                    remaining_attacks_serializable.append({
+                                        'attacker_id': atk['attacker'].id,
+                                        'defender_id': atk['defender'].id,
+                                        'action_dict': atk['action'].to_dict()
+                                    })
+
+                                overflow_data[
+                                    'remaining_attacks'] = remaining_attacks_serializable  # Store serializable list
                                 defender_entity.pending_reroll_data = overflow_data
+                                log.append(
+                                    f"> [系统] AI 攻击队列已暂停，剩余 {len(overflow_data['remaining_attacks'])} 个动作待处理。")
+
                             result_data = {
                                 'action_required': 'select_reroll',
                                 'dice_details': dice_roll_details,
@@ -967,7 +1128,7 @@ def handle_end_turn(game_state):
                             }
                             game_state.add_visual_event('reroll_required', details=result_data)
                             game_ended_mid_turn = True
-                            break  # 停止结算此AI的后续攻击
+                            break  # [MODIFIED] Re-add the break, it's correct now
 
                         game_is_over = game_state.check_game_over()
                         if game_is_over and game_state.game_over == 'ai_win':
@@ -1019,7 +1180,7 @@ def handle_run_projectile_phase(game_state):
             log.extend(entity_log)
 
             # 结算此抛射物的攻击
-            for attack in attacks:
+            for i, attack in enumerate(attacks):  # [MODIFIED] Add enumerate
                 if game_ended_mid_turn:
                     log.append(
                         f"> [结算] 攻击 {attack.get('action').name if attack.get('action') else ''} 被暂停，等待玩家重投。")
@@ -1102,7 +1263,22 @@ def handle_run_projectile_phase(game_state):
                 if result == "reroll_choice_required":
                     player_mech = game_state.get_player_mech()
                     if player_mech:
+                        # [MODIFIED] Store remaining attacks inside the reroll data
+
+                        # [NEW - FIX] Serialize the remaining attacks
+                        remaining_attacks_serializable = []
+                        for atk in attacks[i + 1:]:
+                            remaining_attacks_serializable.append({
+                                'attacker_id': atk['attacker'].id,
+                                'defender_id': atk['defender'].id,
+                                'action_dict': atk['action'].to_dict()
+                            })
+
+                        overflow_data['remaining_attacks'] = remaining_attacks_serializable  # Store serializable list
                         player_mech.pending_reroll_data = overflow_data
+                        log.append(
+                            f"> [系统] 抛射物攻击队列已暂停，剩余 {len(overflow_data['remaining_attacks'])} 个动作待处理。")
+
                     result_data = {
                         'action_required': 'select_reroll',
                         'dice_details': dice_roll_details,

@@ -502,6 +502,7 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
     log.append(f"  > 攻击方投掷结果 (处理后): {attack_roll or '无'}")
     hits = attack_roll.get('轻击', 0)
     crits = attack_roll.get('重击', 0)
+    attack_lightning = attack_roll.get('闪电', 0)  # [新增] 震撼效果
 
     # 3. 投掷受击骰
     white_dice_count = target_part.structure if original_status == 'damaged' else target_part.armor
@@ -541,6 +542,7 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
     )
     dice_roll_details['defense_dice_result'] = processed_defense_rolls  # [修改] 发送处理后的分组结果
 
+    # defense_lightning = defense_roll.get('闪电', 0) # [REMOVED] 震撼效果不再使用此
     log.append(
         f"  > 防御方 (基于{log_dice_source}) 投掷 {white_dice_count}白 {blue_dice_count}蓝, 结果 (处理后): {defense_roll or '无'}")
 
@@ -598,17 +600,57 @@ def resolve_attack(attacker_entity, defender_entity, action, target_part_name, i
 
     # 5. 结算伤害
     defenses = defense_roll.get('防御', 0)
-    dodges = defense_roll.get('闪避', 0)
+    dodges = defense_roll.get('闪避', 0)  # 初始闪避
+
     cancelled_hits = min(hits, defenses)
     hits -= cancelled_hits
     log.append(f"  > {cancelled_hits}个[防御]抵消了{cancelled_hits}个[轻击]。")
+
     cancelled_crits = min(crits, dodges)
     crits -= cancelled_crits
-    dodges -= cancelled_crits
+    dodges -= cancelled_crits  # 闪避在抵消重击后剩余
+
     cancelled_hits_by_dodge = min(hits, dodges)
     hits -= cancelled_hits_by_dodge
+    dodges -= cancelled_hits_by_dodge  # 闪避在抵消轻击后剩余
+
     log.append(
-        f"  > {dodges + cancelled_crits}个[闪避]抵消了{cancelled_crits}个[重击]和{cancelled_hits_by_dodge}个[轻击]。")
+        f"  > {defense_roll.get('闪避', 0)}个[闪避]抵消了{cancelled_crits}个[重击]和{cancelled_hits_by_dodge}个[轻击]。")  # [MODIFIED] 记录原始闪避数
+
+    # [新增] 5.1 结算【震撼】效果 (来自用户请求)
+    has_shock = action.effects.get("shock", False)
+
+    # 仅当攻击方投出闪电时才触发
+    if has_shock and attack_lightning > 0:
+        log.append(f"  > 动作效果【震撼】触发！")
+        log.append(f"  > 攻击方投出 {attack_lightning} [闪电]。")
+
+        # [MODIFIED] 使用最终剩余的闪避来抵消闪电
+        cancelled_lightning = min(attack_lightning, dodges)
+        net_lightning = max(0, attack_lightning - cancelled_lightning)
+
+        if cancelled_lightning > 0:
+            log.append(f"  > {cancelled_lightning} 个剩余[闪避]抵消了 {cancelled_lightning} [闪电]。")
+            dodges -= cancelled_lightning  # 更新剩余闪避（虽然现在没用了，但保持一致）
+
+        if net_lightning > 0:
+            # 检查目标是否是机甲、有驾驶员、有链接值
+            if is_mech_defender and defender_entity.pilot and defender_entity.pilot.link_points > 0:
+                link_loss = min(defender_entity.pilot.link_points, net_lightning)
+                defender_entity.pilot.link_points -= link_loss
+                log.append(
+                    f"  > {link_loss} 点净[闪电]使驾驶员 [{defender_entity.pilot.name}] 失去 {link_loss} 点链接值 (剩余: {defender_entity.pilot.link_points})！")
+
+                # [新规则：宕机检查]
+                if defender_entity.pilot.link_points <= 0 and defender_entity.stance != 'downed':
+                    defender_entity.stance = 'downed'
+                    log.append(f"  > 驾驶员链接值归零！机甲 [{defender_entity.name}] 进入 [宕机姿态]！")
+            elif is_mech_defender:
+                log.append(f"  > 目标驾驶员没有链接值，【震撼】无效。")
+            else:
+                log.append(f"  > 目标不是机甲，【震撼】无效。")
+        else:
+            log.append(f"  > 所有[闪电]均被[闪避]抵消，【震撼】无效。")
 
     # 6. 判断结果
     final_damage = hits + crits
