@@ -411,7 +411,7 @@ PLAYER_BACKPACKS = {
     'LGP-80 长程火炮': Part(name='LGP-80 长程火炮', armor=3, structure=0, evasion=-2,
                                     actions=[ACTION_DIANSHE_HUOPAO],
                            image_url='static/images/parts/LGP-80.png'),
-    'ML-94 四联导弹包': Part(name='ML-94 四联导弹包', armor=3, structure=0, evasion=-2,
+    'ML-94 四联导弹包': Part(name='ML-94 四联导弹包', armor=3, structure=0, evasion=0,
                                     actions=[ACTION_LAUNCH_GUIDED_MISSILE_K],
                            image_url='static/images/parts/ML-94.png'),
 }

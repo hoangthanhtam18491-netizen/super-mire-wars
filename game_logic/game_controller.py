@@ -843,3 +843,250 @@ def handle_resolve_reroll(game_state, player_mech, data):
 
     return game_state, log, result_data, None
 
+
+# [v2.3] 统一的攻击结算函数 (从 combat_system.py 移动而来)
+# [MODIFIED] 这是 v2.3 中的新函数, 旧的 resolve_attack 仅由 game_routes.py 调用
+def resolve_full_attack_sequence(game_state, attacker_entity, defender_entity, action,
+                                 target_part_name=None, is_back_attack_override=None,
+                                 chosen_effect=None, skip_reroll_phase=False,
+                                 rerolled_attack_raw=None, rerolled_defense_raw=None,
+                                 is_interception_attack=False):
+    """
+    (v2.3) 统一函数，处理任何攻击的完整结算流程。
+    包括：部位判定、调用 combat_system.resolve_attack、处理重投/效果中断。
+    返回: (game_state, log, result_data_for_frontend, result_string, dice_roll_details)
+    """
+    log = []
+    result_data = None
+    result_text = "无效"
+    dice_roll_details = {}  # 确保 dice_roll_details 总被定义
+
+    attacker_name = attacker_entity.name
+    defender_name = defender_entity.name
+    is_mech_defender = isinstance(defender_entity, Mech)
+    is_mech_attacker = isinstance(attacker_entity, Mech)
+
+    # --- 1. 确定目标部件 (target_part_slot) ---
+    target_part = None
+    back_attack = False  # 默认非背击
+
+    if target_part_name:
+        # 如果已指定部件 (例如来自玩家的“狙击”选择或 AI 的决策)
+        target_part = defender_entity.get_part_by_name(target_part_name)
+        log.append(f"> 攻击方指定命中部位: [{target_part_name}]。")
+    else:
+        # --- 自动目标判定 ---
+        if is_mech_defender:
+            # 检查背击
+            if is_mech_attacker:  # 只有机甲能执行背击
+                back_attack = is_back_attack(attacker_entity.pos, defender_entity.pos, defender_entity.orientation)
+
+            # [新规则：宕机检查]
+            defender_is_downed = (defender_entity.stance == 'downed')
+
+            if is_back_attack_override or back_attack or defender_is_downed:
+                # 攻击方是玩家，且触发了“任意选择”
+                if attacker_entity.controller == 'player':
+                    log_msg = ""
+                    if back_attack:
+                        log_msg = "> [背击] 玩家获得任意选择权！请选择目标部位。"
+                    elif defender_is_downed:
+                        log_msg = "> [目标宕机] 玩家获得任意选择权！请选择目标部位。"
+                    else:
+                        log_msg = "> [效果] 玩家获得任意选择权！请选择目标部位。"  # e.g. Sniper
+                    log.append(log_msg)
+                    result_data = {'action_required': 'select_part'}
+                    return game_state, log, result_data, "select_part", dice_roll_details
+
+                # 攻击方是 AI，且触发了“任意选择”
+                elif attacker_entity.controller == 'ai':
+                    log_msg = ""
+                    if back_attack:
+                        log_msg = "> [背击] AI 获得任意选择权！"
+                    elif defender_is_downed:
+                        log_msg = "> [目标宕机] AI 获得任意选择权！"
+                    else:
+                        log_msg = "> [效果] AI 获得任意选择权！"
+                    log.append(log_msg)
+
+                    damaged_parts = [s for s, p in defender_entity.parts.items() if p and p.status == 'damaged']
+                    if damaged_parts:
+                        target_part_name = random.choice(damaged_parts)
+                        log.append(f"> AI 优先攻击已受损部件: [{target_part_name}]。")
+                    elif defender_entity.parts.get('core') and defender_entity.parts['core'].status != 'destroyed':
+                        target_part_name = 'core'
+                        log.append(f"> AI 决定攻击 [核心]。")
+                    else:
+                        valid_parts = [s for s, p in defender_entity.parts.items() if p and p.status != 'destroyed']
+                        target_part_name = random.choice(valid_parts) if valid_parts else 'core'
+
+            # 正常：非背击，非狙击
+            else:
+                # 检查招架 (仅近战, 且防御方未宕机)
+                if action.action_type == '近战' and defender_entity.stance != 'downed':
+                    parry_parts = [(s, p) for s, p in defender_entity.parts.items() if
+                                   p and p.parry > 0 and p.status != 'destroyed']
+                    if parry_parts:
+                        # [MODIFIED] 玩家作为防御方时，*不* 自动招架，而是让玩家选择（如果规则支持）
+                        # 目前规则：AI 自动招架，玩家（作为防御方）也自动招架
+                        target_part_name, best_parry_part = max(parry_parts, key=lambda item: item[1].parry)
+                        controller_name = "玩家" if defender_entity.controller == 'player' else "AI"
+                        log.append(f"> {controller_name} 决定用 [{best_parry_part.name}] 进行招架！")
+
+                # 掷部位骰
+                if not target_part_name:
+                    hit_roll_result = roll_black_die()
+                    log.append(f"> 投掷部位骰结果: 【{hit_roll_result}】")
+                    if hit_roll_result == 'any':
+                        # 玩家掷出了 'any'
+                        if attacker_entity.controller == 'player':
+                            log.append("> 玩家获得任意选择权！请选择目标部位。")
+                            result_data = {'action_required': 'select_part'}
+                            return game_state, log, result_data, "select_part", dice_roll_details
+                        # AI 掷出了 'any'
+                        else:
+                            log.append("> AI 获得任意选择权！")
+                            damaged_parts = [s for s, p in defender_entity.parts.items() if p and p.status == 'damaged']
+                            if damaged_parts:
+                                target_part_name = random.choice(damaged_parts)
+                                log.append(f"> AI 优先攻击已受损部件: [{target_part_name}]。")
+                            else:
+                                valid_parts = [s for s, p in defender_entity.parts.items() if
+                                               p and p.status != 'destroyed']
+                                target_part_name = random.choice(valid_parts) if valid_parts else 'core'
+
+                    # 掷出了特定部位
+                    elif defender_entity.parts.get(hit_roll_result) and defender_entity.parts[
+                        hit_roll_result].status != 'destroyed':
+                        target_part_name = hit_roll_result
+                    else:
+                        target_part_name = 'core'
+                        log.append(f"> 部位 [{hit_roll_result}] 不存在或已摧毁，转而命中 [核心]。")
+
+        # 目标非机甲 (抛射物, 无人机)
+        else:
+            target_part_name = 'core'
+            log.append(f"> 攻击自动瞄准 [{defender_entity.name}] 的核心。")
+
+    # --- 1.5 验证最终部件 ---
+    if not target_part_name:
+        log.append(f"> [严重错误] 未能确定目标部件！攻击中止。")
+        return game_state, log, None, "无效", dice_roll_details
+
+    # --- 2. [BUG FIX] 在 combat_system.resolve_attack 之前获取部件 ---
+    target_part = defender_entity.get_part_by_name(target_part_name)
+    if not target_part:
+        log.append(f"> [严重错误] 找不到部件 '{target_part_name}'。")
+        return game_state, log, None, "无效", dice_roll_details
+    original_status = target_part.status
+
+    # --- 3. [BUG FIX] 计算防御骰 (这是 BUG 所在) ---
+    white_dice_count = target_part.structure if original_status == 'damaged' else target_part.armor
+    log_dice_source = "结构值" if original_status == 'damaged' else "装甲值"
+
+    # [v_REFACTOR_FIX] 修复蓝骰子BUG
+    blue_dice_count = defender_entity.get_total_evasion() if defender_entity.stance == 'agile' else 0
+
+    if action.effects:
+        ap_value = action.effects.get("armor_piercing", 0)
+        if ap_value > 0 and original_status != 'damaged':
+            log.append(f"  > 动作效果【穿甲{ap_value}】触发！")
+            original_dice = white_dice_count
+            white_dice_count = max(0, white_dice_count - ap_value)
+            log.append(f"  > 受击方白骰 (来自{log_dice_source}) 从 {original_dice} 减少为 {white_dice_count}。")
+        elif ap_value > 0 and original_status == 'damaged':
+            log.append(f"  > 动作效果【穿甲{ap_value}】触发！但目标已破损，穿甲对结构值无效。")
+
+    # [新规则：宕机检查]
+    if is_mech_defender and action.action_type == '近战' and target_part.parry > 0 and not back_attack and defender_entity.stance != 'downed':
+        white_dice_count += target_part.parry
+        log.append(f"  > [招架] 额外增加 {target_part.parry} 个白骰 (总计 {white_dice_count} 白)。")
+
+    # --- 4. 调用核心结算 (combat_system) ---
+    # [MODIFIED] v2.3 不再需要在这里计算骰子，resolve_attack 会处理
+    # [MODIFIED] combat_system.resolve_attack 现在返回 (log, result_text, overflow_data, dice_roll_details)
+    attack_log, result_text, overflow_data, dice_roll_details = resolve_attack(
+        attacker_entity=attacker_entity,
+        defender_entity=defender_entity,
+        action=action,
+        target_part_name=target_part_name,
+        is_back_attack=back_attack,
+        chosen_effect=chosen_effect,
+        skip_reroll_phase=skip_reroll_phase,
+        rerolled_attack_raw=rerolled_attack_raw,
+        rerolled_defense_raw=rerolled_defense_raw,
+        is_interception_attack=is_interception_attack
+    )
+    log.extend(attack_log)
+
+    # --- 5. 处理中断 (重投或效果选择) ---
+
+    # 5.A 重投中断
+    if result_text == "reroll_choice_required":
+        # 'overflow_data' 此时包含 pending_reroll_data
+        # 我们需要在 *能* 重投的实体上设置 pending_reroll_data
+
+        # 玩家是攻击方
+        if overflow_data['player_is_attacker']:
+            if isinstance(attacker_entity, Mech):
+                attacker_entity.pending_reroll_data = overflow_data
+
+        # 玩家是防御方 (可能是 AI 攻击，也可能是玩家的抛射物在 '立即' 阶段命中了自己)
+        if overflow_data['player_is_defender']:
+            if isinstance(defender_entity, Mech):
+                defender_entity.pending_reroll_data = overflow_data
+
+        # 准备前端所需的数据
+        result_data = {
+            'action_required': 'select_reroll',
+            'dice_details': dice_roll_details,
+            'attacker_name': attacker_name,
+            'defender_name': defender_name,
+            'action_name': action.name
+        }
+        game_state.add_visual_event('reroll_required', details=result_data)
+
+        return game_state, log, result_data, result_text, dice_roll_details
+
+    # 5.B 效果选择中断
+    if result_text == "effect_choice_required":
+        # 'overflow_data' 此时包含效果选择所需的数据
+        if isinstance(attacker_entity, Mech):
+            attacker_entity.pending_effect_data = {
+                'action_dict': action.to_dict(),
+                'overflow_data': {'hits': overflow_data['hits'], 'crits': overflow_data['crits']},
+                'options': overflow_data['options'],
+                'target_entity_id': defender_entity.id,
+                'target_part_name': target_part_name,
+                'is_back_attack': back_attack,
+                'choice': None
+            }
+            result_data = {'action_required': 'select_effect', 'options': overflow_data['options']}
+            game_state.add_visual_event('effect_choice_required', details=result_data)
+
+            return game_state, log, result_data, result_text, dice_roll_details
+        else:
+            # 抛射物或无人机不能选择效果，此路径不应发生
+            log.append(f"> [错误] {attacker_entity.entity_type} 触发了效果选择，但无法处理。")
+
+    # --- 6. 攻击未中断 (正常结算) ---
+
+    # [v_REROLL_FIX] 只有在未中断时才添加默认的视觉事件
+    if dice_roll_details:
+        game_state.add_visual_event(
+            'dice_roll',
+            attacker_name=attacker_name,
+            defender_name=defender_name,
+            action_name=action.name,
+            details=dice_roll_details
+        )
+
+    # [MODIFIED] v2.3 只有在非重投中断时才添加 attack_result 事件
+    # (因为 effect_choice_required 也算一次攻击命中)
+    if result_text in ["击穿", "无效"]:
+        game_state.add_visual_event('attack_result', defender_pos=defender_entity.pos, result_text=result_text)
+
+    # 检查游戏是否结束
+    game_state.check_game_over()
+
+    return game_state, log, None, result_text, dice_roll_details
