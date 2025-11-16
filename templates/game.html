@@ -382,6 +382,61 @@
             color: var(--disabled-color);
             font-size: 0.8rem;
         }
+
+        /* [新增] 标签页按钮样式 */
+        .tab-buttons {
+            display: flex;
+            margin-top: 1rem;
+            border-bottom: 2px solid var(--border-color);
+            /* [修改] 移除 gap，让按钮靠在一起 */
+        }
+        .tab-button {
+            flex: 1;
+            padding: 0.75rem 0.5rem;
+            background-color: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--disabled-color);
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            margin-bottom: -2px; /* 让激活的边框覆盖父元素的边框 */
+            transition: all 0.2s ease-in-out;
+        }
+        .tab-button.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+        .tab-button:hover:not(.active) {
+            color: var(--text-color);
+            background-color: var(--bg-color);
+        }
+        /* [新增] 标签页内容面板样式 */
+        .tab-panel {
+            padding-top: 1.5rem; /* 在标签页和内容之间添加一些间距 */
+            /* [修改] 移除 gap，因为 gap 是在 .sidebar 上设置的 */
+        }
+
+        /* [新增] 动作列表滚动条 */
+        #main-action-list-wrapper {
+            /* [MODIFIED] 调整高度以适应约4个项目 */
+            max-height: 12rem; /* <--- 这就是修改的地方 */
+            overflow-y: auto;  /* 如果内容超出，显示垂直滚动条 */
+            padding-right: 0.5rem; /* 为滚动条腾出一点空间 */
+            margin-right: -0.5rem; /* 抵消 padding */
+        }
+        /* [新增] 自定义滚动条样式 (美观) */
+        #main-action-list-wrapper::-webkit-scrollbar {
+            width: 8px;
+        }
+        #main-action-list-wrapper::-webkit-scrollbar-thumb {
+            background-color: var(--border-color);
+            border-radius: 4px;
+        }
+        #main-action-list-wrapper::-webkit-scrollbar-track {
+            background-color: var(--bg-color);
+        }
+
     </style>
 </head>
 <body>
@@ -394,7 +449,10 @@
     {% set ai_mech = game.get_ai_mech() %}
 
     <!-- [顶部栏] -->
+    <!-- [MODIFIED] 侧边栏结构调整 -->
     <div class="sidebar panel">
+
+        <!-- === 1. 顶部固定区 (始终可见) === -->
         <h4>玩家机甲</h4>
         {% if game_mode == 'horde' %}
         <div style="text-align: center; font-size: 1.5rem; color: var(--phase-color);">
@@ -404,106 +462,143 @@
 
         {% if player_mech %}
 
-        <!-- [新规则：宕机显示] -->
-        {% if player_mech.stance == 'downed' %}
-        <div class="phase-indicator" style="color: var(--status-destroyed); border-color: var(--status-destroyed); background-color: #4a2121;">
-            系统宕机！
-        </div>
-        {% else %}
-        <div class="phase-indicator">阶段: {{ {'timing': '1. 选择时机', 'stance': '2. 选择姿态', 'adjustment': '3. 调整阶段', 'main': '4. 执行动作'}[player_mech.turn_phase] }}</div>
-        {% endif %}
-        <!-- [修改结束] -->
-
-        {% if player_mech.pending_effect_data %}
-        <div id="pending-effect-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
-            待处理：请选择效果
-        </div>
-        {% endif %}
-        <!-- [v_REROLL] 新增重投警告 -->
-        {% if player_mech.pending_reroll_data %}
-        <div id="pending-reroll-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
-            待处理：请解决重投
-        </div>
-        {% endif %}
-
-
-        <!-- [MODIFIED v2.2] 驾驶员信息 -->
-        <div id="player-pilot-info" class="bg-gray-900 p-3 rounded-lg border border-blue-500">
-            {% if player_pilot %}
-                <h5 class="font-bold text-lg text-blue-300">{{ player_pilot.name }}</h5>
-                <p class="text-sm">链接值: <span class="font-bold text-white">{{ player_pilot.link_points }}</span></p>
-                <div class="text-xs grid grid-cols-2 gap-x-2 mt-1 text-gray-400">
-                    {% for stat_name, value in player_pilot.speed_stats.items() %}
-                    <span>{{ stat_name }}: {{ value }}</span>
-                    {% endfor %}
-                </div>
+            <!-- [新规则：宕机显示] -->
+            {% if player_mech.stance == 'downed' %}
+            <div class="phase-indicator" style="color: var(--status-destroyed); border-color: var(--status-destroyed); background-color: #4a2121;">
+                系统宕机！
+            </div>
             {% else %}
-                <h5 class="font-bold text-lg text-gray-500">无驾驶员</h5>
+            <div class="phase-indicator">阶段: {{ {'timing': '1. 选择时机', 'stance': '2. 选择姿态', 'adjustment': '3. 调整阶段', 'main': '4. 执行动作'}[player_mech.turn_phase] }}</div>
             {% endif %}
-        </div>
+            <!-- [修改结束] -->
 
-        <div style="display: flex; justify-content: space-around; text-align: center;">
-            <div><div>行动时点 (AP)</div><div style="font-size: 2rem; font-weight: bold;">{{ player_mech.player_ap }}</div></div>
-            <div><div>调整时点 (TP)</div><div style="font-size: 2rem; font-weight: bold;">{{ player_mech.player_tp }}</div></div>
-        </div>
-        <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
-            <tbody>
-                {% for slot, part in player_mech.parts.items() %}
-                <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
-                <tr style="cursor: pointer;" data-controller="player" data-part-slot="{{ slot }}">
-                    <td>{{ slot }}</td>
-                    <td>{{ part.name if part else 'N/A' }}</td>
-                    <td class="status-{{ part.status if part else 'destroyed' }}">{{ part.status if part else 'destroyed' }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        <!-- [MODIFIED] 移除 onclick, 添加 ID -->
-        <div id="phase-timing-controls"><h4>选择时机</h4><div class="selector-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"><button id="timing-近战">近战</button><button id="timing-射击">射击</button><button id="timing-移动">移动</button><button id="timing-抛射">抛射</button><button id="timing-快速" style="grid-column: span 2;">快速</button></div><button class="btn" id="confirm-timing-btn" style="margin-top: 1rem; background-color: var(--primary-color);">确认时机</button></div>
-        <div id="phase-stance-controls"><h4>姿态选择</h4><div class="selector-group" style="display: flex;"><button id="stance-defense" class="{{ 'active' if player_mech.stance == 'defense' else '' }}">防御</button><button id="stance-agile" class="{{ 'active' if player_mech.stance == 'agile' else '' }}">机动</button><button id="stance-attack" class="{{ 'active' if player_mech.stance == 'attack' else '' }}">攻击</button></div><button class="btn" id="confirm-stance-btn" style="margin-top: 1rem; background-color: var(--primary-color);">确认姿态</button></div>
-        <div id="phase-adjustment-controls"><h4>调整时点动作 (TP)</h4><div id="action-adjust-move" class="action-item"><span>调整移动</span><span class="action-cost">1 TP</span></div><div id="action-change-orientation" class="action-item"><span>仅转向</span><span class="action-cost">1 TP</span></div><button class="btn" id="skip-adjustment-btn" style="margin-top: 1rem;">跳过调整</button></div>
-        <div id="phase-main-controls"><h4>行动时点动作 (AP)</h4>
-            {% for action, part_slot in player_mech.get_all_actions() %}
-            {% if action.action_type != '被动' %}
-            {% set action_id = (part_slot, action.name) %}
-            <!-- [BUG 修复] JSON 序列化/反序列化会将 tuple 变为 list。
-                 Jinja 在比较时需要匹配类型，所以我们将 (str, str) 元组转换为 [str, str] 列表。 -->
-            {% set action_id_list = [part_slot, action.name] %}
-            {% set is_used = action_id_list in player_actions_used %}
-            {% set ammo_key = (player_mech.id, part_slot, action.name) %}
-            {% set current_ammo = game.ammo_counts.get(ammo_key, 0) %}
-            {% set out_of_ammo = (action.ammo > 0 and current_ammo <= 0) %}
-            <!-- [MODIFIED] 弃置动作的特殊处理 -->
-            {% set is_jettison = action.name == '【弃置】' %}
-            <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
-            <div class="action-item {{ 'disabled' if is_used or out_of_ammo else '' }}"
-                 id="action-{{ action.name }}-{{ part_slot }}"
-                 data-action-name="{{ action.name }}"
-                 data-action-range="{{ action.range_val }}"
-                 data-action-type="{{ action.action_type }}"
-                 data-action-cost="{{ action.cost }}"
-                 data-part-slot="{{ part_slot }}"
-                 data-is-jettison="{{ 'true' if is_jettison else 'false' }}"
-                 title="{{ '本回合已使用' if is_used else ('弹药耗尽' if out_of_ammo else '') }}">
-                <span>
-                    {{ action.name }} ({{ part_slot }})
-                    {% if action.ammo > 0 %}
-                        <span style="color: var(--phase-color); font-size: 0.8rem;"> [{{ current_ammo }}/{{ action.ammo }}]</span>
-                    {% endif %}
-                </span>
-                {% if action.cost == 'L' %}
-                    <span class="action-cost">2 AP + 1 TP</span>
-                {% else %}
-                    <span class="action-cost">{{ action.cost.count('M')*2 + action.cost.count('S')*1 }} AP</span>
-                {% endif %}
+            {% if player_mech.pending_effect_data %}
+            <div id="pending-effect-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
+                待处理：请选择效果
             </div>
             {% endif %}
-            {% endfor %}
+            <!-- [v_REROLL] 新增重投警告 -->
+            {% if player_mech.pending_reroll_data %}
+            <div id="pending-reroll-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
+                待处理：请解决重投
+            </div>
+            {% endif %}
+
+
+            <!-- [MODIFIED v2.2] 驾驶员信息 -->
+            <div id="player-pilot-info" class="bg-gray-900 p-3 rounded-lg border border-blue-500">
+                {% if player_pilot %}
+                    <h5 class="font-bold text-lg text-blue-300">{{ player_pilot.name }}</h5>
+                    <p class="text-sm">链接值: <span class="font-bold text-white">{{ player_pilot.link_points }}</span></p>
+                    <div class="text-xs grid grid-cols-2 gap-x-2 mt-1 text-gray-400">
+                        {% for stat_name, value in player_pilot.speed_stats.items() %}
+                        <span>{{ stat_name }}: {{ value }}</span>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <h5 class="font-bold text-lg text-gray-500">无驾驶员</h5>
+                {% endif %}
+            </div>
+
+            <div style="display: flex; justify-content: space-around; text-align: center;">
+                <div><div style="font-size: 0.875rem; color: var(--disabled-color);">行动时点 (AP)</div><div style="font-size: 1.75rem; font-weight: bold;">{{ player_mech.player_ap }}</div></div>
+                <div><div style="font-size: 0.875rem; color: var(--disabled-color);">调整时点 (TP)</div><div style="font-size: 1.75rem; font-weight: bold;">{{ player_mech.player_tp }}</div></div>
+            </div>
+
+        <!-- === 2. 标签页按钮区 (新) === -->
+        <div class="tab-buttons">
+            <button id="tab-btn-actions" class="tab-button active">
+                动作
+            </button>
+            <button id="tab-btn-status" class="tab-button">
+                状态
+            </button>
         </div>
+
+        <!-- === 3. 标签页内容区 (新) === -->
+
+        <!-- 动作面板 (默认显示) -->
+        <div id="tab-panel-actions" class="tab-panel">
+            <!-- [MODIFIED] 将所有 phase-controls 移到这里 -->
+            <div id="phase-timing-controls"><h4>选择时机</h4><div class="selector-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"><button id="timing-近战">近战</button><button id="timing-射击">射击</button><button id="timing-移动">移动</button><button id="timing-抛射">抛射</button><button id="timing-快速" style="grid-column: span 2;">快速</button></div><button class="btn" id="confirm-timing-btn" style="margin-top: 1rem; background-color: var(--primary-color);">确认时机</button></div>
+            <div id="phase-stance-controls"><h4>姿态选择</h4><div class="selector-group" style="display: flex;"><button id="stance-defense" class="{{ 'active' if player_mech.stance == 'defense' else '' }}">防御</button><button id="stance-agile" class="{{ 'active' if player_mech.stance == 'agile' else '' }}">机动</button><button id="stance-attack" class="{{ 'active' if player_mech.stance == 'attack' else '' }}">攻击</button></div><button class="btn" id="confirm-stance-btn" style="margin-top: 1rem; background-color: var(--primary-color);">确认姿态</button></div>
+            <div id="phase-adjustment-controls"><h4>调整时点动作 (TP)</h4><div id="action-adjust-move" class="action-item"><span>调整移动</span><span class="action-cost">1 TP</span></div><div id="action-change-orientation" class="action-item"><span>仅转向</span><span class="action-cost">1 TP</span></div><button class="btn" id="skip-adjustment-btn" style="margin-top: 1rem;">跳过调整</button></div>
+
+            <!-- [MODIFIED] 主动作面板 -->
+            <div id="phase-main-controls">
+                <h4>行动时点动作 (AP)</h4>
+
+                <!-- [NEW] 新增的包裹容器，用于实现滚动条 -->
+                <div id="main-action-list-wrapper">
+
+                    {% for action, part_slot in player_mech.get_all_actions() %}
+                    {% if action.action_type != '被动' %}
+                    {% set action_id = (part_slot, action.name) %}
+                    <!-- [BUG 修复] JSON 序列化/反序列化会将 tuple 变为 list。
+                         Jinja 在比较时需要匹配类型，所以我们将 (str, str) 元组转换为 [str, str] 列表。 -->
+                    {% set action_id_list = [part_slot, action.name] %}
+                    {% set is_used = action_id_list in player_actions_used %}
+                    {% set ammo_key = (player_mech.id, part_slot, action.name) %}
+                    {% set current_ammo = game.ammo_counts.get(ammo_key, 0) %}
+                    {% set out_of_ammo = (action.ammo > 0 and current_ammo <= 0) %}
+                    <!-- [MODIFIED] 弃置动作的特殊处理 -->
+                    {% set is_jettison = action.name == '【弃置】' %}
+                    <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
+                    <div class="action-item {{ 'disabled' if is_used or out_of_ammo else '' }}"
+                         id="action-{{ action.name }}-{{ part_slot }}"
+                         data-action-name="{{ action.name }}"
+                         data-action-range="{{ action.range_val }}"
+                         data-action-type="{{ action.action_type }}"
+                         data-action-cost="{{ action.cost }}"
+                         data-part-slot="{{ part_slot }}"
+                         data-is-jettison="{{ 'true' if is_jettison else 'false' }}"
+                         title="{{ '本回合已使用' if is_used else ('弹药耗尽' if out_of_ammo else '') }}">
+                        <span>
+                            {{ action.name }} ({{ part_slot }})
+                            {% if action.ammo > 0 %}
+                                <span style="color: var(--phase-color); font-size: 0.8rem;"> [{{ current_ammo }}/{{ action.ammo }}]</span>
+                            {% endif %}
+                        </span>
+                        {% if action.cost == 'L' %}
+                            <span class="action-cost">2 AP + 1 TP</span>
+                        {% else %}
+                            <span class="action-cost">{{ action.cost.count('M')*2 + action.cost.count('S')*1 }} AP</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+
+                </div>
+                <!-- [NEW] 包裹容器结束 -->
+
+            </div>
+            <!-- [MODIFIED] 主动作面板结束 -->
+
+        </div>
+
+        <!-- 状态面板 (默认隐藏) -->
+        <div id="tab-panel-status" class="tab-panel" style="display: none;">
+            <!-- [MODIFIED] 将 <table> 移到这里 -->
+            <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
+                <tbody>
+                    {% for slot, part in player_mech.parts.items() %}
+                    <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
+                    <tr style="cursor: pointer;" data-controller="player" data-part-slot="{{ slot }}">
+                        <td>{{ slot }}</td>
+                        <td>{{ part.name if part else 'N/A' }}</td>
+                        <td class="status-{{ part.status if part else 'destroyed' }}">{{ part.status if part else 'destroyed' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
         {% else %}
+        <!-- 如果玩家机甲未加载 -->
         <div class="phase-indicator" style="color: var(--status-destroyed);">玩家机甲未加载</div>
         {% endif %}
 
+        <!-- === 4. 结束回合按钮 (始终可见) === -->
         <!-- [MODIFIED] 移除 onclick -->
         <form id="end-turn-form" action="{{ url_for('game.end_turn') }}" method="POST" style="display: none;"><button type="submit"></button></form>
         <button id="end-turn-btn" class="btn" style="background-color: #c53030;">结束回合</button>

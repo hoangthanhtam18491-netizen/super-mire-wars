@@ -51,6 +51,8 @@ const diceColorMap = {
 
 // 缓存 DOM 元素
 let partDetailModalBackdrop, partDetailTitle, partDetailImage, partDetailStatsContainer, partDetailStatsList, partDetailActionsList;
+// [MODIFIED] 缓存标签页元素
+let tabBtnActions, tabBtnStatus, tabPanelActions, tabPanelStatus;
 
 // --- 2. 核心函数 ---
 
@@ -218,6 +220,20 @@ function showGameOverModal(status) {
 function updateUIForPhase() {
     if (gameState.gameOver || !playerEntity || !playerEntity.turn_phase) return;
 
+    // --- [MODIFIED] 标签页切换逻辑 ---
+    // 在更新UI之前，检查是否需要强制切换到“动作”标签页
+    const currentPhase = gameState.turnPhase;
+    if (currentPhase === 'timing' || currentPhase === 'stance' ||
+        currentPhase === 'adjustment' || currentPhase === 'main') {
+
+        // 如果是动作阶段，并且“动作”标签页当前不是激活状态
+        if (tabBtnActions && !tabBtnActions.classList.contains('active')) {
+            // 模拟点击“动作”标签，这将触发事件监听器来显示正确的面板
+            tabBtnActions.click();
+        }
+    }
+    // --- 逻辑结束 ---
+
     if (playerEntity.stance === 'downed') {
         ['timing', 'stance', 'adjustment', 'main'].forEach(phase => {
             const el = document.getElementById(`phase-${phase}-controls`);
@@ -232,6 +248,7 @@ function updateUIForPhase() {
         return;
     }
 
+    // [MODIFIED] 这个显隐逻辑现在作用于 #tab-panel-actions 内部的 div
     ['timing', 'stance', 'adjustment', 'main'].forEach(phase => {
         const el = document.getElementById(`phase-${phase}-controls`);
         if (el) el.style.display = gameState.turnPhase === phase ? 'block' : 'none';
@@ -872,6 +889,12 @@ function closeDiceRollModal() {
 
 document.addEventListener('DOMContentLoaded', () => {
     // 初始化
+    // [MODIFIED] 缓存标签页元素
+    tabBtnActions = document.getElementById('tab-btn-actions');
+    tabBtnStatus = document.getElementById('tab-btn-status');
+    tabPanelActions = document.getElementById('tab-panel-actions');
+    tabPanelStatus = document.getElementById('tab-panel-status');
+
     updateUIForPhase();
     initializeBoardVisuals();
 
@@ -976,6 +999,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 绑定所有 UI 事件 ---
 
+    // [MODIFIED] 绑定标签页按钮
+    tabBtnActions.addEventListener('click', () => {
+        tabBtnActions.classList.add('active');
+        tabBtnStatus.classList.remove('active');
+        tabPanelActions.style.display = 'block';
+        tabPanelStatus.style.display = 'none';
+    });
+
+    tabBtnStatus.addEventListener('click', () => {
+        tabBtnStatus.classList.add('active');
+        tabBtnActions.classList.remove('active');
+        tabPanelStatus.style.display = 'block';
+        tabPanelActions.style.display = 'none';
+    });
+
     // 阶段 1: 时机
     document.getElementById('timing-近战')?.addEventListener('click', () => selectTiming('近战'));
     document.getElementById('timing-射击')?.addEventListener('click', () => selectTiming('射击'));
@@ -1050,7 +1088,14 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('part-detail-close-btn')?.addEventListener('click', closePartDetailModal);
     document.getElementById('part-detail-modal')?.addEventListener('click', (e) => e.stopPropagation());
 
-    document.querySelectorAll('tr[data-part-slot]').forEach(row => {
+    // [MODIFIED] 将部件详情的点击事件绑定移至 #tab-panel-status 内部的 tr
+    document.querySelectorAll('#tab-panel-status tr[data-part-slot]').forEach(row => {
+        row.addEventListener('click', () => {
+            showPartDetail(row.dataset.controller, row.dataset.partSlot);
+        });
+    });
+    // [MODIFIED] 也为 AI 侧边栏的 tr 添加绑定
+    document.querySelectorAll('.sidebar table tr[data-part-slot][data-controller="ai"]').forEach(row => {
         row.addEventListener('click', () => {
             showPartDetail(row.dataset.controller, row.dataset.partSlot);
         });
