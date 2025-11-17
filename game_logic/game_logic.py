@@ -2,20 +2,20 @@ import math
 import heapq
 import random
 
-# 导入数据模型
+# 基础数据模型
 from .data_models import (
     Mech, Part, Action, GameEntity, Projectile, Drone, Pilot
 )
-# 导入部件、抛射物和AI配置数据库
-# [MODIFIED] 从新的 game_logic.database 包导入
+# 数据库
 from .database import (
     ALL_PARTS, CORES, LEGS, LEFT_ARMS, RIGHT_ARMS, BACKPACKS,
     PROJECTILE_TEMPLATES,
     AI_LOADOUTS,
-    PLAYER_PILOTS, AI_PILOTS  # [MODIFIED v2.2] 导入驾驶员
+    PLAYER_PILOTS, AI_PILOTS
 )
-# 导入战斗结算系统（用于拦截）
-from .combat_system import resolve_attack
+
+
+# [阶段2重构] 移除了对 combat_system 的导入，因为它不再暴露全局函数
 
 
 # --- 核心辅助函数 ---
@@ -105,95 +105,12 @@ def get_ai_lock_status(game_state, ai_mech):
     return False, None
 
 
-# --- 拦截与抛射物逻辑 ---
-
-def check_interception(projectile, game_state, log):
-    """
-    检查是否有任何敌方单位可以拦截此抛射物（在它当前的位置）。
-    此函数会直接消耗弹药、调用 resolve_attack 并更新日志，
-    采用“逐发结算，失败重试”逻辑。
-    """
-    landing_pos = projectile.pos
-
-    # 按顺序检查拦截者
-    intercepting_entities = [
-        e for e in game_state.entities.values()
-        if e.controller != projectile.controller and e.entity_type == 'mech' and e.status != 'destroyed'
-    ]
-
-    # 遍历所有实体，寻找拦截者
-    for entity in intercepting_entities:
-        # 检查此抛射物是否已被摧毁
-        if projectile.status == 'destroyed':
-            log.append(f"> [拦截] {projectile.name} 已被摧毁，{entity.name} 取消拦截。")
-            break  # 停止检查其他拦截者
-
-        interceptor_actions = entity.get_interceptor_actions()
-        if not interceptor_actions:
-            continue  # 这个机甲没有拦截系统
-
-        # 遍历该机甲的所有拦截动作 (例如，如果它有2个AMS背包)
-        for intercept_action, part_slot in interceptor_actions:
-            # 再次检查抛射物状态
-            if projectile.status == 'destroyed':
-                log.append(f"> [拦截] {projectile.name} 已被摧毁，{entity.name} 的 [{intercept_action.name}] 取消拦截。")
-                break  # 停止检查此机甲的其他AMS
-
-            # 检查射程
-            intercept_range = intercept_action.range_val
-            dist_to_landing = _get_distance(entity.pos, landing_pos)
-
-            if dist_to_landing <= intercept_range:
-                # 检查弹药
-                ammo_key = (entity.id, part_slot, intercept_action.name)
-                current_ammo = game_state.ammo_counts.get(ammo_key, 0)
-
-                if current_ammo > 0:
-                    log.append(
-                        f"> [拦截] {entity.name} 的 [{intercept_action.name}] 侦测到 {projectile.name} (在 {landing_pos})！")
-                    log.append(f"> [拦截] 距离 {dist_to_landing}格 (范围 {intercept_range}格)。")
-
-                    shots_fired = 0
-                    # 循环，直到弹药耗尽或目标被摧毁
-                    while current_ammo > 0 and projectile.status != 'destroyed':
-                        shots_fired += 1
-                        log.append(
-                            f"> [拦截] {entity.name} 消耗 1 弹药 (剩余 {current_ammo - 1}) 尝试第 {shots_fired} 次拦截...")
-
-                        # 消耗弹药
-                        game_state.ammo_counts[ammo_key] -= 1
-                        current_ammo -= 1
-
-                        # 立即调用 resolve_attack，并传入 is_interception_attack=True 来禁用重投
-                        attack_log, result, overflow_data, dice_roll_details = resolve_attack(
-                            attacker_entity=entity,  # 拦截者是攻击方
-                            defender_entity=projectile,  # 抛射物是防御方
-                            action=intercept_action,
-                            target_part_name='core',  # 抛射物总是命中核心
-                            is_back_attack=False,
-                            chosen_effect=None,
-                            skip_reroll_phase=True,
-                            is_interception_attack=True  # 禁用重投
-                        )
-
-                        # 将拦截攻击的日志添加到主日志中
-                        log.extend(attack_log)
-
-                    if shots_fired > 0:
-                        if projectile.status == 'destroyed':
-                            log.append(f"> [拦截] {entity.name} 在第 {shots_fired} 次射击后成功摧毁 {projectile.name}！")
-                        elif current_ammo == 0:
-                            log.append(
-                                f"> [拦截] {entity.name} 弹药耗尽 ({shots_fired} 次射击)，{projectile.name} 仍存活。")
-                else:
-                    log.append(
-                        f"> [拦截] {entity.name} 侦测到 {projectile.name}，但 [{intercept_action.name}] 弹药耗尽。")
-    return
-
+# --- 抛射物逻辑 ---
 
 def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
     """
     为单个抛射物实体运行其逻辑，分为 '立即' (发射时) 或 '延迟' (AI回合结束时)。
+    [重构] 此函数现在只负责计算目标和移动，不再处理拦截或攻击。
     """
     log = []
     attacks_to_resolve = []
@@ -208,8 +125,7 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
     if timing_to_run == '立即':
         log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 立即执行 [{action_obj.name}]！")
 
-        # '立即' 动作在 *发射时* 检查拦截
-        check_interception(projectile, game_state, log)
+        # [重构] 拦截逻辑已移至 game_controller
 
         # 检查抛射物是否在拦截中存活
         if projectile.status == 'destroyed':
@@ -242,7 +158,7 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
 
         if not closest_enemy:
             log.append(f"> [抛射物] {projectile.name} 未找到敌方目标，自我销毁。")
-            projectile.status = 'destroyed'
+            projectile.status = 'destroyed'  # 状态修改
             return log, attacks_to_resolve
 
         log.append(f"> [抛射物] 锁定最近的目标: {closest_enemy.name} (在 {closest_enemy.pos})。")
@@ -266,22 +182,26 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
                 if dist_to_target < min_dist_after_move:
                     min_dist_after_move = dist_to_target
                     best_landing_spot = pos
+                elif dist_to_target == min_dist_after_move:
+                    # 偏好更接近起点的移动 (如果距离相同)
+                    if _get_distance(pos, projectile.pos) < _get_distance(best_landing_spot, projectile.pos):
+                        best_landing_spot = pos
 
                 # 如果能直接命中（距离为0），就采用
                 if min_dist_after_move == 0:
+                    best_landing_spot = pos
                     break
 
             if best_landing_spot:
                 best_pos = best_landing_spot
                 projectile.last_pos = projectile.pos
-                projectile.pos = best_pos
+                projectile.pos = best_pos  # 状态修改
                 log.append(
                     f"> [抛射物] {projectile.name} 【空中移动】 {move_range} 格到 {best_pos} (距离目标 {min_dist_after_move} 格)。")
             else:
                 log.append(f"> [抛射物] {projectile.name} 无法找到更近的位置，停留在 {projectile.pos}。")
 
-        # 4. 在移动后检查拦截
-        check_interception(projectile, game_state, log)
+        # 4. [重构] 拦截逻辑已移至 game_controller
 
         # 5. 检查抛射物是否在拦截中存活
         if projectile.status == 'destroyed':
@@ -334,18 +254,14 @@ def create_mech_from_selection(name, selection, entity_id, controller, pilot_nam
 
     pilot_obj = None
     if pilot_name:
-        # 尝试加载 Pilot
-        try:
-            # [MODIFIED] 使用已在文件顶部导入的 PLAYER_PILOTS 和 AI_PILOTS
-            pilot_data_source = PLAYER_PILOTS if controller == 'player' else AI_PILOTS
-
-            if pilot_name in pilot_data_source:
-                pilot_obj = pilot_data_source[pilot_name]
-            else:
-                print(f"警告: 找不到驾驶员 '{pilot_name}' (controller: {controller})。将不分配驾驶员。")
-        except ImportError:
-            # 这个 try/except 块在理论上不再需要，但作为安全措施保留
-            print(f"警告: 无法从 .database 导入 PLAYER_PILOTS 或 AI_PILOTS。")
+        pilot_data_source = PLAYER_PILOTS if controller == 'player' else AI_PILOTS
+        if pilot_name in pilot_data_source:
+            # [重要] 我们不能直接赋实例，因为 pilot.link_points 是可变的。
+            # 我们需要复制它。最简单的方法是 to_dict -> from_dict
+            pilot_template = pilot_data_source[pilot_name]
+            pilot_obj = Pilot.from_dict(pilot_template.to_dict())
+        else:
+            print(f"警告: 找不到驾驶员 '{pilot_name}' (controller: {controller})。将不分配驾驶员。")
 
     return Mech(
         id=entity_id,
@@ -420,8 +336,8 @@ class GameState:
         # 视觉事件
         self.visual_events = []
 
-        # 持久化攻击队列，用于解决中断问题
-        self.pending_attack_queue = []
+        # [移除] 不再需要
+        # self.pending_attack_queue = []
 
         # --- 初始化玩家机甲 ---
         if player_mech_selection:
@@ -508,7 +424,8 @@ class GameState:
     def _spawn_range_ai(self):
         """靶场模式下，在 (5, 8) 重新生成一个AI。"""
         # 移除所有旧的AI和抛射物
-        ids_to_remove = [eid for eid, e in self.entities.items() if e.controller == 'ai']
+        ids_to_remove = [eid for eid, e in self.entities.items() if
+                         e.controller == 'ai' or e.entity_type == 'projectile']
         for eid in ids_to_remove:
             del self.entities[eid]
 
@@ -538,7 +455,7 @@ class GameState:
             player_mech.timing = None
             player_mech.opening_move_taken = False
             player_mech.actions_used_this_turn = []
-            player_mech.pending_effect_data = None
+            player_mech.pending_combat = None
             player_mech.last_pos = None
 
             # 重置玩家弹药
@@ -677,8 +594,8 @@ class GameState:
             'game_over': self.game_over,
             'ammo_counts': self.ammo_counts,
             'visual_events': self.visual_events,
-            'pending_attack_queue': [atk.to_dict() if hasattr(atk, 'to_dict') else atk for atk in
-                                     self.pending_attack_queue],
+            # 'pending_attack_queue': [atk.to_dict() if hasattr(atk, 'to_dict') else atk for atk in
+            #                          self.pending_attack_queue],
         }
 
     @classmethod
@@ -699,7 +616,7 @@ class GameState:
         game_state.game_over = data.get('game_over', None)
         game_state.ammo_counts = data.get('ammo_counts', {})
         game_state.visual_events = data.get('visual_events', [])
-        game_state.pending_attack_queue = data.get('pending_attack_queue', [])
+        # game_state.pending_attack_queue = data.get('pending_attack_queue', [])
 
         return game_state
 
@@ -774,10 +691,8 @@ class GameState:
                         current_is_locked = True
                         break
 
-                # --- [MODIFIED v2.3] 规则 A 实现 ---
                 # 只要从一个被锁定的格子出发，移动成本就是 2。
                 move_cost = 2 if current_is_locked else 1
-                # --- [修改结束] ---
 
                 for dx_step, dy_step in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
                     nx, ny = x + dx_step, y + dy_step
@@ -894,7 +809,7 @@ class GameState:
                                 valid_launch_cells.append(cell_pos)
 
         elif action.action_type == '被动':
-            # 拦截动作的目标是抛射物，由 check_interception 动态决定
+            # 拦截动作的目标是抛射物，由 _run_interception_checks 动态决定
             pass
 
         return valid_targets, valid_launch_cells

@@ -1,40 +1,41 @@
 // --- 1. 状态初始化 ---
 
-// 从 HTML 中的 "data island" 脚本标签读取由 Jinja 注入的数据
+// 从 HTML 中的 "data island" 脚本标签读取由 Jinja 注入的 JSON 数据
 const gameDataElement = document.getElementById('game-data');
 const data = JSON.parse(gameDataElement.textContent);
 
 // 模块内的"全局"状态变量
-let selectedAction = {};
-const CELL_SIZE_PX = 51; // 50px + 1px gap
-let diceModalTimer = null;
+let selectedAction = {}; // 存储玩家当前选择的动作
+const CELL_SIZE_PX = 51; // 棋盘格的像素尺寸 (50px + 1px 间隙)
+let diceModalTimer = null; // 骰子弹窗的自动关闭计时器
 
 // 从 data 对象解构所有动态数据
-const allEntities = data.allEntities;
-const playerID = data.playerID;
-const playerEntity = data.playerEntity;
-const aiEntity = data.aiEntity; // 注意：这只是 *默认* AI，可能不是当前目标
-const orientationMap = data.orientationMap;
-const apiUrls = data.apiUrls; // 所有 Flask URL
-const playerLoadout = data.playerLoadout;
-const aiOpponentName = data.aiOpponentName;
+const allEntities = data.allEntities; // 游戏中所有实体的列表
+const playerID = data.playerID; // 玩家机甲的ID (例如 'player_1')
+const playerEntity = data.playerEntity; // 玩家机甲的完整数据对象
+const aiEntity = data.aiEntity; // 默认AI机甲的数据对象
+const orientationMap = data.orientationMap; // 方向映射 ( 'N': '↑' )
+const apiUrls = data.apiUrls; // 所有后端 API 的 URL
+const playerLoadout = data.playerLoadout; // 玩家的装备配置 (用于分析)
+const aiOpponentName = data.aiOpponentName; // 对手AI的名称 (用于分析)
 
-// 这是我们将引用的主要前端状态机
+// 这是我们将引用的主要前端状态机，用于管理UI
 const gameState = {
     turnPhase: playerEntity ? playerEntity.turn_phase : 'timing',
     timing: playerEntity ? playerEntity.timing : null,
     openingMoveTaken: playerEntity ? playerEntity.opening_move_taken : false,
     isPlayerLocked: data.isPlayerLocked,
     gameOver: data.gameOver,
-    pendingEffect: playerEntity && playerEntity.pending_effect_data ? true : false,
-    pendingReroll: playerEntity && playerEntity.pending_reroll_data ? true : false,
-    visualEvents: data.visualEvents,
-    runProjectilePhase: data.runProjectilePhase,
+    // [核心修复] 检查 'pending_combat' 属性和 'stage' 来确定中断状态
+    pendingEffect: playerEntity && playerEntity.pending_combat && playerEntity.pending_combat.stage && playerEntity.pending_combat.stage.includes('EFFECT') ? true : false,
+    pendingReroll: playerEntity && playerEntity.pending_combat && playerEntity.pending_combat.stage && playerEntity.pending_combat.stage.includes('REROLL') ? true : false,
+    visualEvents: data.visualEvents, // 从后端传递的视觉事件 (如掷骰)
+    runProjectilePhase: data.runProjectilePhase, // 是否在加载后自动运行抛射物阶段
     gameMode: data.gameMode,
     defeatCount: data.defeatCount
 };
 
-// 静态常量
+// 静态常量，用于UI显示
 const effectDescriptions = {
     'devastating': { title: '【毁伤】', text: '对目标结构造成二次伤害', style: 'background-color: var(--status-damaged);' },
     'scattershot': { title: '【霰射】', text: '对随机部件造成溢出伤害', style: 'background-color: var(--status-destroyed);' },
@@ -51,13 +52,12 @@ const diceColorMap = {
 
 // 缓存 DOM 元素
 let partDetailModalBackdrop, partDetailTitle, partDetailImage, partDetailStatsContainer, partDetailStatsList, partDetailActionsList;
-// [MODIFIED] 缓存标签页元素
 let tabBtnActions, tabBtnStatus, tabPanelActions, tabPanelStatus;
 
 // --- 2. 核心函数 ---
 
 /**
- * [NEW] 显示一个包含错误信息并停止自动重载的弹窗。
+ * 显示一个包含错误信息并停止自动重载的弹窗。
  * @param {string} title - 弹窗的标题.
  * @param {string} message - 要显示的错误信息.
  */
@@ -83,7 +83,10 @@ function showErrorModal(title, message) {
     });
 }
 
-
+/**
+ * 初始化棋盘上所有实体的视觉位置和朝向。
+ * 处理新加载和移动动画。
+ */
 function initializeBoardVisuals() {
     if (!allEntities) return;
     const wrappers = document.querySelectorAll('.mech-icon-wrapper');
@@ -99,55 +102,60 @@ function initializeBoardVisuals() {
             const lastPos = JSON.parse(wrapper.dataset.lastPos);
             const currentPos = JSON.parse(wrapper.dataset.currentPos);
 
+            // 确定朝向和可能的水平翻转 (AI 默认朝左)
             const defaultScaleX = (entityData.controller === 'ai') ? -1 : 1;
             let desiredScaleX = defaultScaleX;
             let desiredRotation = 0;
             const orientation = entityData.orientation;
 
             if (orientation === 'W') {
-                desiredScaleX = -1;
+                desiredScaleX = -1; // 朝西
             } else if (orientation === 'E') {
-                desiredScaleX = 1;
+                desiredScaleX = 1; // 朝东
             } else if (orientation === 'N') {
                 desiredScaleX = defaultScaleX;
-                desiredRotation = -90;
+                desiredRotation = -90; // 朝北
             } else if (orientation === 'S') {
                 desiredScaleX = defaultScaleX;
-                desiredRotation = 90;
+                desiredRotation = 90; // 朝南
             }
 
             const finalTransform = `scaleX(${desiredScaleX}) rotate(${desiredRotation}deg)`;
             const finalLeft = `${(currentPos[0] - 1) * CELL_SIZE_PX}px`;
             const finalTop = `${(currentPos[1] - 1) * CELL_SIZE_PX}px`;
 
+            // 如果 'lastPos' 存在且不同，说明实体发生了移动
             if (lastPos && (lastPos[0] !== currentPos[0] || lastPos[1] !== currentPos[1])) {
-                const startLeft = `${(lastPos[0] - 1) * CELL_SIZE_PX}px`;
-                const startTop = `${(lastPos[1] - 1) * CELL_SIZE_PX}px`;
-
+                // 1. 立即设置朝向
                 wrapper.style.transition = 'none';
                 img.style.transition = 'transform 0.3s ease';
                 img.style.transform = finalTransform;
-                wrapper.style.left = startLeft;
-                wrapper.style.top = startTop;
+                // 2. 将实体瞬移到起始位置
+                wrapper.style.left = `${(lastPos[0] - 1) * CELL_SIZE_PX}px`;
+                wrapper.style.top = `${(lastPos[1] - 1) * CELL_SIZE_PX}px`;
 
-                wrapper.offsetHeight; // 强制重绘
+                wrapper.offsetHeight; // 强制浏览器重绘
 
+                // 3. 添加 CSS 过渡并移动到最终位置
                 if (entityData.entity_type === 'projectile') {
-                    wrapper.style.transition = 'left 0.8s linear, top 0.8s linear';
+                    wrapper.style.transition = 'left 0.8s linear, top 0.8s linear'; // 抛射物直线移动
                 } else {
-                    wrapper.style.transition = 'left 0.4s ease-out, top 0.4s ease-out';
+                    wrapper.style.transition = 'left 0.4s ease-out, top 0.4s ease-out'; // 机甲正常移动
                 }
                 wrapper.style.left = finalLeft;
                 wrapper.style.top = finalTop;
             } else {
+                // 如果没有移动，直接设置最终位置和朝向
                 wrapper.style.transition = 'none';
                 img.style.transition = 'none';
                 wrapper.style.left = finalLeft;
                 wrapper.style.top = finalTop;
                 img.style.transform = finalTransform;
 
+                // 强制重绘
                 wrapper.offsetHeight;
 
+                // 为未来的移动添加过渡
                 if (entityData.entity_type === 'projectile') {
                     wrapper.style.transition = 'left 0.8s linear, top 0.8s linear';
                 } else {
@@ -161,11 +169,17 @@ function initializeBoardVisuals() {
     });
 }
 
+/**
+ * 在指定坐标显示伤害/未命中/爆炸效果。
+ * @param {Array<number>} pos - [x, y] 坐标
+ * @param {string} text - 结果类型: '击穿', '无效', 'effect_choice_required'
+ */
 function showAttackEffect(pos, text) {
     const [x, y] = pos;
     const cell = document.getElementById(`cell-${x}-${y}`);
     if (!cell) return;
 
+    // 如果是击穿或需要选择效果，显示爆炸动画
     if (text === '击穿' || text === 'effect_choice_required') {
         const explosion = document.createElement('div');
         explosion.className = 'explosion-effect';
@@ -173,6 +187,7 @@ function showAttackEffect(pos, text) {
         setTimeout(() => { if (explosion.parentNode) { explosion.parentNode.removeChild(explosion); } }, 800);
     }
 
+    // 显示伤害/未命中数字
     const indicator = document.createElement('div');
     indicator.className = 'damage-indicator';
     if (text === '击穿') {
@@ -189,15 +204,22 @@ function showAttackEffect(pos, text) {
     }
 }
 
+/**
+ * 根据游戏结果显示游戏结束弹窗。
+ * @param {string} status - 游戏结果: 'player_win', 'ai_win', 'ai_defeated_in_range'
+ */
 function showGameOverModal(status) {
+    // 记录游戏结果到 Firebase Analytics
     if (window.recordGameOutcome) {
         window.recordGameOutcome(status, playerLoadout, aiOpponentName);
     }
 
     let modal;
     if (status === 'ai_defeated_in_range') {
+        // 靶场模式
         modal = document.getElementById('range-continue-modal');
     } else {
+        // 决斗或生存模式
         modal = document.getElementById('game-over-modal');
         const title = document.getElementById('game-over-title');
         if (status === 'player_win') {
@@ -210,6 +232,7 @@ function showGameOverModal(status) {
         }
     }
     if (modal) { modal.style.display = 'block'; }
+    // 禁用所有UI元素
     document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
         if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal')) {
             el.disabled = true;
@@ -217,23 +240,24 @@ function showGameOverModal(status) {
     });
 }
 
+/**
+ * 根据当前的 gameState.turnPhase 更新左侧边栏的UI (显示/隐藏/禁用按钮)。
+ */
 function updateUIForPhase() {
     if (gameState.gameOver || !playerEntity || !playerEntity.turn_phase) return;
 
-    // --- [MODIFIED] 标签页切换逻辑 ---
-    // 在更新UI之前，检查是否需要强制切换到“动作”标签页
+    // 检查是否需要强制切换回“动作”标签页
     const currentPhase = gameState.turnPhase;
     if (currentPhase === 'timing' || currentPhase === 'stance' ||
         currentPhase === 'adjustment' || currentPhase === 'main') {
 
-        // 如果是动作阶段，并且“动作”标签页当前不是激活状态
         if (tabBtnActions && !tabBtnActions.classList.contains('active')) {
-            // 模拟点击“动作”标签，这将触发事件监听器来显示正确的面板
+            // 如果玩家在“状态”标签页，但回合阶段推进了，自动切回“动作”标签页
             tabBtnActions.click();
         }
     }
-    // --- 逻辑结束 ---
 
+    // 如果玩家机甲宕机，隐藏所有动作UI
     if (playerEntity.stance === 'downed') {
         ['timing', 'stance', 'adjustment', 'main'].forEach(phase => {
             const el = document.getElementById(`phase-${phase}-controls`);
@@ -248,27 +272,30 @@ function updateUIForPhase() {
         return;
     }
 
-    // [MODIFIED] 这个显隐逻辑现在作用于 #tab-panel-actions 内部的 div
+    // 切换回合阶段控制面板的可见性
     ['timing', 'stance', 'adjustment', 'main'].forEach(phase => {
         const el = document.getElementById(`phase-${phase}-controls`);
         if (el) el.style.display = gameState.turnPhase === phase ? 'block' : 'none';
     });
 
+    // 高亮显示当前选择的时机
     if (gameState.turnPhase === 'timing') {
         document.querySelectorAll('#phase-timing-controls button').forEach(btn => {
             btn.classList.toggle('active', btn.textContent === gameState.timing);
         });
     }
+    // 高亮显示当前选择的姿态
     if (gameState.turnPhase === 'stance') {
         document.querySelectorAll('#phase-stance-controls button').forEach(btn => {
             btn.classList.toggle('active', btn.id.includes(playerEntity.stance));
         });
     }
 
+    // 检查是否有中断 (重投或效果选择)
     const message = gameState.pendingReroll ? '请先解决重投！' : '请先选择效果！';
     const isInterrupted = gameState.pendingEffect || gameState.pendingReroll;
 
-    // [FIX BUG 2] 只选择动作按钮，不再包含 #end-turn-btn
+    // 禁用所有动作按钮
     document.querySelectorAll('#phase-main-controls .action-item, #phase-adjustment-controls .action-item').forEach(item => {
         if (isInterrupted) {
             item.classList.add('disabled');
@@ -278,17 +305,18 @@ function updateUIForPhase() {
 
         let isDisabled = false;
         let title = '';
-        const baseTitle = item.getAttribute('title') || '';
+        const baseTitle = item.getAttribute('title') || ''; // 保留 '已使用' 或 '弹药耗尽'
 
         if (baseTitle === '本回合已使用') {
             isDisabled = true; title = '本回合已使用';
         } else if (baseTitle === '弹药耗尽') {
             isDisabled = true; title = '弹药耗尽';
         } else if (gameState.turnPhase === 'main') {
-            // 这个逻辑现在只应用于动作按钮，是正确的
+            // 检查起手动作是否匹配
             if (!gameState.openingMoveTaken && item.dataset.actionType !== gameState.timing) {
                 isDisabled = true; title = '非当前时机的起手动作';
             }
+            // 检查是否被近战锁定
             if (gameState.isPlayerLocked && item.dataset.actionType === '射击') {
                 isDisabled = true; title = '被近战锁定，无法射击';
             }
@@ -298,7 +326,7 @@ function updateUIForPhase() {
         item.title = title;
     });
 
-    // [FIX BUG 2] 单独处理“结束回合”按钮
+    // 单独处理“结束回合”按钮
     const endTurnBtn = document.getElementById('end-turn-btn');
     if (endTurnBtn) {
         if (isInterrupted) {
@@ -312,12 +340,15 @@ function updateUIForPhase() {
     }
 }
 
-
+/**
+ * 清除棋盘上所有的高亮和点击事件。
+ */
 function clearHighlights() {
     document.querySelectorAll('.grid-cell').forEach(c => {
         c.classList.remove('highlight-move', 'highlight-attack', 'highlight-launch');
         c.onclick = null;
     });
+    // 重置并隐藏方向选择器
     const orientationSelector = document.getElementById('orientation-selector');
     if (orientationSelector.parentElement !== document.body) {
          document.body.appendChild(orientationSelector);
@@ -325,6 +356,14 @@ function clearHighlights() {
     orientationSelector.style.display = 'none';
 }
 
+/**
+ * 玩家点击一个动作时调用 (例如 奔跑, 点射)。
+ * @param {string} name - 动作名称
+ * @param {number} range - 动作射程
+ * @param {string} type - 动作类型 ( '移动', '射击' 等)
+ * @param {string} cost - 动作成本 ('S', 'M', 'L')
+ * @param {string} partSlot - 部件槽位
+ */
 function selectAction(name, range, type, cost, partSlot) {
     if (gameState.pendingEffect || gameState.pendingReroll) return;
     clearHighlights();
@@ -332,6 +371,7 @@ function selectAction(name, range, type, cost, partSlot) {
 
     let url = '', body = { action_name: name, part_slot: partSlot, player_id: playerID };
 
+    // 根据动作类型选择正确的 API URL
     if (type === '移动' || name === '调整移动') {
         url = apiUrls.getMoveRange;
     } else if (type === '近战' || type === '射击' || type === '抛射' || type === '快速') {
@@ -341,10 +381,12 @@ function selectAction(name, range, type, cost, partSlot) {
         return;
     }
 
+    // 向后端请求有效范围
     if(url) {
         fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
         .then(res => res.json())
         .then(data => {
+            // 高亮移动格
             if(data.valid_moves) data.valid_moves.forEach(([x,y]) => {
                 const c = document.getElementById(`cell-${x}-${y}`);
                 if (c) {
@@ -352,6 +394,7 @@ function selectAction(name, range, type, cost, partSlot) {
                     c.onclick = () => showOrientationSelector(x,y);
                 }
             });
+            // 高亮攻击目标
             if(data.valid_targets) data.valid_targets.forEach(t => {
                 const [x,y] = t.pos;
                 const c = document.getElementById(`cell-${x}-${y}`);
@@ -360,6 +403,7 @@ function selectAction(name, range, type, cost, partSlot) {
                     c.onclick = () => initiateAttack(t.entity_id, x, y, t.is_back_attack);
                 }
             });
+            // 高亮抛射目标格
             if(data.valid_launch_cells) data.valid_launch_cells.forEach(([x,y]) => {
                 const c = document.getElementById(`cell-${x}-${y}`);
                 if (c) {
@@ -373,6 +417,10 @@ function selectAction(name, range, type, cost, partSlot) {
     }
 }
 
+/**
+ * 玩家点击【弃置】动作时调用。
+ * @param {string} partSlot - 要弃置的部件槽位
+ */
 function initiateJettison(partSlot) {
     if (gameState.pendingEffect || gameState.pendingReroll) return;
     clearHighlights();
@@ -382,41 +430,54 @@ function initiateJettison(partSlot) {
     });
 }
 
+/**
+ * 玩家点击一个高亮的敌方单位时调用。
+ * @param {string} entityId - 目标实体ID
+ * @param {number} x - 目标 x 坐标
+ * @param {number} y - 目标 y 坐标
+ * @param {boolean} isBackAttack - 是否为背击
+ */
 function initiateAttack(entityId, x, y, isBackAttack) {
     selectedAction.targetEntityId = entityId;
     selectedAction.targetPos = [x, y];
     executeAttack();
 }
 
+/**
+ * 玩家点击一个高亮的抛射目标格时调用。
+ * @param {number} x - 目标 x 坐标
+ * @param {number} y - 目标 y 坐标
+ */
 function initiateLaunch(x, y) {
     selectedAction.targetEntityId = null;
     selectedAction.targetPos = [x, y];
     executeAttack();
 }
 
+/**
+ * 显示“选择攻击部位”弹窗 (用于背击、狙击等)。
+ */
 function showPartSelector() {
-    const modal = document.getElementById('part-selector-modal'), buttons = document.getElementById('part-buttons'); buttons.innerHTML = '';
+    const modal = document.getElementById('part-selector-modal');
+    const buttons = document.getElementById('part-buttons');
+    buttons.innerHTML = '';
 
-    // [FIX] BUG: 不再使用全局的 aiEntity，而是使用 selectedAction 中存储的当前目标 ID
-    // if (!aiEntity || !aiEntity.parts) return; // <--- 旧的错误代码
-
-    // 1. 从 selectedAction 中获取当前目标 ID
+    // 从 selectedAction 中获取当前目标 ID
     const defenderId = selectedAction.targetEntityId;
     if (!defenderId) {
         console.error("showPartSelector: selectedAction.targetEntityId is not set!");
         return;
     }
 
-    // 2. 从顶部的 allEntities 列表中查找正确的目标实体
-    // 注意: allEntities 是在 data island 中从 Jinja 初始化的
+    // 从 allEntities 列表中查找正确的目标实体
     const defender = allEntities.find(e => e.id === defenderId);
 
     if (!defender || !defender.parts) {
          console.error(`showPartSelector: Could not find defender with ID ${defenderId} or it has no parts.`);
-         return; // <--- 新的、正确的检查
+         return;
     }
 
-    // 3. [FIX] 遍历 *正确的* defender 实体的部件
+    // 遍历目标的部件并创建按钮
     for (const slot in defender.parts) {
         const part = defender.parts[slot];
         if (part && part.status !== 'destroyed') {
@@ -430,34 +491,64 @@ function showPartSelector() {
     modal.style.display = 'block';
 }
 
-function closePartSelector() { document.getElementById('part-selector-modal').style.display = 'none'; clearHighlights(); }
+function closePartSelector() {
+    document.getElementById('part-selector-modal').style.display = 'none';
+    clearHighlights();
+}
 
+/**
+ * 玩家在“选择部位”弹窗中点击一个部件时调用。
+ * @param {string} partSlot - 选中的部件槽位
+ */
 function confirmPartSelection(partSlot) {
     selectedAction.targetPartName = partSlot;
     closePartSelector();
-    executeAttack();
+    executeAttack(); // 再次调用，这次附带了 targetPartName
 }
 
+/**
+ * 显示“选择触发效果”弹窗 (用于毁伤/霰射/顺劈)。
+ * @param {Array<string>} options - 可选的效果列表, e.g., ['devastating', 'scattershot']
+ */
 function showEffectSelector(options) {
-    const buttonsDiv = document.getElementById('effect-buttons'); buttonsDiv.innerHTML = '';
-    if (!options || options.length === 0) { console.error("showEffectSelector 被调用，但没有提供选项！"); return; }
+    const buttonsDiv = document.getElementById('effect-buttons');
+    buttonsDiv.innerHTML = '';
+    if (!options || options.length === 0) {
+        console.error("showEffectSelector 被调用，但没有提供选项！");
+        return;
+    }
     options.forEach(optionKey => {
         const desc = effectDescriptions[optionKey];
         if (desc) {
-            const btn = document.createElement('button'); btn.className = 'btn'; btn.style.cssText = desc.style || 'background-color: var(--primary-color);';
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.style.cssText = desc.style || 'background-color: var(--primary-color);';
             btn.innerHTML = `<strong>${desc.title}</strong><br><small>${desc.text}</small>`;
             btn.onclick = () => confirmEffectChoice(optionKey);
             buttonsDiv.appendChild(btn);
-        } else { console.warn(`未知的效果键: ${optionKey}`); }
+        } else {
+            console.warn(`未知的效果键: ${optionKey}`);
+        }
     });
     document.getElementById('effect-selector-modal').style.display = 'block';
 }
 
+/**
+ * 玩家在“选择效果”弹窗中点击一个选项时调用。
+ * @param {string} choice - 选中的效果键
+ */
 function confirmEffectChoice(choice) {
     document.getElementById('effect-selector-modal').style.display = 'none';
+    // 发送到后端 API 进行处理
     postAndReload(apiUrls.resolveEffectChoice, { choice: choice, player_id: playerID });
 }
 
+/**
+ * 在玩家点击移动目标格后，显示方向选择器。
+ * @param {number} x - 目标 x 坐标
+ * @param {number} y - 目标 y 坐标
+ * @param {boolean} isRotationOnly - 这是否是“仅转向”动作
+ */
 function showOrientationSelector(x, y, isRotationOnly = false) {
     const cell = document.getElementById(`cell-${x}-${y}`);
     const s = document.getElementById('orientation-selector');
@@ -471,22 +562,35 @@ function showOrientationSelector(x, y, isRotationOnly = false) {
     selectedAction.isRotationOnly = isRotationOnly;
 }
 
-function setFinalOrientation(o) { selectedAction.finalOrientation = o; executeMove(); }
+/**
+ * 玩家在方向选择器上点击一个方向时调用。
+ * @param {string} o - 选中的方向 ('N', 'E', 'S', 'W')
+ */
+function setFinalOrientation(o) {
+    selectedAction.finalOrientation = o;
+    executeMove();
+}
 
-// [MODIFIED] postAndReload 函数已修改，以捕获错误并显示弹窗
+/**
+ * [核心API函数] 向后端发送 POST 请求，并期望页面重载或处理中断。
+ * 这是所有改变游戏状态的主要途径。
+ * @param {string} url - 目标 API URL
+ * @param {object} body - 发送到后端的 JSON 数据
+ */
 function postAndReload(url, body = {}) {
     body.player_id = playerID;
     console.log("Calling postAndReload for:", url, body);
 
     fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
-    .then(async res => { // [MODIFIED] 标记为 async 以便读取 .json()
+    .then(async res => { // 标记为 async 以便读取 .json()
         if (res.redirected) {
+            // 如果后端重定向 (例如 /end_turn)，则跟随重定向
             console.log("Response was a redirect, reloading...");
             window.location.href = res.url;
             return null;
         }
         if (!res.ok) {
-            // [MODIFIED] 尝试从错误的响应中解析 JSON 消息
+            // 如果是 HTTP 500 或 404 等错误
             let errorMsg = `HTTP 错误! 状态: ${res.status} ${res.statusText}`;
             try {
                 // 尝试解析JSON体以获取更详细的错误
@@ -495,9 +599,9 @@ function postAndReload(url, body = {}) {
                     errorMsg = errData.message;
                 }
             } catch (e) {
-                // 响应不是JSON，或者解析失败，使用默认的 statusText
+                // 响应不是JSON，使用默认的 statusText
             }
-            // [MODIFIED] 抛出这个更详细的错误
+            // 抛出这个更详细的错误
             throw new Error(errorMsg);
         }
         return res.json();
@@ -508,14 +612,18 @@ function postAndReload(url, body = {}) {
         console.log("Received data:", data);
 
         if(data.success) {
-            // [FIX BUG 1] 修复 if/else 逻辑
+            // 后端成功处理了请求
+            // 检查后端是否要求前端执行特定操作 (中断)
+
             if (data.action_required === 'select_part') {
+                // 中断：需要选择部位
                 console.log("Action required: select_part. Showing modal.");
                 showPartSelector();
-                return; // 关键：在此处停止，不要执行 'else'
+                return; // 停止，不重载
             }
 
             if (data.action_required === 'select_reroll') {
+                // 中断：需要重投
                 console.log("Action required: select_reroll. Showing modal.");
                 const rerollData = data;
                 const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
@@ -525,41 +633,42 @@ function postAndReload(url, body = {}) {
                     rerollData.action_name,
                     rerollData.attacker_name,
                     rerollData.defender_name,
-                    true,
+                    true, // 可交互
                     attackerIsPlayer,
                     defenderIsPlayer
                 );
-                return; // 关键：在此处停止
+                return; // 停止，不重载
             }
 
             if (data.action_required === 'select_effect') {
+                // 中断：需要选择效果
                 console.log("Action required: select_effect. Showing modal.");
                 showEffectSelector(data.options);
-                return; // 关键：在此处停止
+                return; // 停止，不重载
             }
 
-            // 默认行为：如果没有中断，则重载
+            // 默认行为：如果没有中断，则重载页面以显示新状态
             console.log("No action required, reloading.");
             window.location.reload();
 
         } else {
-            // [MODIFIED] API 调用成功，但业务逻辑失败 (e.g., AP不足)
+            // API 调用成功，但业务逻辑失败 (e.g., AP不足, "操作失败")
             console.warn("Operation failed:", data.message);
-            // [MODIFIED] 不再自动重载，而是显示错误
+            // 显示错误弹窗，而不是重载
             showErrorModal('操作失败', data.message || '后端返回了一个错误，但没有提供详情。');
-            // window.location.reload(); // <--- [REMOVED]
         }
     }).catch(e => {
-        // [MODIFIED] 捕获 fetch 错误 (e.g., HTTP 500, 网络中断)
+        // 捕获 fetch 错误 (e.g., HTTP 500, 网络中断)
         console.error("Fetch error:", e.message);
-        // [MODIFIED] 不再自动重载，而是显示错误
+        // 显示错误弹窗，而不是重载
         showErrorModal('后端通信错误', e.message || '一个未知的fetch错误发生了。');
-        // window.location.reload(); // <--- [REMOVED]
     });
 }
 
 
 // --- 乐观 UI 函数 (用于快速响应) ---
+// 这些函数会立即更新UI，然后发送一个“静默”的fetch请求同步到后端。
+// 如果请求失败，会强制重载以纠正状态。
 
 function selectTiming(t) {
     if (gameState.pendingEffect || gameState.pendingReroll) return;
@@ -630,6 +739,9 @@ function skipAdjustment() {
 
 // --- 其他函数 ---
 
+/**
+ * 玩家确认移动或转向后，调用此函数。
+ */
 function executeMove() {
     let url = selectedAction.isRotationOnly ? apiUrls.changeOrientation : (selectedAction.name === '调整移动' ? apiUrls.executeAdjustMove : apiUrls.movePlayer);
     postAndReload(url, {
@@ -640,6 +752,9 @@ function executeMove() {
     });
 }
 
+/**
+ * 玩家确认攻击目标后，调用此函数。
+ */
 function executeAttack() {
     let body = {
         action_name: selectedAction.name,
@@ -651,19 +766,19 @@ function executeAttack() {
     postAndReload(apiUrls.executeAttack, body);
 }
 
+/**
+ * 显示部件详情弹窗。
+ * @param {string} controller - 'player' 或 'ai'
+ * @param {string} slot - 部件槽位 (e.g., 'core', 'left_arm')
+ */
 function showPartDetail(controller, slot) {
     if (!allEntities) return;
 
-    // [FIX] 修复: 从 allEntities 动态查找
     let entityId = null;
     if (controller === 'player') {
         entityId = playerID;
     } else {
-        // [FIX] 这是一个临时的、不完美的方法，它假定 aiEntity 变量是正确的。
-        // [FIX 2] 为了在生存模式下工作，我们需要从点击的 DOM 元素向上查找...
-        // ...但为了简单起见，我们暂时还是用 aiEntity
-        // [FIX 3] 在生存模式下, aiEntity 可能是 ai_1, 但我们需要 ai_2
-        // 我们应该从 allEntities 查找第一个 'ai'
+        // 动态查找当前存活的 AI
         const currentAi = allEntities.find(e => e.controller === 'ai' && e.status !== 'destroyed');
         entityId = currentAi ? currentAi.id : null;
     }
@@ -676,8 +791,6 @@ function showPartDetail(controller, slot) {
     const mech = allEntities.find(e => e.id === entityId);
 
     if (!mech || !mech.parts || !mech.parts[slot]) {
-        // 如果在 allEntities 中找不到 aiEntity (例如 ai_1 死了, 换成了 ai_2)
-        // 这是一个已知的小问题，但不会导致崩溃
         console.warn(`Could not find part for ${controller} (ID: ${entityId}) at ${slot}`);
         return;
     }
@@ -685,6 +798,7 @@ function showPartDetail(controller, slot) {
     const part = mech.parts[slot];
     if (!part) return;
 
+    // 填充弹窗内容
     partDetailTitle.innerText = part.name;
     let statsHtml = `<li>装甲: ${part.armor}</li><li>结构: ${part.structure}</li>`;
     if (part.evasion) statsHtml += `<li>闪避: ${part.evasion}</li>`;
@@ -712,6 +826,7 @@ function showPartDetail(controller, slot) {
     }
     partDetailActionsList.innerHTML = actionsHtml;
 
+    // 根据是否有图片来显示不同内容
     if (part.image_url) {
         partDetailImage.src = part.image_url;
         partDetailImage.style.display = 'block';
@@ -729,6 +844,11 @@ function closePartDetailModal() {
     }
 }
 
+/**
+ * 将 {yellow_count: 1, red_count: 3} 这样的对象转换为 HTML 骰子图标。
+ * @param {object} input - 骰子输入对象
+ * @returns {string} - HTML 字符串
+ */
 function formatDiceInput(input) {
     let html = ''; if (!input) return '<span>无</span>';
     for (const key in input) {
@@ -740,6 +860,13 @@ function formatDiceInput(input) {
     return html || '<span>无</span>';
 }
 
+/**
+ * 将 {yellow: [['轻击'], ['空白']], red: [['重击']]} 这样的对象转换为 HTML 骰子图标。
+ * @param {object} result - 骰子结果对象
+ * @param {string} rollType - 'attacker', 'defender', 'secondary'
+ * @param {boolean} isClickable - 骰子是否可点击 (用于重投)
+ * @returns {string} - HTML 字符串
+ */
 function formatDiceResult(result, rollType, isClickable = false) {
     let html = '';
     if (!result || Object.keys(result).length === 0) return '<span>无结果</span>';
@@ -749,16 +876,19 @@ function formatDiceResult(result, rollType, isClickable = false) {
     for (const color_key of color_order) {
         const dice_groups = result[color_key];
         if (dice_groups && dice_groups.length > 0) {
+            // 遍历每一颗骰子
             for (const [die_index, die_results] of dice_groups.entries()) {
                 if (total_dice_groups_rendered > 0) {
                      html += `<span style="border-left: 2px solid var(--border-color); margin: 0 0.5rem; height: 1.5rem;"></span>`;
                 }
                 let dieGroupHtml = '';
+                // 遍历一颗骰子上的多个结果 (例如 '轻击*2')
                 for (const key of die_results) {
                     const icon = diceIconMap[key] || '?';
                     dieGroupHtml += `<span class="dice-icon dice-result ${key}">${icon}</span>`;
                 }
 
+                // 创建可点击的重投组
                 const clickableClass = isClickable ? 'clickable' : 'disabled';
                 html += `<span class="dice-reroll-group ${clickableClass}"
                               data-roll-type="${rollType}"
@@ -774,7 +904,16 @@ function formatDiceResult(result, rollType, isClickable = false) {
     return html || '<span>无结果</span>';
 }
 
-
+/**
+ * 显示掷骰结果弹窗。
+ * @param {object} diceDetails - 包含掷骰详情的对象
+ * @param {string} actionName - 动作名称
+ * @param {string} attackerName - 攻击方名称
+ * @param {string} defenderName - 防御方名称
+ * @param {boolean} isInteractive - 是否为可交互 (重投) 模式
+ * @param {boolean} attackerIsPlayer - 攻击方是否为玩家
+ * @param {boolean} defenderIsPlayer - 防御方是否为玩家
+ */
 function showDiceRollModal(diceDetails, actionName, attackerName, defenderName, isInteractive = false, attackerIsPlayer = false, defenderIsPlayer = false) {
     if (diceModalTimer) {
         clearTimeout(diceModalTimer);
@@ -787,12 +926,15 @@ function showDiceRollModal(diceDetails, actionName, attackerName, defenderName, 
 
     const details = diceDetails;
 
+    // 填充攻击方骰子
     document.getElementById('dice-roll-attacker-input').innerHTML = formatDiceInput(details.attack_dice_input);
     document.getElementById('dice-roll-attacker-result').innerHTML = formatDiceResult(details.attack_dice_result, 'attacker', isInteractive && attackerIsPlayer);
 
+    // 填充防御方骰子
     document.getElementById('dice-roll-defender-input').innerHTML = formatDiceInput(details.defense_dice_input);
     document.getElementById('dice-roll-defender-result').innerHTML = formatDiceResult(details.defense_dice_result, 'defender', isInteractive && defenderIsPlayer);
 
+    // 填充次要掷骰 (毁伤/霰射/顺劈)
     const secondarySection = document.getElementById('dice-roll-secondary-section');
     if (details.secondary_roll) {
         const secondary = details.secondary_roll;
@@ -802,12 +944,13 @@ function showDiceRollModal(diceDetails, actionName, attackerName, defenderName, 
         if (secondary.type === 'cleave_roll') title = "【顺劈】结算";
         document.getElementById('dice-roll-secondary-title').innerText = title;
         document.getElementById('dice-roll-secondary-input').innerHTML = formatDiceInput(secondary.defense_dice_input);
-        document.getElementById('dice-roll-secondary-result').innerHTML = formatDiceResult(secondary.defense_dice_result, 'secondary', false);
+        document.getElementById('dice-roll-secondary-result').innerHTML = formatDiceResult(secondary.defense_dice_result, 'secondary', false); // 效果掷骰目前不可重投
         secondarySection.style.display = 'block';
     } else {
         secondarySection.style.display = 'none';
     }
 
+    // 检查玩家是否有链接值来重投
     const playerLinkPoints = (playerEntity && playerEntity.pilot) ? playerEntity.pilot.link_points : 0;
     const canReroll = playerLinkPoints > 0;
 
@@ -816,6 +959,7 @@ function showDiceRollModal(diceDetails, actionName, attackerName, defenderName, 
     const confirmButton = document.getElementById('dice-roll-confirm');
     const skipButton = document.getElementById('dice-roll-skip');
 
+    // 根据是否可交互来显示/隐藏按钮
     if (isInteractive) {
         rerollButtons.classList.remove('reroll-hidden');
         closeButton.classList.add('reroll-hidden');
@@ -832,24 +976,34 @@ function showDiceRollModal(diceDetails, actionName, attackerName, defenderName, 
         skipButton.classList.remove('disabled');
         skipButton.disabled = false;
     } else {
+        // 非交互模式 (例如 AI 攻击 AI)，自动关闭
         rerollButtons.classList.add('reroll-hidden');
         closeButton.classList.remove('reroll-hidden');
-        diceModalTimer = setTimeout(closeDiceRollModal, 5000);
+        diceModalTimer = setTimeout(closeDiceRollModal, 5000); // 5秒后自动关闭
     }
 
     document.getElementById('dice-roll-modal-backdrop').style.display = 'flex';
 }
 
+/**
+ * 切换一个骰子组的 'selected' 状态 (用于重投)。
+ * @param {HTMLElement} element - 被点击的 .dice-reroll-group 元素
+ */
 function toggleRerollDie(element) {
     if (element.dataset.clickable !== "true") return;
     element.classList.toggle('selected');
 }
 
+/**
+ * 玩家点击“确认重投”或“跳过”时调用。
+ * @param {boolean} isSkipping - 玩家是否点击了“跳过”
+ */
 function confirmReroll(isSkipping = false) {
     let selections_attacker = [];
     let selections_defender = [];
 
     if (!isSkipping) {
+        // 收集所有被选中的骰子
         document.querySelectorAll('#dice-roll-attacker-result .dice-reroll-group.selected').forEach(die => {
             selections_attacker.push({
                 color: die.dataset.color,
@@ -865,18 +1019,24 @@ function confirmReroll(isSkipping = false) {
     }
 
     closeDiceRollModal();
+    // 发送重投请求到后端
     postAndReload(apiUrls.resolveReroll, {
         reroll_selections_attacker: selections_attacker,
         reroll_selections_defender: selections_defender
     });
 }
 
+/**
+ * 关闭掷骰弹窗。
+ */
 function closeDiceRollModal() {
     if (diceModalTimer) {
         clearTimeout(diceModalTimer);
         diceModalTimer = null;
     }
     document.getElementById('dice-roll-modal-backdrop').style.display = 'none';
+
+    // 这是一个后备，用于显示攻击结果，以防万一
     if (!gameState.pendingReroll) {
         const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
         if (firstAttackResult && !gameState.runProjectilePhase) {
@@ -887,16 +1047,17 @@ function closeDiceRollModal() {
 
 // --- 3. 初始化和事件绑定 ---
 
+// 当 DOM 加载完成后执行
 document.addEventListener('DOMContentLoaded', () => {
     // 初始化
-    // [MODIFIED] 缓存标签页元素
+    // 缓存标签页元素
     tabBtnActions = document.getElementById('tab-btn-actions');
     tabBtnStatus = document.getElementById('tab-btn-status');
     tabPanelActions = document.getElementById('tab-panel-actions');
     tabPanelStatus = document.getElementById('tab-panel-status');
 
-    updateUIForPhase();
-    initializeBoardVisuals();
+    updateUIForPhase(); // 根据当前回合阶段更新UI
+    initializeBoardVisuals(); // 设置棋盘上所有单位的初始位置
 
     // 缓存部件详情弹窗的 DOM 元素
     partDetailModalBackdrop = document.getElementById('part-detail-modal-backdrop');
@@ -906,14 +1067,14 @@ document.addEventListener('DOMContentLoaded', () => {
     partDetailStatsList = document.getElementById('part-detail-stats-list');
     partDetailActionsList = document.getElementById('part-detail-actions-list');
 
-    // 检查游戏结束
+    // 检查游戏是否结束
     if (gameState.gameOver) {
         showGameOverModal(gameState.gameOver);
     }
 
-    // 检查待处理效果
+    // 检查待处理效果 (例如 毁伤/霰射/顺劈)
     if (gameState.pendingEffect) {
-        const pendingOptions = (playerEntity.pending_effect_data && playerEntity.pending_effect_data.options) ? playerEntity.pending_effect_data.options : [];
+        const pendingOptions = (playerEntity.pending_combat && playerEntity.pending_combat.options) ? playerEntity.pending_combat.options : [];
         showEffectSelector(pendingOptions);
     }
 
@@ -921,85 +1082,83 @@ document.addEventListener('DOMContentLoaded', () => {
     const log = document.querySelector('.combat-log');
     if (log) log.scrollTop = log.scrollHeight;
 
-    // AI 回合暂停逻辑
+    // 自动运行抛射物阶段 (如果需要)
     if (gameState.runProjectilePhase && !gameState.gameOver && !gameState.pendingEffect && !gameState.pendingReroll) {
+        // 禁用UI，显示等待
         document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
-            if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal') && !el.closest('#error-modal-backdrop')) { // [MODIFIED] 排除错误弹窗
+            if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal') && !el.closest('#error-modal-backdrop')) {
                 el.disabled = true;
                 el.style.cursor = 'wait';
             }
         });
+        // 延迟2秒，让玩家看到AI的移动
         setTimeout(() => {
             fetch(apiUrls.runProjectilePhase, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({})
             })
-            .then(res => {
-                // [FIX] /run_projectile_phase 不再重定向，它返回 JSON
-                return res.json();
-            })
+            .then(res => res.json())
             .then(data => {
-                // [FIX] 收到 JSON 确认后， *现在* 重载页面
+                // 收到后端确认后，刷新页面
                 if (data && data.success) {
                     window.location.reload();
                 } else if (data) {
                     console.error("抛射物阶段运行失败:", data.message);
-                    // [MODIFIED] 显示错误弹窗而不是重载
                     showErrorModal('抛射物阶段失败', data.message || '后端未能运行抛射物阶段。');
-                    // window.location.reload(); // <--- [REMOVED]
                 }
             })
             .catch(e => {
                 console.error("Fetch error:", e);
-                // [MODIFIED] 显示错误弹窗而不是重载
                 showErrorModal('抛射物阶段Fetch失败', e.message || '无法连接到服务器以运行抛射物阶段。');
-                // window.location.reload(); // <--- [REMOVED]
             });
-        }, 2000); // 延迟2秒，让玩家看到AI的移动
+        }, 2000);
     }
 
-    // 视觉事件处理
+    // 视觉事件处理 (显示掷骰弹窗)
     const rerollEvent = gameState.visualEvents.find(e => e.type === 'reroll_required');
     const diceRollEvent = gameState.visualEvents.find(e => e.type === 'dice_roll');
     const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
 
     if (rerollEvent) {
+        // 优先显示重投弹窗
         const rerollData = rerollEvent.details;
         const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
         const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
         showDiceRollModal(
             rerollData.dice_details, rerollData.action_name,
             rerollData.attacker_name, rerollData.defender_name,
-            true, attackerIsPlayer, defenderIsPlayer
+            true, attackerIsPlayer, defenderIsPlayer // true = 可交互
         );
     } else if (diceRollEvent) {
+        // 其次显示普通掷骰弹窗
         const eventData = diceRollEvent;
         showDiceRollModal(
             eventData.details, eventData.action_name,
             eventData.attacker_name, eventData.defender_name,
-            false
+            false // false = 不可交互
         );
     } else if (firstAttackResult) {
+        // 最后，如果都没有，显示攻击结果 (例如 '击穿')
         showAttackEffect(firstAttackResult.defender_pos, firstAttackResult.result_text);
     }
 
-    // 调试日志
+    // 调试日志：帮助诊断竞态条件
     if (gameState.pendingReroll && !rerollEvent) {
         console.error(
-            "--- [错误类型判断] ---",
-            "\n游戏卡死！",
-            "\n原因: gameState.pendingReroll 为 true (红色警告条出现)，",
+            "--- [状态不一致错误] ---",
+            "\n游戏可能已卡死！",
+            "\n原因: gameState.pendingReroll 为 true (应显示红色警告条)，",
             "但是 gameState.visualEvents 中 *没有* 找到 'reroll_required' 事件。",
-            "\n请检查后端（game_controller.py）中所有调用 resolve_attack 的地方，",
-            "确保在 'reroll_choice_required' 返回时，已将 'reroll_required' 事件添加到 visual_events 列表中。",
-            "\nVisual Events 内容:", gameState.visualEvents
+            "\n这通常发生在后端状态与前端不同步时。",
+            "\nVisual Events 内容:", gameState.visualEvents,
+            "\nPlayer Entity:", playerEntity
         );
     }
 
     // --- 绑定所有 UI 事件 ---
 
-    // [MODIFIED] 绑定标签页按钮
+    // 绑定标签页按钮
     tabBtnActions.addEventListener('click', () => {
         tabBtnActions.classList.add('active');
         tabBtnStatus.classList.remove('active');
@@ -1082,19 +1241,18 @@ document.addEventListener('DOMContentLoaded', () => {
     attackerDiceGroup?.addEventListener('click', handleDieClick);
     defenderDiceGroup?.addEventListener('click', handleDieClick);
 
-
     // 部件详情
     document.getElementById('part-detail-modal-backdrop')?.addEventListener('click', closePartDetailModal);
     document.getElementById('part-detail-close-btn')?.addEventListener('click', closePartDetailModal);
     document.getElementById('part-detail-modal')?.addEventListener('click', (e) => e.stopPropagation());
 
-    // [MODIFIED] 将部件详情的点击事件绑定移至 #tab-panel-status 内部的 tr
+    // 为“状态”标签页中的玩家部件行添加点击事件
     document.querySelectorAll('#tab-panel-status tr[data-part-slot]').forEach(row => {
         row.addEventListener('click', () => {
             showPartDetail(row.dataset.controller, row.dataset.partSlot);
         });
     });
-    // [MODIFIED] 也为 AI 侧边栏的 tr 添加绑定
+    // 也为 AI 侧边栏的部件行添加点击事件
     document.querySelectorAll('.sidebar table tr[data-part-slot][data-controller="ai"]').forEach(row => {
         row.addEventListener('click', () => {
             showPartDetail(row.dataset.controller, row.dataset.partSlot);
