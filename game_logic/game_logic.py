@@ -1,15 +1,18 @@
 import math
 import heapq
 import random
+
 # 导入数据模型
 from .data_models import (
     Mech, Part, Action, GameEntity, Projectile, Drone, Pilot
 )
 # 导入部件、抛射物和AI配置数据库
-from parts_database import (
+# [MODIFIED] 从新的 game_logic.database 包导入
+from .database import (
     ALL_PARTS, CORES, LEGS, LEFT_ARMS, RIGHT_ARMS, BACKPACKS,
     PROJECTILE_TEMPLATES,
-    AI_LOADOUTS
+    AI_LOADOUTS,
+    PLAYER_PILOTS, AI_PILOTS  # [MODIFIED v2.2] 导入驾驶员
 )
 # 导入战斗结算系统（用于拦截）
 from .combat_system import resolve_attack
@@ -36,6 +39,7 @@ def is_in_forward_arc(viewer_pos, viewer_orientation, target_pos):
 
 def is_back_attack(attacker_pos, defender_pos, defender_orientation):
     """检查攻击是否来自防御者的后方90度弧形区域。"""
+    # 复用 is_in_forward_arc 逻辑，只需将防御者的朝向反转
     if defender_orientation == 'N': return is_in_forward_arc(defender_pos, 'S', attacker_pos)
     if defender_orientation == 'S': return is_in_forward_arc(defender_pos, 'N', attacker_pos)
     if defender_orientation == 'E': return is_in_forward_arc(defender_pos, 'W', attacker_pos)
@@ -52,7 +56,8 @@ def _is_adjacent(pos1, pos2):
 
 def _is_tile_locked_by_opponent(game_state, tile_pos, a_mech, b_pos, b_mech):
     """
-    检查 tile_pos 上的单位是否被对手近战锁定。
+    检查 tile_pos 上的单位 (a_mech) 是否被对手 (b_mech) 近战锁定。
+    宕机、被摧毁或没有近战动作的单位无法锁定。
     """
     if not b_mech or b_mech.status == 'destroyed':
         return False
@@ -63,6 +68,7 @@ def _is_tile_locked_by_opponent(game_state, tile_pos, a_mech, b_pos, b_mech):
 
     if not b_mech.has_melee_action():
         return False
+
     # 规则：锁定周围8格
     if not _is_adjacent(tile_pos, b_pos):
         return False
@@ -187,7 +193,7 @@ def check_interception(projectile, game_state, log):
 
 def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
     """
-    为单个抛射物实体运行其AI逻辑。
+    为单个抛射物实体运行其逻辑，分为 '立即' (发射时) 或 '延迟' (AI回合结束时)。
     """
     log = []
     attacks_to_resolve = []
@@ -202,7 +208,7 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
     if timing_to_run == '立即':
         log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 立即执行 [{action_obj.name}]！")
 
-        # 立即检查拦截
+        # '立即' 动作在 *发射时* 检查拦截
         check_interception(projectile, game_state, log)
 
         # 检查抛射物是否在拦截中存活
@@ -224,7 +230,7 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
     elif timing_to_run == '延迟':
         log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 激活【延迟】动作 [{action_obj.name}]！")
 
-        # 1. 查找最近的敌人
+        # 1. '延迟' 动作 (如导弹) 寻找最近的敌人
         closest_enemy = None
         min_dist = 999
         for entity in game_state.entities.values():
@@ -249,7 +255,7 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
             is_flight=True  # 【空中移动】
         )
 
-        # 3. 寻找最佳移动位置
+        # 3. 寻找最佳移动位置 (移向最近的敌人)
         best_pos = projectile.pos
         min_dist_after_move = min_dist
 
@@ -330,7 +336,7 @@ def create_mech_from_selection(name, selection, entity_id, controller, pilot_nam
     if pilot_name:
         # 尝试加载 Pilot
         try:
-            from parts_database import PLAYER_PILOTS, AI_PILOTS
+            # [MODIFIED] 使用已在文件顶部导入的 PLAYER_PILOTS 和 AI_PILOTS
             pilot_data_source = PLAYER_PILOTS if controller == 'player' else AI_PILOTS
 
             if pilot_name in pilot_data_source:
@@ -338,7 +344,8 @@ def create_mech_from_selection(name, selection, entity_id, controller, pilot_nam
             else:
                 print(f"警告: 找不到驾驶员 '{pilot_name}' (controller: {controller})。将不分配驾驶员。")
         except ImportError:
-            print(f"警告: 无法从 parts_database 导入 PLAYER_PILOTS 或 AI_PILOTS。")
+            # 这个 try/except 块在理论上不再需要，但作为安全措施保留
+            print(f"警告: 无法从 .database 导入 PLAYER_PILOTS 或 AI_PILOTS。")
 
     return Mech(
         id=entity_id,
@@ -376,7 +383,7 @@ def create_ai_mech(ai_loadout_key=None, entity_id="ai_1"):
         name = chosen_loadout['name']
         missing_standard_parts = [part_name for part_name in selection.values() if part_name not in ALL_PARTS]
         if missing_standard_parts:
-            print(f"严重错误: 标准AI配置中的部件 {missing_standard_parts} 也不存在！请检查 parts_database.py。")
+            print(f"严重错误: 标准AI配置中的部件 {missing_standard_parts} 也不存在！请检查 .database 包。")
             return None
 
     mech = create_mech_from_selection(
@@ -392,9 +399,13 @@ def create_ai_mech(ai_loadout_key=None, entity_id="ai_1"):
 class GameState:
     """
     管理整个游戏的状态，基于实体字典。
+    这是游戏状态的“唯一真实来源”。
     """
 
     def __init__(self, player_mech_selection=None, ai_loadout_key=None, game_mode='duel', player_pilot_name=None):
+        """
+        初始化游戏状态，创建玩家和AI机甲，并根据游戏模式设置它们的起始位置。
+        """
         self.board_width = 10
         self.board_height = 10
         self.entities = {}  # 核心状态：{ 'player_1': <Mech>, 'ai_1': <Mech>, 'proj_123': <Projectile> }
@@ -742,7 +753,7 @@ class GameState:
                         visited[next_pos] = new_cost
                         heapq.heappush(pq, (new_cost, next_pos))
         else:
-            # --- 地面移动逻辑 (A*) ---
+            # --- 地面移动逻辑 (A* 算法) ---
             pq = [(0, start_pos)]  # (cost, pos)
             visited = {start_pos: 0}
 
@@ -764,7 +775,7 @@ class GameState:
                         break
 
                 # --- [MODIFIED v2.3] 规则 A 实现 ---
-                # 根据你的要求：只要从一个被锁定的格子出发，移动成本就是 2。
+                # 只要从一个被锁定的格子出发，移动成本就是 2。
                 move_cost = 2 if current_is_locked else 1
                 # --- [修改结束] ---
 
@@ -775,8 +786,7 @@ class GameState:
                     if not (1 <= nx <= self.board_width and 1 <= ny <= self.board_height): continue
                     if next_pos in occupied_tiles: continue  # 路径不能穿过其他单位
 
-                    # --- [MODIFIED v2.3] 移除旧的 "脱离锁定" 成本逻辑 ---
-                    # new_cost = cost + move_cost (使用在循环外定义的 move_cost)
+                    # 移动成本是在 *离开* 格子时支付的
                     new_cost = cost + move_cost
 
                     if new_cost <= move_distance and (next_pos not in visited or new_cost < visited[next_pos]):
@@ -807,19 +817,23 @@ class GameState:
         is_curved = (action.action_style == 'curved')
 
         if action.effects:
+            # 检查【静止】加成
             static_bonus = action.effects.get("static_range_bonus", 0)
             if static_bonus > 0 and current_tp >= 1:
                 final_range += static_bonus
 
+            # 检查【双手】加成
             if isinstance(attacker_entity, Mech):  # 只有机甲能用双手
                 two_handed_bonus = action.effects.get("two_handed_range_bonus", 0)
                 if two_handed_bonus > 0:
                     action_slot = None
+                    # 找到这个动作来自哪个槽位
                     for slot, part in attacker_entity.parts.items():
                         if part and part.status != 'destroyed':
                             if any(act.name == action.name for act in part.actions):
                                 action_slot = slot
                                 break
+                    # 检查是否是手臂，以及另一只手是否为【空手】
                     if action_slot in ['left_arm', 'right_arm']:
                         other_arm_slot = 'right_arm' if action_slot == 'left_arm' else 'left_arm'
                         other_arm_part = attacker_entity.parts.get(other_arm_slot)
@@ -828,6 +842,7 @@ class GameState:
 
         # 2. 根据动作类型遍历目标
         if action.action_type == '近战':
+            # --- 近战逻辑 ---
             sx, sy = start_pos
             valid_melee_cells = []
             if orientation == 'N':
@@ -847,7 +862,8 @@ class GameState:
                             back_attack = is_back_attack(start_pos, entity.pos, entity.orientation)
                         valid_targets.append({'pos': entity.pos, 'entity': entity, 'is_back_attack': back_attack})
 
-        elif action.action_type == '射击' or action.action_type == '抛射':
+        elif action.action_type == '射击' or action.action_type == '抛射' or action.action_type == '快速':
+            # --- 射击/抛射 目标实体 逻辑 ---
             # 遍历所有敌方实体
             for entity in self.entities.values():
                 if entity.controller != attacker_entity.controller and entity.status != 'destroyed':
@@ -863,6 +879,7 @@ class GameState:
 
             # 如果是抛射, *额外* 查找所有可发射的空格子
             if action.action_type == '抛射':
+                # --- 抛射 目标格子 逻辑 ---
                 occupied_tiles = self.get_occupied_tiles()
                 for x in range(1, self.board_width + 1):
                     for y in range(1, self.board_height + 1):
