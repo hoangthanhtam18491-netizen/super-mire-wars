@@ -9,6 +9,8 @@ from .game_logic import (
     run_projectile_logic,
 )
 from .data_models import Mech
+# [新增] 导入抛射物模板以评估抛射动作强度
+from .database import PROJECTILE_TEMPLATES
 
 
 # --- AI 评估辅助函数 ---
@@ -33,28 +35,61 @@ def _evaluate_action_strength(action, available_s_action_count, is_in_range):
     if not action: return 0
     if action.action_type not in ['近战', '射击', '抛射']: return 0
 
-    yellow, red = _parse_dice_string_for_eval(action.dice)
+    strength = 0
 
-    # --- 期望值计算 (假设攻击姿态) ---
-    # 黄骰: 8面, 2x[轻*2], 2x[轻*1], 1x[空心轻*1], 1x[闪电], 1x[眼], 1x[空]
-    # EV(黄) = (2*2 + 2*1 + 1*1) / 8 = 7/8 = 0.875
-    ev_yellow = yellow * 0.875
+    # [新增] 抛射动作的特殊评估逻辑
+    # 抛射动作本身的 dice 通常为空字符串，伤害由生成的抛射物实体造成
+    if action.action_type == '抛射' and action.projectile_to_spawn:
+        template = PROJECTILE_TEMPLATES.get(action.projectile_to_spawn)
+        if template:
+            # 获取抛射物的主动作（通常是列表中的第一个）
+            proj_actions = template.get('actions', [])
+            if proj_actions:
+                # 这是一个字典，因为 PROJECTILE_TEMPLATES 存储的是字典格式
+                payload_action = proj_actions[0]
+                p_dice = payload_action.get('dice', '')
+                yellow, red = _parse_dice_string_for_eval(p_dice)
 
-    # 红骰: 8面, 4x[重*1], 1x[空心重*1], 1x[空心轻*1], 1x[闪电], 1x[眼]
-    # EV(红) = (4*1.5 + 1*1.5) / 8 [重击] + (1*1.0) / 8 [轻击]
-    # EV(红) = (7.5 + 1) / 8 = 8.5 / 8 = 1.0625
-    # (我们给重击 1.5 权重, 轻击 1.0 权重)
-    ev_red = red * ((5 / 8 * 1.5) + (1 / 8 * 1.0))  # 1.0625
+                # 计算单发抛射物的 EV (期望值)
+                # 黄骰 EV: 0.875, 红骰 EV: 1.0625
+                ev_yellow = yellow * 0.875
+                ev_red = red * 1.0625
+                base_strength = ev_yellow + ev_red
 
-    strength = ev_yellow + ev_red
+                # 考虑齐射 (Salvo)
+                salvo = action.effects.get('salvo', 1)
+                strength = base_strength * salvo
 
-    # 检查【频闪武器】(闪电->重击)
-    if action.effects and action.effects.get("convert_lightning_to_crit"):
-        # 1/8 概率的闪电现在变成了重击 (1.5 权重)
-        strength += yellow * (1 / 8 * 1.5)
-        strength += red * (1 / 8 * 1.5)
+                # 考虑类型优势
+                # '立即': 相当于直射，无额外加成
+                # '延迟': 具有追踪和压制能力，给予战术加成
+                payload_type = payload_action.get('action_type')
+                if payload_type == '延迟':
+                    strength *= 1.3  # 延迟导弹有很高的战术价值 (迫使玩家移动或拦截)
+    else:
+        # 常规动作评估逻辑 (直接读取 action.dice)
+        yellow, red = _parse_dice_string_for_eval(action.dice)
 
-    # --- 成本和效果调整 ---
+        # --- 期望值计算 (假设攻击姿态) ---
+        # 黄骰: 8面, 2x[轻*2], 2x[轻*1], 1x[空心轻*1], 1x[闪电], 1x[眼], 1x[空]
+        # EV(黄) = (2*2 + 2*1 + 1*1) / 8 = 7/8 = 0.875
+        ev_yellow = yellow * 0.875
+
+        # 红骰: 8面, 4x[重*1], 1x[空心重*1], 1x[空心轻*1], 1x[闪电], 1x[眼]
+        # EV(红) = (4*1.5 + 1*1.5) / 8 [重击] + (1*1.0) / 8 [轻击]
+        # EV(红) = (7.5 + 1) / 8 = 8.5 / 8 = 1.0625
+        # (我们给重击 1.5 权重, 轻击 1.0 权重)
+        ev_red = red * ((5 / 8 * 1.5) + (1 / 8 * 1.0))  # 1.0625
+
+        strength = ev_yellow + ev_red
+
+        # 检查【频闪武器】(闪电->重击)
+        if action.effects and action.effects.get("convert_lightning_to_crit"):
+            # 1/8 概率的闪电现在变成了重击 (1.5 权重)
+            strength += yellow * (1 / 8 * 1.5)
+            strength += red * (1 / 8 * 1.5)
+
+    # --- 通用：成本和效果调整 ---
     if action.cost == 'S':
         strength *= 1.2  # S动作更灵活
         if available_s_action_count == 1:

@@ -231,8 +231,10 @@ class CombatState:
 
     # --- 私有辅助方法 ---
 
+    # [--- 修复 ---]
+    # 将被遗忘的 _create_empty_packet 辅助方法添加回类中
     def _create_empty_packet(self, status='invalid'):
-        """创建一个空的、安全的结果包。"""
+        """(私有辅助函数) 创建一个空的、安全的结果包。"""
         return {
             'attacker_id': self.attacker_entity.id,
             'defender_id': self.defender_entity.id,
@@ -243,6 +245,8 @@ class CombatState:
             'pilot_changes': [],
             'entity_changes': [],
         }
+
+    # [--- 修复结束 ---]
 
     def _resolve_initial_roll(self, log):
         """
@@ -261,10 +265,23 @@ class CombatState:
         result_packet['dice_roll_details'] = dice_roll_details
 
         # --- 2. 确定目标部件 ---
-        target_part = self.defender_entity.get_part_by_name(self.target_part_name)
+        # [BUG 1 修复] 检查防御方是机甲还是抛射物
+        target_part = None
+        if isinstance(self.defender_entity, Projectile):
+            # 抛射物没有 get_part_by_name，它们只有一个 'core' 部件
+            target_part = self.defender_entity.parts.get('core')
+            if target_part:
+                self.target_part_name = 'core'  # 确保 target_part_name 也被设置
+            log.append(f"  > 目标是抛射物，自动瞄准 [核心]。")
+        elif isinstance(self.defender_entity, Mech):
+            # 机甲的原始逻辑
+            target_part = self.defender_entity.get_part_by_name(self.target_part_name)
+
         if not target_part:
-            log.append(f"  > [错误] 无法找到机甲部件 '{self.target_part_name}'。攻击中止。")
+            log.append(f"  > [错误] 无法找到目标部件 '{self.target_part_name}'。攻击中止。")
+            self.stage = 'RESOLVED'  # 标记为已解决以防卡死
             return log, self._create_empty_packet('invalid')
+        # [修复结束]
 
         original_status = target_part.status
 
@@ -387,7 +404,26 @@ class CombatState:
         dice_roll_details = self.initial_dice_roll_details
         result_packet['dice_roll_details'] = dice_roll_details
 
-        target_part = self.defender_entity.get_part_by_name(self.target_part_name)
+        # [BUG 1 修复 v2] 替换掉错误的行
+        # target_part = self.defender_entity.get_part_by_name(self.target_part_name) # <-- 这行是错误的
+
+        # [BUG 1 修复 v2] 在 _resolve_rerolled_attack 中也应用同样的检查
+        target_part = None
+        if isinstance(self.defender_entity, Projectile):
+            # 抛射物没有 get_part_by_name，它们只有一个 'core' 部件
+            target_part = self.defender_entity.parts.get('core')
+            if target_part:
+                self.target_part_name = 'core'  # 确保 target_part_name 也被设置
+        elif isinstance(self.defender_entity, Mech):
+            # 机甲的原始逻辑
+            target_part = self.defender_entity.get_part_by_name(self.target_part_name)
+
+        if not target_part:  # 如果在重投后目标部件消失了（理论上不应该，但作为安全检查）
+            log.append(f"  > [错误] 重投后无法找到目标部件 '{self.target_part_name}'。")
+            self.stage = 'RESOLVED'
+            return log, self._create_empty_packet('invalid')
+        # [修复结束]
+
         original_status = target_part.status
         is_mech_attacker = isinstance(self.attacker_entity, Mech)
         is_mech_defender = isinstance(self.defender_entity, Mech)

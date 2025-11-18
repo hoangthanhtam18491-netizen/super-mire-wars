@@ -1072,17 +1072,16 @@ document.addEventListener('DOMContentLoaded', () => {
         showGameOverModal(gameState.gameOver);
     }
 
-    // 检查待处理效果 (例如 毁伤/霰射/顺劈)
-    if (gameState.pendingEffect) {
-        const pendingOptions = (playerEntity.pending_combat && playerEntity.pending_combat.options) ? playerEntity.pending_combat.options : [];
-        showEffectSelector(pendingOptions);
-    }
+    // [BUG 2 修复] 移除此处的 pendingEffect 检查，
+    // 因为它现在和 rerollEvent 一起在 "视觉事件处理" 部分被处理，
+    // 以确保正确的显示优先级。
+    // if (gameState.pendingEffect) { ... }
 
     // 滚动日志到底部
     const log = document.querySelector('.combat-log');
     if (log) log.scrollTop = log.scrollHeight;
 
-    // 自动运行抛射物阶段 (如果需要)
+    // [BUG 2 修复] 自动运行抛射物阶段 (如果需要)
     if (gameState.runProjectilePhase && !gameState.gameOver && !gameState.pendingEffect && !gameState.pendingReroll) {
         // 禁用UI，显示等待
         document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
@@ -1096,13 +1095,62 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch(apiUrls.runProjectilePhase, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({})
+                body: JSON.stringify({ player_id: playerID }) // [健壮性] 始终发送 playerID
             })
             .then(res => res.json())
             .then(data => {
-                // 收到后端确认后，刷新页面
+                // [BUG 2 修复] 检查返回的 JSON 中是否包含中断！
                 if (data && data.success) {
+
+                    if (data.action_required === 'select_reroll') {
+                        // 中断：需要重投
+                        console.log("Projectile Phase: Action required: select_reroll. Showing modal.");
+                        const rerollData = data;
+                        // [健壮性] 确保 rerollData.dice_details 存在
+                        if (!rerollData.dice_details) {
+                            console.error("Reroll interrupt missing dice_details!", rerollData);
+                            showErrorModal('前端错误', '重投中断缺少 dice_details，无法显示弹窗。');
+                            return;
+                        }
+                        const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
+                        const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
+                        showDiceRollModal(
+                            rerollData.dice_details,
+                            rerollData.action_name,
+                            rerollData.attacker_name,
+                            rerollData.defender_name,
+                            true, // 可交互
+                            attackerIsPlayer,
+                            defenderIsPlayer
+                        );
+                        // 停止，不重载，等待玩家输入
+                        // [健壮性] 更新本地状态并重新启用UI
+                        gameState.pendingReroll = true;
+                        updateUIForPhase();
+                        return;
+                    }
+
+                    if (data.action_required === 'select_effect') {
+                        // 中断：需要选择效果
+                        console.log("Projectile Phase: Action required: select_effect. Showing modal.");
+                         // [健壮性] 确保 rerollData.options 存在
+                        if (!data.options) {
+                             console.error("Effect interrupt missing options!", data);
+                             showErrorModal('前端错误', '效果中断缺少 options，无法显示弹窗。');
+                             return;
+                        }
+                        showEffectSelector(data.options);
+                        // 停止，不重载，等待玩家输入
+                        // [健壮性] 更新本地状态并重新启用UI
+                        gameState.pendingEffect = true;
+                        updateUIForPhase();
+                        return;
+                    }
+
+                    // 默认行为：如果没有中断，则重载页面以显示新回合
+                    console.log("Projectile phase complete, no interrupts. Reloading for player turn.");
                     window.location.reload();
+
                 } else if (data) {
                     console.error("抛射物阶段运行失败:", data.message);
                     showErrorModal('抛射物阶段失败', data.message || '后端未能运行抛射物阶段。');
@@ -1114,22 +1162,43 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }, 2000);
     }
+    // [修复结束]
 
     // 视觉事件处理 (显示掷骰弹窗)
-    const rerollEvent = gameState.visualEvents.find(e => e.type === 'reroll_required');
+    // [BUG 2 修复] 使用 'details' 来查找正确的事件，并优先处理中断
+    const rerollEvent = gameState.visualEvents.find(e => e.type === 'select_reroll');
+    const effectEvent = gameState.visualEvents.find(e => e.type === 'select_effect');
     const diceRollEvent = gameState.visualEvents.find(e => e.type === 'dice_roll');
     const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
 
     if (rerollEvent) {
         // 优先显示重投弹窗
+        // [BUG 2 修复] 使用 'details'
         const rerollData = rerollEvent.details;
-        const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
-        const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
-        showDiceRollModal(
-            rerollData.dice_details, rerollData.action_name,
-            rerollData.attacker_name, rerollData.defender_name,
-            true, attackerIsPlayer, defenderIsPlayer // true = 可交互
-        );
+        // [健壮性] 确保 rerollData.dice_details 存在
+        if (!rerollData.dice_details) {
+            console.error("Reroll interrupt missing dice_details!", rerollData);
+            showErrorModal('前端错误', '重投中断缺少 dice_details，无法显示弹窗。');
+        } else {
+            const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
+            const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
+            showDiceRollModal(
+                rerollData.dice_details, rerollData.action_name,
+                rerollData.attacker_name, rerollData.defender_name,
+                true, attackerIsPlayer, defenderIsPlayer // true = 可交互
+            );
+        }
+    } else if (effectEvent) {
+        // [BUG 2 修复] 其次显示效果选择
+        console.log("VisualEvents: Action required: select_effect. Showing modal.");
+        // [健壮性] 确保 effectEvent.details.options 存在
+        if (!effectEvent.details || !effectEvent.details.options) {
+             console.error("Effect interrupt missing options!", effectEvent);
+             showErrorModal('前端错误', '效果中断缺少 options，无法显示弹窗。');
+        } else {
+            showEffectSelector(effectEvent.details.options);
+        }
+
     } else if (diceRollEvent) {
         // 其次显示普通掷骰弹窗
         const eventData = diceRollEvent;
@@ -1144,17 +1213,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 调试日志：帮助诊断竞态条件
+    // [BUG 2 修复] 修正检查逻辑
     if (gameState.pendingReroll && !rerollEvent) {
         console.error(
             "--- [状态不一致错误] ---",
             "\n游戏可能已卡死！",
             "\n原因: gameState.pendingReroll 为 true (应显示红色警告条)，",
-            "但是 gameState.visualEvents 中 *没有* 找到 'reroll_required' 事件。",
+            "但是 gameState.visualEvents 中 *没有* 找到 'select_reroll' 事件。",
             "\n这通常发生在后端状态与前端不同步时。",
             "\nVisual Events 内容:", gameState.visualEvents,
             "\nPlayer Entity:", playerEntity
         );
+        // [健壮性] 尝试强制重载来解决状态不同步
+        showErrorModal('状态不同步', '检测到状态不同步 (pendingReroll=true 但缺少事件)。将尝试强制重载。');
+        setTimeout(() => window.location.reload(), 3000);
     }
+    // [BUG 2 修复] 修正检查逻辑
+    if (gameState.pendingEffect && !effectEvent) {
+         console.error(
+            "--- [状态不一致错误] ---",
+            "\n游戏可能已卡死！",
+            "\n原因: gameState.pendingEffect 为 true (应显示红色警告条)，",
+            "但是 gameState.visualEvents 中 *没有* 找到 'select_effect' 事件。",
+            "\nVisual Events 内容:", gameState.visualEvents,
+            "\nPlayer Entity:", playerEntity
+        );
+        showErrorModal('状态不同步', '检测到状态不同步 (pendingEffect=true 但缺少事件)。将尝试强制重载。');
+        setTimeout(() => window.location.reload(), 3000);
+    }
+
 
     // --- 绑定所有 UI 事件 ---
 

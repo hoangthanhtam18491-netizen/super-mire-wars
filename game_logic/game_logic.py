@@ -336,8 +336,11 @@ class GameState:
         # 视觉事件
         self.visual_events = []
 
-        # [移除] 不再需要
-        # self.pending_attack_queue = []
+        # [新增] 抛射物阶段的待处理队列 (用于断点续传)
+        self.pending_projectile_queue = []
+
+        # [NEW] 标记当前是否处于抛射物阶段 (防止过早结束回合)
+        self.projectile_phase_active = False
 
         # --- 初始化玩家机甲 ---
         if player_mech_selection:
@@ -468,6 +471,8 @@ class GameState:
 
         self.game_over = None
         self.visual_events = []
+        self.pending_projectile_queue = []  # 重置队列
+        self.projectile_phase_active = False  # [NEW] 重置阶段标志
 
     def add_visual_event(self, event_type, **kwargs):
         """
@@ -594,13 +599,17 @@ class GameState:
             'game_over': self.game_over,
             'ammo_counts': self.ammo_counts,
             'visual_events': self.visual_events,
-            # 'pending_attack_queue': [atk.to_dict() if hasattr(atk, 'to_dict') else atk for atk in
-            #                          self.pending_attack_queue],
+            'pending_projectile_queue': self.pending_projectile_queue,  # [新增] 序列化队列
+            'projectile_phase_active': self.projectile_phase_active,  # [NEW] 序列化
         }
 
     @classmethod
     def from_dict(cls, data):
         """从字典重建游戏状态，包括所有实体。"""
+        # [FIX] 如果 data 为 None（session 失效），返回一个新的默认状态
+        if data is None:
+            return cls()
+
         game_state = cls.__new__(cls)
         game_state.board_width = 10
         game_state.board_height = 10
@@ -616,7 +625,12 @@ class GameState:
         game_state.game_over = data.get('game_over', None)
         game_state.ammo_counts = data.get('ammo_counts', {})
         game_state.visual_events = data.get('visual_events', [])
-        # game_state.pending_attack_queue = data.get('pending_attack_queue', [])
+
+        # [新增] 反序列化队列
+        game_state.pending_projectile_queue = data.get('pending_projectile_queue', [])
+
+        # [NEW] 反序列化
+        game_state.projectile_phase_active = data.get('projectile_phase_active', False)
 
         return game_state
 

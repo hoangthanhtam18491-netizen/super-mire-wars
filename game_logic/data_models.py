@@ -1,5 +1,6 @@
 import random
 
+
 # 注意：这个文件位于 game_logic/ 文件夹中。
 # 它依赖于同在 game_logic/ 下的 database/ 包。
 
@@ -501,6 +502,9 @@ class Projectile(GameEntity):
         self.electronics = electronics  # 电子值
         self.move_range = move_range  # '延迟' 动作的移动范围
 
+        # [NEW] 本回合是否已经行动过的标志
+        self.has_acted = False
+
         # 抛射物只有一个 'core' 部件，代表它的 HP (通常 structure=1)
         self.parts = {
             'core': Part(name=f"{name} 核心", armor=0, structure=1, actions=actions, electronics=electronics)
@@ -549,6 +553,7 @@ class Projectile(GameEntity):
             'parts': {'core': self.parts['core'].to_dict() if self.parts.get('core') else None},
             'electronics': self.electronics,
             'move_range': self.move_range,
+            'has_acted': self.has_acted,  # [NEW] 序列化
         })
         return base_dict
 
@@ -578,6 +583,9 @@ class Projectile(GameEntity):
             projectile.controller_css = 'player'
         elif projectile.controller == 'ai':
             projectile.controller_css = 'ai'
+
+        # [NEW] 反序列化
+        projectile.has_acted = data.get('has_acted', False)
 
         if core_part:
             projectile.parts['core'].status = core_part_data.get('status', 'ok')

@@ -20,6 +20,16 @@ AI_LOADOUT_HEAVY = {
         'backpack': 'EB-03 扩容电池'
     }
 }
+AI_LOADOUT_HEAVY_M = {
+    'name': "AI机甲 (重导弹型)",
+    'selection': {
+        'core': 'GK-09 "壁垒"核心',
+        'legs': 'TK-05 坦克履带',
+        'left_arm': 'ML-32 双联发射器 + CC-3 格斗刀',
+        'right_arm': '63型 臂炮 + CC-20 单手剑（右）',
+        'backpack': 'ML-94 四联导弹包'
+    }
+}
 AI_LOADOUT_STANDARD = {
     'name': "AI机甲 (标准泥沼型)",
     'selection': {
@@ -54,6 +64,7 @@ AI_LOADOUT_LIGHTB = {
 # AI 加载项的主字典
 AI_LOADOUTS = {
     "heavy": AI_LOADOUT_HEAVY,
+    "heavy_m": AI_LOADOUT_HEAVY_M,
     "standard": AI_LOADOUT_STANDARD,
     "lighta": AI_LOADOUT_LIGHTA,
     "lightb": AI_LOADOUT_LIGHTB,

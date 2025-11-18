@@ -54,10 +54,30 @@ def game():
     # 1. 从 game_state 中获取由控制器(controller)生成的、需要前端显示的视觉事件
     visual_events = game_state_obj.visual_events or []
 
+    # [BUG 2 修复] 检查 session 中是否有 'pending_interrupt_data'
+    # 这是由 handle_end_turn 存储的、在重定向上丢失的中断数据
+    pending_interrupt = session.pop('pending_interrupt_data', None)
+    if pending_interrupt:
+        # 找到一个待处理的中断！将其注入到 visual_events 中，
+        # 这样 game.js 就能在页面加载时立即捕获它。
+        action_required = pending_interrupt.get('action_required')
+        if action_required:
+            visual_events.append({
+                'type': action_required,  # 'select_reroll' 或 'select_effect'
+                'details': pending_interrupt
+            })
+            # [健壮性] 确保 game_state 也有这个事件，以防万一
+            game_state_obj.add_visual_event(action_required, details=pending_interrupt)
+
     # 2. 检查 session 中是否有 'run_projectile_phase' 标志
     #    (由 /end_turn 路由设置)
     #    这会告诉 game.js 在页面加载后立即触发 AJAX 调用
     run_projectile_phase_flag = session.get('run_projectile_phase', False)
+
+    # [FIX] 使用 projectile_phase_active 来判断是否需要继续运行抛射物阶段
+    # 这比仅仅检查队列更健壮，因为它覆盖了队列被清空但阶段未结束的情况
+    if game_state_obj.projectile_phase_active:
+        run_projectile_phase_flag = True
 
     # 从环境变量读取 Firebase 配置 (用于分析)
     firebase_config = os.environ.get('__firebase_config', '{}')
@@ -143,6 +163,7 @@ def reset_game():
     session.pop('combat_log', None)
     session.pop('visual_feedback_events', None)
     session.pop('run_projectile_phase', None)
+    session.pop('pending_interrupt_data', None)  # [BUG 2 修复] 清理
     return redirect(url_for('main.hangar'))
 
 
@@ -168,6 +189,14 @@ def end_turn():
         # 设置一个标志，让 /game 路由在加载时知道要自动触发 JS
         session['run_projectile_phase'] = True
 
+    # [BUG 2 修复] 检查是否发生了中断 (e.g., AI回合的攻击触发了玩家重投)
+    if result_data and result_data.get('action_required'):
+        # 不要丢失这个中断数据！将其存入 session。
+        # GET /game 路由将会读取它并注入到 visual_events 中。
+        session['pending_interrupt_data'] = result_data
+        # 同时，确保我们不运行抛射物阶段，因为中断优先
+        session.pop('run_projectile_phase', None)
+
     # 4. 保存所有状态回 session
     session['game_state'] = updated_state.to_dict()
     if len(log) > MAX_LOG_ENTRIES:
@@ -186,7 +215,16 @@ def run_projectile_phase():
     它调用 game_controller 来处理抛射物移动和攻击。
     它返回 JSON 而不是重定向。
     """
-    game_state_obj = GameState.from_dict(session.get('game_state'))
+    # [FIX] 防御性编程：检查 session 是否有效
+    raw_state = session.get('game_state')
+    if not raw_state:
+        return jsonify({'success': False, 'message': 'Session expired', 'redirect': url_for('main.hangar')}), 401
+
+    try:
+        game_state_obj = GameState.from_dict(raw_state)
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'State corrupted: {e}', 'redirect': url_for('main.hangar')}), 500
+
     log = session.get('combat_log', [])
 
     # 1. 消耗 'run_projectile_phase' 标志，防止重复运行
@@ -209,8 +247,13 @@ def run_projectile_phase():
         log = log[-MAX_LOG_ENTRIES:]
     session['combat_log'] = log
 
-    # 5. 返回 JSON，通知 game.js 操作已完成 (然后 game.js 会刷新页面)
-    return jsonify({'success': True, 'message': 'Projectile phase processed'})
+    # 5. [BUG 2 修复] 返回 JSON，通知 game.js 操作已完成
+    #    **并且** 将 result_data (中断数据) 一起返回！
+    response_data = {'success': True, 'message': 'Projectile phase processed'}
+    if result_data:
+        response_data.update(result_data)  # 合并中断数据
+
+    return jsonify(response_data)
 
 
 @game_bp.route('/respawn_ai', methods=['POST'])

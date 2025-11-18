@@ -41,7 +41,9 @@ def _apply_combat_packet(game_state, packet, log):
             if part_slot_or_name in entity.parts:
                 part = entity.parts.get(part_slot_or_name)
             else:
-                part = entity.get_part_by_name(part_slot_or_name)
+                # [健壮性] 确保 get_part_by_name 存在
+                if hasattr(entity, 'get_part_by_name'):
+                    part = entity.get_part_by_name(part_slot_or_name)
 
             if part:
                 part.status = new_status
@@ -190,7 +192,7 @@ def _run_interception_checks(projectile, game_state, log):
                             attacker_entity=entity,
                             defender_entity=projectile,
                             action=intercept_action,
-                            target_part_name='core',
+                            target_part_name='core',  # 抛射物只有一个 'core'
                             is_back_attack=False,
                             is_interception_attack=True  # 标记为拦截，跳过重投
                         )
@@ -1064,6 +1066,13 @@ def handle_end_turn(game_state):
     log.append("-" * 20)
     log.append("> 玩家回合结束。")
 
+    # [NEW] 在回合结束时，激活抛射物阶段标志
+    game_state.projectile_phase_active = True
+    # [NEW] 重置所有抛射物的行动状态
+    for entity in game_state.entities.values():
+        if entity.entity_type == 'projectile':
+            entity.has_acted = False
+
     entities_to_process = list(game_state.entities.values())
     game_ended_mid_turn = False
     result_data = {}
@@ -1132,78 +1141,137 @@ def handle_run_projectile_phase(game_state):
     result_data = {}
 
     log.append("--- 延迟动作阶段 (抛射物) ---")
-    entities_to_process = list(game_state.entities.values())
 
-    for entity in entities_to_process:
+    # [MODIFIED] 取消召唤失调逻辑，使用持久化队列断点续传
+
+    # 1. 初始化队列 (如果为空，且是本回合第一次进入此逻辑)
+    if not game_state.pending_projectile_queue:
+        projectiles_to_act = []
+        entities = list(game_state.entities.values())
+        for entity in entities:
+            if entity.entity_type == 'projectile' and entity.status == 'ok':
+                # [FIX] 使用 getattr 安全获取 is_active，防止旧存档报错
+                # 如果 entity 没有 is_active 属性，默认为 False，然后立即激活
+                if not getattr(entity, 'is_active', False):
+                    entity.is_active = True
+
+                    # 只有未行动过的才能加入队列
+                # [FIX] 使用 getattr 安全获取 has_acted
+                if not getattr(entity, 'has_acted', False):
+                    projectiles_to_act.append(entity)
+
+        # 排序：玩家优先
+        def sort_key(proj):
+            if proj.controller == 'player':
+                return 0
+            elif proj.controller == 'ai':
+                return 1
+            else:
+                return 2
+
+        projectiles_to_act.sort(key=sort_key)
+
+        # 存入队列 (存 ID)
+        game_state.pending_projectile_queue = [p.id for p in projectiles_to_act]
+
+        if projectiles_to_act:
+            log.append(f"> [系统] {len(projectiles_to_act)} 个抛射物准备行动。")
+
+    # 2. 处理队列
+    while game_state.pending_projectile_queue:
         if game_ended_mid_turn:
             break
 
-        if entity.entity_type == 'projectile' and entity.status == 'ok':
+        proj_id = game_state.pending_projectile_queue[0]
+        entity = game_state.get_entity_by_id(proj_id)
 
-            # [重构] 在抛射物移动 *之前* 运行拦截
-            game_state, log = _run_interception_checks(entity, game_state, log)
-            if entity.status == 'destroyed':
-                log.append(f"> [拦截] {entity.name} 在移动前被摧毁。")
-                continue  # 跳过这个抛射物
+        # 如果实体不存在、已摧毁、或已行动，直接移除并继续
+        # [FIX] 使用 getattr 安全检查 has_acted
+        if not entity or entity.status != 'ok' or getattr(entity, 'has_acted', False):
+            game_state.pending_projectile_queue.pop(0)
+            continue
 
-            entity_log, attacks = run_projectile_logic(entity, game_state, '延迟')
-            log.extend(entity_log)
+        # -------------------------------------------------
+        # 核心逻辑开始
+        # -------------------------------------------------
 
-            # [重构] 在抛射物移动 *之后* 再次运行拦截
-            game_state, log = _run_interception_checks(entity, game_state, log)
-            if entity.status == 'destroyed':
-                log.append(f"> [拦截] {entity.name} 在移动后被摧毁。")
-                continue  # 跳过这个抛射物
+        # [拦截 1] 移动前
+        game_state, log = _run_interception_checks(entity, game_state, log)
+        if entity.status == 'destroyed':
+            log.append(f"> [拦截] {entity.name} 在移动前被摧毁。")
+            game_state.pending_projectile_queue.pop(0)
+            continue
 
-            # 序列化攻击队列
-            attack_queue = []
-            for attack in attacks:
-                attack_queue.append({
-                    'attacker_id': attack['attacker'].id,
-                    'defender_id': attack['defender'].id,
-                    'action_dict': attack['action'].to_dict()
-                })
+        # 移动
+        entity_log, attacks = run_projectile_logic(entity, game_state, '延迟')
+        log.extend(entity_log)
 
-            # 循环结算抛射物攻击
-            for i, attack_data in enumerate(attack_queue):
-                game_state, log, result_data, game_ended_mid_turn = _resolve_queued_attack(
-                    game_state, log, attack_data, attack_queue[i + 1:]
-                )
-                if game_ended_mid_turn:
-                    break
+        # [拦截 2] 移动后
+        game_state, log = _run_interception_checks(entity, game_state, log)
+        if entity.status == 'destroyed':
+            log.append(f"> [拦截] {entity.name} 在移动后被摧毁。")
+            game_state.pending_projectile_queue.pop(0)
+            continue
+
+        # [NEW] 标记为已行动，防止重复
+        entity.has_acted = True
+
+        # 序列化攻击
+        attack_queue = []
+        for attack in attacks:
+            attack_queue.append({
+                'attacker_id': attack['attacker'].id,
+                'defender_id': attack['defender'].id,
+                'action_dict': attack['action'].to_dict()
+            })
+
+        # [关键步骤] 从队列中移除
+        game_state.pending_projectile_queue.pop(0)
+
+        # 结算攻击
+        for i, attack_data in enumerate(attack_queue):
+            game_state, log, result_data, game_ended_mid_turn = _resolve_queued_attack(
+                game_state, log, attack_data, attack_queue[i + 1:]
+            )
+            if game_ended_mid_turn:
+                # 中断发生！
+                break
 
     # --- 阶段 3: 回合结束，重置玩家状态 ---
-    player_mech = game_state.get_player_mech()  # [FIX] 在 if 之外获取 player_mech
+    if not game_state.pending_projectile_queue and not game_ended_mid_turn:
 
-    # [FIX] 只有在游戏未结束、本阶段未中断、且玩家没有已在等待的中断时，才重置玩家回合
-    if not game_state.game_over and not game_ended_mid_turn and not (player_mech and player_mech.pending_combat):
-        log.append(
-            "> AI回合结束。请开始你的回合。" if game_state.game_mode != 'range' else "> [靶场模式] 请开始你的回合。")
-        log.append("-" * 20)
+        # [NEW] 抛射物阶段结束
+        game_state.projectile_phase_active = False
 
-        if player_mech:
-            # 宕机恢复检查
-            if player_mech.stance == 'downed':
-                log.append("> [系统] 驾驶员链接恢复。机甲 [宕机姿态] 解除。")
-                log.append("> [警告] 系统冲击！本回合 AP-1, TP-1！")
-                player_mech.player_ap = 1
-                player_mech.player_tp = 0
-                player_mech.stance = 'defense'
-            else:
-                # 正常回合
-                player_mech.player_ap = 2
-                player_mech.player_tp = 1
+        player_mech = game_state.get_player_mech()
+        if not game_state.game_over and not (player_mech and player_mech.pending_combat):
+            log.append(
+                "> AI回合结束。请开始你的回合。" if game_state.game_mode != 'range' else "> [靶场模式] 请开始你的回合。")
+            log.append("-" * 20)
 
-            # 状态重置
-            player_mech.turn_phase = 'timing'
-            player_mech.timing = None
-            player_mech.opening_move_taken = False
-            player_mech.actions_used_this_turn = []
-            player_mech.pending_combat = None  # [阶段2重构] 清除战斗状态 (现在在这里是安全的)
+            if player_mech:
+                # 宕机恢复检查
+                if player_mech.stance == 'downed':
+                    log.append("> [系统] 驾驶员链接恢复。机甲 [宕机姿态] 解除。")
+                    log.append("> [警告] 系统冲击！本回合 AP-1, TP-1！")
+                    player_mech.player_ap = 1
+                    player_mech.player_tp = 0
+                    player_mech.stance = 'defense'
+                else:
+                    # 正常回合
+                    player_mech.player_ap = 2
+                    player_mech.player_tp = 1
 
-        game_state.check_game_over()
-    elif player_mech and player_mech.pending_combat:
-        log.append("> [系统] 玩家有待处理的中断，跳过回合重置。")
+                # 状态重置
+                player_mech.turn_phase = 'timing'
+                player_mech.timing = None
+                player_mech.opening_move_taken = False
+                player_mech.actions_used_this_turn = []
+                player_mech.pending_combat = None
+
+            game_state.check_game_over()
+        elif player_mech and player_mech.pending_combat:
+            log.append("> [系统] 玩家有待处理的中断，跳过回合重置。")
 
     return game_state, log, result_data, None
 
