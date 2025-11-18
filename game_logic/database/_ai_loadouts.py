@@ -25,8 +25,8 @@ AI_LOADOUT_HEAVY_M = {
     'selection': {
         'core': 'GK-09 "壁垒"核心',
         'legs': 'TK-05 坦克履带',
-        'left_arm': 'ML-32 双联发射器 + CC-3 格斗刀',
-        'right_arm': '63型 臂炮 + CC-20 单手剑（右）',
+        'left_arm': '55 型轻盾 + PC-9 霰弹枪（左）',
+        'right_arm': '55 型轻盾 + PC-9 霰弹枪（右）',
         'backpack': 'ML-94 四联导弹包'
     }
 }

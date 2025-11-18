@@ -60,12 +60,31 @@ def _evaluate_action_strength(action, available_s_action_count, is_in_range):
                 salvo = action.effects.get('salvo', 1)
                 strength = base_strength * salvo
 
-                # 考虑类型优势
+                # --- [AI 优化 v2.4] 抛射物战术价值提升 ---
+
+                # 1. 考虑类型优势
                 # '立即': 相当于直射，无额外加成
-                # '延迟': 具有追踪和压制能力，给予战术加成
+                # '延迟': 具有追踪和压制能力，给予极高的战术加成 (1.3 -> 1.5)
                 payload_type = payload_action.get('action_type')
                 if payload_type == '延迟':
-                    strength *= 1.3  # 延迟导弹有很高的战术价值 (迫使玩家移动或拦截)
+                    strength *= 1.5  # 延迟导弹能迫使玩家移动，极具威胁
+
+                # 2. 曲射/间接火力加成
+                # 曲射无视地形和射界，非常灵活
+                if action.action_style == 'curved':
+                    strength *= 1.25
+
+                # 3. 射程优势
+                # 如果射程 >= 6，给予安全距离加成，鼓励远程打击
+                if action.range_val >= 6:
+                    strength *= 1.1
+
+                # 4. "Alpha Strike" 偏好 (弹药焦虑)
+                # 如果是有弹药限制的武器，AI 倾向于在早期使用它们 (1.15倍)，
+                # 而不是留着弹药被摧毁。
+                if action.ammo > 0:
+                    strength *= 1.15
+
     else:
         # 常规动作评估逻辑 (直接读取 action.dice)
         yellow, red = _parse_dice_string_for_eval(action.dice)
@@ -171,8 +190,13 @@ def _calculate_ai_attack_range(game_state, attacker_mech, action, start_pos, ori
 
         is_curved = (action.action_style == 'curved')
 
-        # 1. 检查视线 (曲射跳过)
-        if not is_curved and not is_in_forward_arc(start_pos, orientation, target_pos):
+        # 1. 检查视线
+        # [AI 修复 v2.4] 抛射动作 (无论是曲射还是直射) 在本游戏规则中均无视朝向限制
+        requires_arc_check = True
+        if action.action_type == '抛射' or is_curved:
+            requires_arc_check = False
+
+        if requires_arc_check and not is_in_forward_arc(start_pos, orientation, target_pos):
             return []
 
         # 2. 计算最终射程
@@ -204,6 +228,20 @@ def _calculate_ai_attack_range(game_state, attacker_mech, action, start_pos, ori
         # 3. 检查距离
         dist = _get_distance(start_pos, target_pos)
         is_valid_target = (dist <= final_range)
+
+        # [AI 优化 v2.5] 智能射程判断 (追踪补偿)
+        if not is_valid_target and action.action_type == '抛射' and action.projectile_to_spawn:
+            template = PROJECTILE_TEMPLATES.get(action.projectile_to_spawn)
+            if template:
+                # 获取抛射物自身的移动/追踪能力
+                proj_move = template.get('move_range', 0)
+
+                # 只有带有移动能力的抛射物才能延伸射程
+                if proj_move > 0:
+                    # 计算最大有效威胁半径
+                    max_effective_range = final_range + proj_move
+                    if dist <= max_effective_range:
+                        is_valid_target = True
 
     if is_valid_target:
         targets.append({'pos': target_pos})
@@ -409,6 +447,16 @@ def run_ai_turn(ai_mech, game_state):
             part_obj = ai_mech.parts.get(part_slot)
             if part_obj and part_obj.status != 'destroyed':
                 if not (action.action_type == '被动' and action.effects.get("interceptor")):
+
+                    # [AI 修复 - 死循环根源]
+                    # 检查弹药。如果弹药为0，直接从可用列表中剔除。
+                    # 防止 AI 选择它，然后在执行时发现没弹药，由于逻辑错误陷入无限循环。
+                    if action.ammo > 0:
+                        ammo_key = (ai_mech.id, part_slot, action.name)
+                        current_ammo = game_state.ammo_counts.get(ammo_key, 0)
+                        if current_ammo <= 0:
+                            continue  # 跳过无弹药动作
+
                     available_actions.append((action, part_slot))
 
     # --- 阶段 1.5: 评估当前位置的攻击选项 ---
@@ -427,7 +475,7 @@ def run_ai_turn(ai_mech, game_state):
                                    player_pos, current_tp=tp) and (a.action_type == '抛射' or not is_ai_locked)
     ]
 
-    # 查找最佳 L 动作 (因为它们可能无法立即使用，但仍需评估)
+    # 查找最佳 L 动作
     best_l_melee_tuple = max(
         [(a, slot) for (a, slot) in available_actions if a.action_type == '近战' and a.cost == 'L'],
         key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count,
@@ -564,7 +612,6 @@ def run_ai_turn(ai_mech, game_state):
     if tp >= 1 and adjust_move_val > 0:
         log.append(f"> AI 正在评估 (TP) 调整移动... (范围: {adjust_move_val})")
 
-        # 尝试寻找一个 S/M 动作的攻击位置
         potential_melee_target = max(
             [(a, slot) for (a, slot) in available_actions if a.action_type == '近战' and a.cost != 'L'],
             key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count, False), default=None
@@ -620,7 +667,6 @@ def run_ai_turn(ai_mech, game_state):
             log.append(f"> AI 调整移动后立即转向 {target_orientation}。")
             ai_mech.orientation = target_orientation
     else:
-        # 如果不移动，则考虑转向
         target_orientation = _get_orientation_to_target(ai_mech.pos, player_pos)
         if ai_mech.orientation != target_orientation and tp >= 1:
             tp_needed_for_shot = False
@@ -642,7 +688,17 @@ def run_ai_turn(ai_mech, game_state):
 
     # --- 阶段 4: 主要动作 (AP) 循环 ---
     opening_move_taken = False
+
+    # [修复] 添加循环安全计数器，防止无限循环
+    loop_safety_counter = 0
+    MAX_LOOP_ITERATIONS = 20
+
     while ap > 0:
+        loop_safety_counter += 1
+        if loop_safety_counter > MAX_LOOP_ITERATIONS:
+            log.append("> [系统警告] AI 行动循环次数过多，强制结束 AI 回合以防止卡死。")
+            break
+
         # 重新评估当前可用动作
         current_available_actions_tuples = []
         for action, part_slot in all_actions_raw:
@@ -651,6 +707,14 @@ def run_ai_turn(ai_mech, game_state):
                 part_obj = ai_mech.parts.get(part_slot)
                 if part_obj and part_obj.status != 'destroyed':
                     if not (action.action_type == '被动' and action.effects.get("interceptor")):
+
+                        # [AI 修复 - 死循环根源] 再次检查弹药，确保不在循环中重新添加空动作
+                        if action.ammo > 0:
+                            ammo_key = (ai_mech.id, part_slot, action.name)
+                            current_ammo = game_state.ammo_counts.get(ammo_key, 0)
+                            if current_ammo <= 0:
+                                continue  # 跳过无弹药动作
+
                         current_available_actions_tuples.append((action, part_slot))
 
         if not current_available_actions_tuples:
@@ -759,6 +823,7 @@ def run_ai_turn(ai_mech, game_state):
         (action_obj, action_slot) = action_to_perform_tuple
         cost_ap, cost_tp_action = _get_action_cost(action_obj)
 
+        # [防卡死] 如果选中了动作但无法支付成本，标记为已使用并跳过，防止死循环
         if ap < cost_ap or tp < cost_tp_action:
             log.append(
                 f"> [成本检查失败] AI 试图执行 [{action_obj.name}] (需 {cost_ap}AP {cost_tp_action}TP) 但只有 ( {ap}AP {tp}TP)。")
@@ -827,21 +892,63 @@ def run_ai_turn(ai_mech, game_state):
                 launch_count = min(salvo_count, current_ammo)
 
                 if launch_count <= 0:
+                    # [AI 修复 - 关键] 如果因为某种原因进入了这里（理论上前面的过滤应拦截），
+                    # 我们必须确保动作被留在 "used" 列表里，防止死循环。
                     log.append(f"> [AI错误] 弹药耗尽，无法发射 [{action_obj.name}]。")
                     ap += cost_ap
                     tp += cost_tp_action
-                    ai_mech.actions_used_this_turn.pop()
-                    opening_move_taken = False
-                    continue
+
+                    # [FIX] 原代码在这里做了 pop()，导致死循环。现在我们删掉这行。
+                    # ai_mech.actions_used_this_turn.pop()
+
+                    opening_move_taken = False  # 保持重置，但动作已标记为使用，所以不会再选
+                    continue  # 继续循环，寻找下一个可用动作
 
                 game_state.ammo_counts[ammo_key] -= launch_count
-                log.append(f"> AI 发射 [{action_obj.name}] (齐射 {launch_count}) 到 {player_pos}！")
+                log.append(f"> AI 发射 [{action_obj.name}] (齐射 {launch_count})！")
                 log.append(f"> 消耗 {launch_count} 弹药, 剩余 {game_state.ammo_counts[ammo_key]}。")
+
+                # [AI 优化 v2.5] 智能瞄准
+                # 确定发射落点。如果玩家在射程外，则发射到射程极限处最靠近玩家的格子。
+                launch_range = action_obj.range_val
+                # (简单起见，这里暂不重复计算静止/双手加成，或者假设AI已应用)
+                if action_obj.effects.get("static_range_bonus") and tp >= 1:
+                    launch_range += action_obj.effects.get("static_range_bonus")
+
+                # [修复] 限制最大搜索范围，防止过大数值导致卡死
+                launch_range = min(launch_range, max(game_state.board_width, game_state.board_height) + 5)
+
+                target_spot = player_pos
+                dist_to_player = _get_distance(ai_mech.pos, player_pos)
+
+                if dist_to_player > launch_range:
+                    # 寻找中间点
+                    occupied = game_state.get_occupied_tiles()
+                    best_intermediate = None
+                    min_dist_to_player = 999
+
+                    # 搜索所有射程内的格子
+                    for dx in range(-launch_range, launch_range + 1):
+                        for dy in range(-launch_range, launch_range + 1):
+                            if abs(dx) + abs(dy) <= launch_range:
+                                cx, cy = ai_mech.pos[0] + dx, ai_mech.pos[1] + dy
+                                if 1 <= cx <= game_state.board_width and 1 <= cy <= game_state.board_height:
+                                    # 目标格子不能有单位 (抛射物除外，但简单起见避开所有单位)
+                                    if (cx, cy) not in occupied:
+                                        d = _get_distance((cx, cy), player_pos)
+                                        if d < min_dist_to_player:
+                                            min_dist_to_player = d
+                                            best_intermediate = (cx, cy)
+
+                    if best_intermediate:
+                        target_spot = best_intermediate
+                        log.append(f"> [AI 战术] 玩家在射程外 ({dist_to_player} > {launch_range})。")
+                        log.append(f"> [AI 战术] 发射到中间点 {target_spot}，依靠导弹自动追踪。")
 
                 for i in range(launch_count):
                     proj_id, proj_obj = game_state.spawn_projectile(
                         launcher_entity=ai_mech,
-                        target_pos=player_pos,  # AI 总是以玩家位置为目标
+                        target_pos=target_spot,  # 使用智能计算的落点
                         projectile_key=action_obj.projectile_to_spawn
                     )
                     if not proj_obj:
