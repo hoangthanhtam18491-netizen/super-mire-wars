@@ -32,6 +32,10 @@ ACTION_HUIZHAN_ZHONG = Action(name='挥斩【重】', action_type='近战', cost
                         effects=build_effects(EFFECT_STROBE_WEAPON, EFFECT_CLEAVE, EFFECT_TWO_HANDED_DEVASTATING))
 ACTION_DUNJI = Action(name="盾击", action_type="近战", cost="S", dice="5黄", range_val=1,
                         effects=build_effects(EFFECT_SHOCK))
+ACTION_CIJI_PB = Action(name="刺击【PB】", action_type="近战", cost="S", dice="2黄2红", range_val=1,
+                        effects=build_effects(EFFECT_AP_1))
+ACTION_CHUANCI_PB = Action(name="穿刺【PB】", action_type="近战", cost="L", dice="2黄4红", range_val=1,
+                        effects=build_effects((EFFECT_AP_2), EFFECT_DEVASTATING))
 
 # --- 射击 (Ranged) ---
 ACTION_DIANSHE = Action(name="点射", action_type="射击", cost="M", dice="1黄3红", range_val=6,
@@ -40,6 +44,8 @@ ACTION_DIANSHE_CI = Action(name="点射【磁】", action_type="射击", cost="S
                            effects=build_effects(EFFECT_AP_1, EFFECT_STATIC_RANGE_2))
 ACTION_DIANSHE_XIAN = Action(name="点射【霰射】", action_type="射击", cost="S", dice="2黄2红", range_val=3,
                            effects=build_effects(EFFECT_SCATTERSHOT))
+ACTION_DIANSHE_RF = Action(name="点射【RF】", action_type="射击", cost="S", dice="3红", range_val=6)
+ACTION_LIANSHE_RF = Action(name="连射【RF】", action_type="射击", cost="M", dice="2黄3红", range_val=6)
 ACTION_JUJI = Action(name="狙击", action_type="射击", cost="M", dice="2黄2红", range_val=12,
                      effects=build_effects(EFFECT_TWO_HANDED_SNIPER))
 ACTION_PAOJI = Action(name="炮击", action_type="射击", cost="L", dice="1黄4红", range_val=12,
@@ -47,10 +53,10 @@ ACTION_PAOJI = Action(name="炮击", action_type="射击", cost="L", dice="1黄4
 ACTION_DIANSHE_HUOPAO = Action(name="点射", action_type="射击", cost="L", dice="1黄4红", range_val=12,
                       effects=build_effects(EFFECT_DEVASTATING))
 ACTION_SAOSHE = Action(name="扫射", action_type="射击", cost="S", dice="4黄", range_val=4)
-ACTION_SUSHE_BIPAO = Action(name="速射", action_type="射击", cost="S", dice="4黄", range_val=4)
+ACTION_SUSHE_BIPAO = Action(name="速射【臂】", action_type="射击", cost="S", dice="4黄", range_val=4)
 ACTION_SUSHE = Action(name="速射", action_type="射击", cost="M", dice="4黄1红", range_val=6,
                         effects=build_effects(EFFECT_TWO_HANDED_RANGE_2))
-ACTION_DIANSHE_ZHAN = Action(name="点射(战)", action_type="射击", cost="S", dice="1黄2红", range_val=6)
+ACTION_DIANSHE_ZHAN = Action(name="点射【战】", action_type="射击", cost="S", dice="1黄2红", range_val=6)
 
 # --- 快速 (Quick) ---
 ACTION_JETTISON = Action(name="【弃置】", action_type="快速", cost="S", dice="", range_val=0,
@@ -61,28 +67,29 @@ ACTION_BENPAO = Action(name="奔跑", action_type="移动", cost="M", dice="", r
 ACTION_TIAOYUE = Action(name="跳跃", action_type="移动", cost="S", dice="", range_val=2,
                         effects=build_effects(EFFECT_FLIGHT_MOVEMENT))
 ACTION_BENPAO_MA = Action(name="奔跑（马）", action_type="移动", cost="M", dice="", range_val=5)
+ACTION_TUIJING = Action(name="推进", action_type="移动", cost="S", dice="", range_val=4)
 
 # 喷射冲刺动作
-ACTION_JET_SPRINT = Action(
-    name="喷射冲刺",
-    action_type="移动",
-    cost="M",
-    dice="",
-    range_val=3, # 基础移动 3 格
+ACTION_JET_SPRINT = Action(name="喷射冲刺", action_type="移动", cost="M", dice="", range_val=3, # 基础移动 3 格
     effects=build_effects(EFFECT_JET_SPRINT) # 关联直线移动效果
 )
+
+# --- 战术 (Tactic) ---
+ACTION_ARMOR_ASSULT = Action(name="突击装甲", action_type="战术", cost="S", dice="5黄", range_val=3,
+                        effects=build_effects(EFFECT_SHOCK))
 
 # --- 被动 (Passive) ---
 ACTION_NONE = Action(name="无动作", action_type="被动", cost="", dice="", range_val=0)
 ACTION_ENHANCED_COOLING = Action(name="增强冷却", action_type="被动", cost="", dice="", range_val=0,
                                  effects=build_effects(EFFECT_PASSIVE_COOLING))
+# [新增] 战斗型OS 被动动作
+ACTION_BATLLETYPE = Action(name="战斗型OS", action_type="被动", cost="", dice="", range_val=0,
+                           effects=build_effects(EFFECT_STANCE_MASTERY))
+
 
 # --- 拦截 (Interceptor) ---
-ACTION_AUTO_INTERCEPT = Action(
-    name="自动拦截",
-    action_type="被动", # 拦截动作是被动触发的
-    cost="",
-    dice="3黄", # 拦截时投掷 3 个黄骰
+ACTION_AUTO_INTERCEPT = Action(name="自动拦截", action_type="被动", # 拦截动作是被动触发的
+    cost="", dice="3黄", # 拦截时投掷 3 个黄骰
     range_val=3, # 拦截触发范围
     ammo=3,      # 弹药量
     effects=build_effects(EFFECT_INTERCEPTOR_3)
@@ -98,6 +105,17 @@ ACTION_LAUNCH_ROCKET = Action(
     action_style='direct',
     projectile_to_spawn='RA_81_ROCKET',
     ammo=2
+)
+ACTION_LAUNCH_GRENADE_SONG = Action(
+    name="榴弹【SONG】",
+    action_type="抛射",
+    cost="M",
+    dice="",
+    range_val=8,
+    action_style='direct',
+    projectile_to_spawn='SONGBIRD_GRENADE',
+    ammo=2,
+    effects=build_effects(EFFECT_SALVO_2)
 )
 ACTION_LAUNCH_GUIDED_MISSILE = Action(
     name="导弹",
@@ -121,10 +139,29 @@ ACTION_LAUNCH_GUIDED_MISSILE_K = Action(
     ammo=4,
     effects=build_effects(EFFECT_SALVO_4, EFFECT_CURVED_FIRE)
 )
+ACTION_LAUNCH_GUIDED_MISSILE_PB = Action(
+    name="双向飞弹",
+    action_type="抛射",
+    cost="S",
+    dice="",
+    range_val=6,
+    action_style='curved',
+    projectile_to_spawn='P32DUO-03',
+    ammo=6,
+    effects=build_effects(EFFECT_SALVO_3, EFFECT_CURVED_FIRE)
+)
 
 # --- 抛射物内部动作 (Immediate / Delayed) ---
 ACTION_IMMEDIATE_EXPLOSION = Action(
     name="多级串联战斗部",
+    action_type="立即",
+    cost="",
+    dice="3红",
+    range_val=0,
+    aoe_range=0
+)
+ACTION_IMMEDIATE_EXPLOSION_SB = Action(
+    name="轻型榴弹",
     action_type="立即",
     cost="",
     dice="3红",
@@ -146,4 +183,13 @@ ACTION_DELAYED_GUIDED_ATTACK_K = Action(
     dice="2红",
     range_val=0,
     aoe_range=0
+)
+ACTION_DELAYED_GUIDED_ATTACK_P = Action(
+    name="制导攻击_双向飞弹",
+    action_type="延迟",
+    cost="",
+    dice="2黄",
+    range_val=0,
+    aoe_range=0,
+    effects=build_effects(EFFECT_SHOCK)
 )

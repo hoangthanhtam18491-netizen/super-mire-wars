@@ -39,6 +39,10 @@ EFFECT_AP_1 = {
     "logic": {"armor_piercing": 1},
     "name": "【穿甲1】"
 }
+EFFECT_AP_2 = {
+    "logic": {"armor_piercing": 2},
+    "name": "【穿甲2】"
+}
 EFFECT_STROBE_WEAPON = {
     "logic": {"convert_lightning_to_crit": True},
     "name": "【频闪武器】"
@@ -109,6 +113,10 @@ EFFECT_SALVO_2 = {
     "logic": {"salvo": 2},
     "name": "【齐射2】"
 }
+EFFECT_SALVO_3 = {
+    "logic": {"salvo": 3},
+    "name": "【齐射3】"
+}
 EFFECT_SALVO_4 = {
     "logic": {"salvo": 4},
     "name": "【齐射4】"
@@ -128,6 +136,12 @@ EFFECT_SHOCK = {
 
 # 喷射冲刺效果
 EFFECT_JET_SPRINT = {
-    "logic": {"straight_line_bonus": 2},  # 赋予 API 检查的逻辑密钥
-    "name": "【直线移动】+2移动距离"  # 赋予前端显示的名称
+    "logic": {"straight_line_bonus": 2},
+    "name": "【直线移动】+2移动距离"
+}
+
+# [新增] 战斗型OS效果
+EFFECT_STANCE_MASTERY = {
+    "logic": {"stance_mastery": True},
+    "name": "【战斗型OS】"
 }

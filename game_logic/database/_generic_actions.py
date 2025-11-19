@@ -7,13 +7,13 @@
 - ..data_models (导入 Projectile - 尽管这里没直接用)
 - ._actions (导入抛射物“内部”使用的动作，如 ACTION_IMMEDIATE_EXPLOSION)
 """
-
+from . import ACTION_IMMEDIATE_EXPLOSION_SB
 # 导入抛射物内部动作
 # （注意：这些动作是在 _actions.py 中定义的）
 from ._actions import (
     ACTION_IMMEDIATE_EXPLOSION,
     ACTION_DELAYED_GUIDED_ATTACK,
-    ACTION_DELAYED_GUIDED_ATTACK_K
+    ACTION_DELAYED_GUIDED_ATTACK_K, ACTION_DELAYED_GUIDED_ATTACK_P
 )
 
 # === 抛射物模板 (Projectile Templates) ===
@@ -30,6 +30,19 @@ PROJECTILE_TEMPLATES = {
         "life_span": 1,
         # 使用导入的动作常量并转换为字典
         "actions": [ACTION_IMMEDIATE_EXPLOSION.to_dict()],
+        "electronics": 0,
+        "move_range": 0
+    },
+    "SONGBIRD_GRENADE": {
+        "name": "SONGBIRD 榴弹",
+        "entity_type": "projectile",
+        "evasion": 4,
+        "stance": "agile",
+        "structure": 1,
+        "armor": 0,
+        "life_span": 1,
+        # 使用导入的动作常量并转换为字典
+        "actions": [ACTION_IMMEDIATE_EXPLOSION_SB.to_dict()],
         "electronics": 0,
         "move_range": 0
     },
@@ -57,6 +70,19 @@ PROJECTILE_TEMPLATES = {
         "life_span": 99,
         # 使用导入的动作常量并转换为字典
         "actions": [ACTION_DELAYED_GUIDED_ATTACK_K.to_dict()],
+        "move_range": 6
+    },
+    "P32DUO-03": {
+        "name": "P32DUO-03 飞弹",
+        "entity_type": "projectile",
+        "evasion": 4,
+        "electronics": 1,
+        "stance": "agile",
+        "structure": 1,
+        "armor": 0,
+        "life_span": 99,
+        # 使用导入的动作常量并转换为字典
+        "actions": [ACTION_DELAYED_GUIDED_ATTACK_P.to_dict()],
         "move_range": 6
     }
 }
