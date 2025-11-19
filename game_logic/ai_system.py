@@ -476,15 +476,19 @@ def run_ai_turn(ai_mech, game_state):
     ]
 
     # 查找最佳 L 动作
+    # [FIX] 必须确保 L 动作在当前位置也是有效的 (因为 L 动作消耗 2AP+1TP，无法进行 adjustment 移动)
+    # 如果这里不检查范围，AI 可能会选择一个不可用的 L 动作作为“最佳动作”，然后尝试执行它。
     best_l_melee_tuple = max(
-        [(a, slot) for (a, slot) in available_actions if a.action_type == '近战' and a.cost == 'L'],
+        [(a, slot) for (a, slot) in available_actions if a.action_type == '近战' and a.cost == 'L'
+         and _calculate_ai_attack_range(game_state, ai_mech, a, ai_mech.pos, sim_orientation, player_pos, current_tp=tp)],
         key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count,
                                                    bool(melee_actions_now)),
         default=None
     )
     best_l_shoot_tuple = max(
         [(a, slot) for (a, slot) in available_actions if
-         (a.action_type == '射击' or a.action_type == '抛射') and a.cost == 'L'],
+         (a.action_type == '射击' or a.action_type == '抛射') and a.cost == 'L'
+         and _calculate_ai_attack_range(game_state, ai_mech, a, ai_mech.pos, sim_orientation, player_pos, current_tp=tp)],
         key=lambda item: _evaluate_action_strength(item[0], available_s_actions_count,
                                                    bool(shoot_actions_now)),
         default=None
@@ -758,12 +762,15 @@ def run_ai_turn(ai_mech, game_state):
             potential_openers = []
             if timing == '近战':
                 potential_openers.extend(possible_now_melee)
-                if best_melee_tuple and best_melee_tuple[0].cost == 'L':
-                    potential_openers.append(best_melee_tuple)
+                # [FIX] 移除了强制添加 L 动作的代码，因为 L 动作必须即时有效
+                # 如果 L 动作有效，它应该已经在 possible_now_melee 中了
+                # if best_melee_tuple and best_melee_tuple[0].cost == 'L':
+                #    potential_openers.append(best_melee_tuple)
             elif timing == '射击' or timing == '抛射':
                 potential_openers.extend(possible_now_shoot)
-                if best_shoot_tuple and best_shoot_tuple[0].cost == 'L':
-                    potential_openers.append(best_shoot_tuple)
+                # [FIX] 同上
+                # if best_shoot_tuple and best_shoot_tuple[0].cost == 'L':
+                #    potential_openers.append(best_shoot_tuple)
             elif timing == '移动':
                 potential_openers.extend(possible_now_move)
 

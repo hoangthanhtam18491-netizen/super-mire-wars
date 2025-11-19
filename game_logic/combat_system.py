@@ -231,8 +231,6 @@ class CombatState:
 
     # --- 私有辅助方法 ---
 
-    # [--- 修复 ---]
-    # 将被遗忘的 _create_empty_packet 辅助方法添加回类中
     def _create_empty_packet(self, status='invalid'):
         """(私有辅助函数) 创建一个空的、安全的结果包。"""
         return {
@@ -245,8 +243,6 @@ class CombatState:
             'pilot_changes': [],
             'entity_changes': [],
         }
-
-    # [--- 修复结束 ---]
 
     def _resolve_initial_roll(self, log):
         """
@@ -312,11 +308,10 @@ class CombatState:
                 # 条件: 攻击者是机甲, 姿态为 Attack, 动作是伤害动作 (排除抛射), 拥有 stance_mastery
                 if effect_dict.get("stance_mastery"):
                     if self.attacker_entity.stance == 'attack':
-                         # 确保是本体造成的直接伤害（近战、射击、战术），不包括抛射物（因为抛射物实体是独立的，这里只会是本体动作）
+                        # 确保是本体造成的直接伤害（近战、射击、战术），不包括抛射物（因为抛射物实体是独立的，这里只会是本体动作）
                         if self.action.action_type in ['近战', '射击', '战术']:
-                             log.append(f"  > [被动效果: 战斗型OS] 触发！攻击姿态下攻击骰 +1黄。")
-                             attack_dice_counts['yellow_count'] = attack_dice_counts.get('yellow_count', 0) + 1
-
+                            log.append(f"  > [被动效果: 战斗型OS] 触发！攻击姿态下攻击骰 +1黄。")
+                            attack_dice_counts['yellow_count'] = attack_dice_counts.get('yellow_count', 0) + 1
 
         dice_roll_details['attack_dice_input'] = attack_dice_counts.copy()
 
@@ -357,15 +352,15 @@ class CombatState:
 
         # 处理 [战斗型OS] 防御加成
         if is_mech_defender:
-             passive_effects = self.defender_entity.get_passive_effects()
-             for effect_dict in passive_effects:
-                 if effect_dict.get("stance_mastery"):
-                     if self.defender_entity.stance == 'defense':
-                         white_dice_count += 1
-                         log.append(f"  > [被动效果: 战斗型OS] 触发！防御姿态下白骰 +1 (总计 {white_dice_count} 白)。")
-                     elif self.defender_entity.stance == 'agile':
-                         blue_dice_count += 2
-                         log.append(f"  > [被动效果: 战斗型OS] 触发！机动姿态下蓝骰 +2 (总计 {blue_dice_count} 蓝)。")
+            passive_effects = self.defender_entity.get_passive_effects()
+            for effect_dict in passive_effects:
+                if effect_dict.get("stance_mastery"):
+                    if self.defender_entity.stance == 'defense':
+                        white_dice_count += 1
+                        log.append(f"  > [被动效果: 战斗型OS] 触发！防御姿态下白骰 +1 (总计 {white_dice_count} 白)。")
+                    elif self.defender_entity.stance == 'agile':
+                        blue_dice_count += 2
+                        log.append(f"  > [被动效果: 战斗型OS] 触发！机动姿态下蓝骰 +2 (总计 {blue_dice_count} 蓝)。")
 
         dice_roll_details['defense_dice_input'] = {'white_count': white_dice_count, 'blue_count': blue_dice_count}
 
@@ -691,6 +686,62 @@ class CombatState:
         self.stage = 'RESOLVED'
         return log, result_packet
 
+    def _resolve_chosen_effect(self, log, chosen_effect, result_packet=None):
+        """
+        (私有) 结算选定的效果 (手动选择或自动单选)。
+        """
+        if result_packet is None:
+            result_packet = self._create_empty_packet('penetration')
+            # 如果是从 submit_effect_choice 恢复的，我们需要重新填充 dice_roll_details
+            result_packet['dice_roll_details'] = self.initial_dice_roll_details.copy()
+
+        log.append(f"> 选定效果: 【{chosen_effect}】")
+
+        # 1. 计算效果逻辑
+        target_part = self.defender_entity.get_part_by_name(self.target_part_name)
+        if not target_part:
+            log.append(f"  > [错误] 无法找到目标部件 '{self.target_part_name}'。")
+            self.stage = 'RESOLVED'
+            return log, result_packet
+
+        # 调用 _calculate_effect_logic
+        # 注意：_calculate_effect_logic 内部会处理重投检查
+        log, dice_roll_details_2, packet_extension = self._calculate_effect_logic(
+            log, self.attacker_entity, self.defender_entity, target_part,
+            self.overflow_hits, self.overflow_crits, chosen_effect
+        )
+
+        # 2. 处理结果
+        if packet_extension.get('status') == 'reroll_choice_required':
+            # 发生重投中断
+            self.stage = 'AWAITING_EFFECT_REROLL'
+            # 保存重投所需的数据 (在 _calculate_effect_logic 中可能已经构建了部分，但我们需要保存它)
+            self.pending_effect_reroll_data = packet_extension['pending_reroll_data']
+
+            # 合并 status 到 result_packet
+            result_packet['status'] = 'reroll_choice_required'
+            # 添加第二次掷骰的详情到 result_packet
+            if dice_roll_details_2:
+                result_packet['dice_roll_details']['secondary_roll'] = dice_roll_details_2
+
+            return log, result_packet
+
+        # 3. 正常结算
+        if dice_roll_details_2:
+            result_packet['dice_roll_details']['secondary_roll'] = dice_roll_details_2
+
+        result_packet['part_changes'].extend(packet_extension.get('part_changes', []))
+        result_packet['pilot_changes'].extend(packet_extension.get('pilot_changes', []))
+        result_packet['entity_changes'].extend(packet_extension.get('entity_changes', []))
+
+        # 4. 结束战斗
+        if isinstance(self.attacker_entity, Projectile):
+            result_packet['entity_changes'].append({'target_id': self.attacker_entity.id, 'status': 'destroyed'})
+            log.append(f"  > [抛射物] {self.attacker_entity.name} 在攻击后引爆并移除。")
+
+        self.stage = 'RESOLVED'
+        return log, result_packet
+
     def _calculate_effect_logic(self, log, attacker_entity, defender_entity, target_part, overflow_hits, overflow_crits,
                                 chosen_effect, skip_reroll_phase=False, rerolled_defense_raw=None):
         """
@@ -719,13 +770,13 @@ class CombatState:
         stance_mastery_bonus_white = 0
         stance_mastery_bonus_blue = 0
         if isinstance(defender_entity, Mech):
-             passive_effects = defender_entity.get_passive_effects()
-             for effect_dict in passive_effects:
-                 if effect_dict.get("stance_mastery"):
-                     if defender_entity.stance == 'defense':
-                         stance_mastery_bonus_white += 1
-                     elif defender_entity.stance == 'agile':
-                         stance_mastery_bonus_blue += 2
+            passive_effects = defender_entity.get_passive_effects()
+            for effect_dict in passive_effects:
+                if effect_dict.get("stance_mastery"):
+                    if defender_entity.stance == 'defense':
+                        stance_mastery_bonus_white += 1
+                    elif defender_entity.stance == 'agile':
+                        stance_mastery_bonus_blue += 2
 
         if stance_mastery_bonus_white > 0:
             log.append(f"  > [被动效果: 战斗型OS] 触发！防御姿态下额外增加 +{stance_mastery_bonus_white}白。")
@@ -737,7 +788,8 @@ class CombatState:
             log.append(f"  > [效果：毁伤] 触发！")
             log.append(f"  > 计算对结构值的溢出伤害: {overflow_crits}重, {overflow_hits}轻。")
             white_dice_count_2 = target_part.structure + stance_mastery_bonus_white
-            blue_dice_count_2 = (defender_entity.get_total_evasion() + stance_mastery_bonus_blue) if defender_entity.stance == 'agile' else 0
+            blue_dice_count_2 = (
+                        defender_entity.get_total_evasion() + stance_mastery_bonus_blue) if defender_entity.stance == 'agile' else 0
 
             dice_roll_details_2 = {
                 'type': 'devastating_roll',
@@ -820,7 +872,8 @@ class CombatState:
                 log.append(f"  > [毁伤结算] 结构值被击穿！")
 
                 # [新增] 驾驶员技能：乘胜追击 (Pursuit) - 毁伤效果也算作击穿
-                if isinstance(attacker_entity, Mech) and attacker_entity.pilot and "pursuit" in attacker_entity.pilot.skills:
+                if isinstance(attacker_entity,
+                              Mech) and attacker_entity.pilot and "pursuit" in attacker_entity.pilot.skills:
                     attacker_entity.player_tp += 1
                     log.append(f"  > [驾驶员技能: 乘胜追击] 触发 (毁伤)！{attacker_entity.name} 获得 1 TP。")
 
@@ -869,9 +922,11 @@ class CombatState:
                 log.append(
                     f"  > [{log_effect_name}] 溢出伤害 ({overflow_crits}重, {overflow_hits}轻) 结算至随机部件: [{secondary_target.name}] ({secondary_target_slot})！")
 
-                white_dice_2 = (secondary_target.structure if secondary_status == 'damaged' else secondary_target.armor) + stance_mastery_bonus_white
+                white_dice_2 = (
+                                   secondary_target.structure if secondary_status == 'damaged' else secondary_target.armor) + stance_mastery_bonus_white
                 log_dice_source_2 = "结构值" if secondary_status == 'damaged' else "装甲值"
-                blue_dice_2 = (defender_entity.get_total_evasion() + stance_mastery_bonus_blue) if defender_entity.stance == 'agile' else 0
+                blue_dice_2 = (
+                            defender_entity.get_total_evasion() + stance_mastery_bonus_blue) if defender_entity.stance == 'agile' else 0
 
                 dice_roll_details_2 = {
                     'type': f'{chosen_effect}_roll',
@@ -955,9 +1010,11 @@ class CombatState:
                     log.append(f"  > [{log_effect_name}结算] 击穿了 [{secondary_target.name}]！")
 
                     # [新增] 驾驶员技能：乘胜追击 (Pursuit) - 顺劈/霰射击穿也算
-                    if isinstance(attacker_entity, Mech) and attacker_entity.pilot and "pursuit" in attacker_entity.pilot.skills:
-                         attacker_entity.player_tp += 1
-                         log.append(f"  > [驾驶员技能: 乘胜追击] 触发 ({log_effect_name})！{attacker_entity.name} 获得 1 TP。")
+                    if isinstance(attacker_entity,
+                                  Mech) and attacker_entity.pilot and "pursuit" in attacker_entity.pilot.skills:
+                        attacker_entity.player_tp += 1
+                        log.append(
+                            f"  > [驾驶员技能: 乘胜追击] 触发 ({log_effect_name})！{attacker_entity.name} 获得 1 TP。")
 
                     new_status = 'destroyed'
                     if secondary_target.structure == 0:

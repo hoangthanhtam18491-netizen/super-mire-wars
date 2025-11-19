@@ -285,6 +285,9 @@ class Mech(GameEntity):
         # [核心状态] 存储战斗状态机 (CombatState) 的序列化字典
         # 这是管理重投和效果选择中断的唯一来源
         self.pending_combat: dict | None = None
+
+        # [NEW] 标记：Ace AI 是否在本回合已经抢先行动过
+        self.has_acted_early = False
         # ---
 
     def get_total_evasion(self):
@@ -435,6 +438,8 @@ class Mech(GameEntity):
 
             # [核心状态] 序列化新的 pending_combat 状态
             "pending_combat": make_json_safe(self.pending_combat),
+            # [NEW] 序列化抢先行动状态
+            "has_acted_early": self.has_acted_early,
         })
         return base_dict
 
@@ -476,6 +481,9 @@ class Mech(GameEntity):
         # [核心修复] 确保在从 session 加载时恢复 pending_combat 状态
         mech.pending_combat = data.get('pending_combat', None)
         mech.last_pos = data.get('last_pos', None)
+
+        # [NEW] 恢复抢先行动状态
+        mech.has_acted_early = data.get('has_acted_early', False)
 
         mech.controller_css = data.get('controller_css', 'neutral')
         if mech.controller == 'player':

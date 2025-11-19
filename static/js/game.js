@@ -8,6 +8,7 @@ const data = JSON.parse(gameDataElement.textContent);
 let selectedAction = {}; // 存储玩家当前选择的动作
 const CELL_SIZE_PX = 51; // 棋盘格的像素尺寸 (50px + 1px 间隙)
 let diceModalTimer = null; // 骰子弹窗的自动关闭计时器
+let clashModalTimer = null; // [NEW] 拼点弹窗计时器
 
 // 从 data 对象解构所有动态数据
 const allEntities = data.allEntities; // 游戏中所有实体的列表
@@ -672,14 +673,22 @@ function postAndReload(url, body = {}) {
 
 function selectTiming(t) {
     if (gameState.pendingEffect || gameState.pendingReroll) return;
-    gameState.timing = t;
-    playerEntity.timing = t;
-    updateUIForPhase();
+    // [Fix Ace Logic] 不要乐观更新 gameState.timing，因为后端可能因为 Ace 判定而改变流程
+    // gameState.timing = t;
+    // playerEntity.timing = t;
+    // updateUIForPhase();
+
     fetch(apiUrls.selectTiming, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ timing: t, player_id: playerID })
     }).then(res => res.json()).then(data => {
-        if (!data.success) { console.warn('时机同步失败, 强制刷新。'); window.location.reload(); }
+        if (!data.success) {
+            console.warn('时机同步失败, 强制刷新。');
+            window.location.reload();
+        } else {
+            // 如果后端处理成功，重载页面以显示 Ace 动画或正常进入下一阶段
+            window.location.reload();
+        }
     }).catch(e => { console.error("Fetch error:", e); window.location.reload(); });
 }
 
@@ -690,6 +699,13 @@ function confirmTiming() {
         body: JSON.stringify({ player_id: playerID })
     }).then(res => res.json()).then(data => {
         if (data.success) {
+            // [NEW] 检查是否有拼点发生
+            if (data.clash_occurred) {
+                console.log("Clash occurred! Reloading...");
+                window.location.reload();
+                return;
+            }
+
             gameState.turnPhase = 'stance';
             playerEntity.turn_phase = 'stance';
             updateUIForPhase();
@@ -902,6 +918,66 @@ function formatDiceResult(result, rollType, isClickable = false) {
         }
     }
     return html || '<span>无结果</span>';
+}
+
+/**
+ * [MODIFIED] 显示 Ace 拼点结果弹窗 (使用 HTML 中的预定义结构)
+ * [FIX] 动态生成 HTML 结构，不再依赖预定义的 HTML
+ */
+function showClashModal(data) {
+    let modal = document.getElementById('clash-modal');
+
+    // 如果模态框不存在，则动态创建
+    if (!modal) {
+        const modalHtml = `
+            <div id="clash-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.85); z-index: 1000; justify-content: center; align-items: center; flex-direction: column;">
+                <h2 style="font-size: 3rem; color: #fff; margin-bottom: 2rem; font-family: 'Impact', sans-serif; letter-spacing: 2px; text-shadow: 0 0 10px #4299e1;">SPEED CLASH</h2>
+                <div style="display: flex; justify-content: center; align-items: center; gap: 4rem; margin-bottom: 2rem;">
+                    <div style="text-align: center;">
+                        <div style="color: #63b3ed; font-size: 1.2rem; margin-bottom: 0.5rem;">PLAYER</div>
+                        <div id="clash-player-timing" style="font-size: 2.5rem; font-weight: bold; color: white; border: 2px solid #63b3ed; padding: 1rem 2rem; border-radius: 8px; background: rgba(49, 130, 206, 0.2);"></div>
+                    </div>
+                    <div style="font-size: 3rem; font-weight: bold; color: #cbd5e0; font-style: italic;">VS</div>
+                    <div style="text-align: center;">
+                        <div style="color: #fc8181; font-size: 1.2rem; margin-bottom: 0.5rem;">ACE AI</div>
+                        <div id="clash-ai-timing" style="font-size: 2.5rem; font-weight: bold; color: white; border: 2px solid #fc8181; padding: 1rem 2rem; border-radius: 8px; background: rgba(229, 62, 62, 0.2);"></div>
+                    </div>
+                </div>
+                <div id="clash-reason" style="font-size: 1rem; color: #a0aec0; margin-bottom: 2rem; max-width: 600px; text-align: center;"></div>
+                <div id="clash-result" style="font-size: 2rem; font-weight: bold; text-transform: uppercase; animation: pulse 1s infinite;"></div>
+            </div>
+            <style>
+                @keyframes pulse {
+                    0% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.05); opacity: 0.8; }
+                    100% { transform: scale(1); opacity: 1; }
+                }
+            </style>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        modal = document.getElementById('clash-modal');
+    }
+
+    const winnerText = data.winner === 'player' ? 'INITIATIVE WON' : 'INITIATIVE LOST';
+    const winnerColor = data.winner === 'player' ? 'color: #48bb78;' : 'color: #f56565;';
+
+    // 填充数据
+    document.getElementById('clash-player-timing').innerText = data.player_timing;
+    document.getElementById('clash-ai-timing').innerText = data.ai_timing;
+    document.getElementById('clash-reason').innerText = data.reason;
+
+    const resultEl = document.getElementById('clash-result');
+    resultEl.innerText = winnerText;
+    resultEl.style.cssText = winnerColor;
+
+    // 显示模态框
+    modal.style.display = 'flex';
+
+    // 3秒后自动关闭
+    if (clashModalTimer) clearTimeout(clashModalTimer);
+    clashModalTimer = setTimeout(() => {
+        modal.style.display = 'none';
+    }, 3000);
 }
 
 /**
@@ -1166,10 +1242,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 视觉事件处理 (显示掷骰弹窗)
     // [BUG 2 修复] 使用 'details' 来查找正确的事件，并优先处理中断
+    const clashEvent = gameState.visualEvents.find(e => e.type === 'clash_result'); // [NEW]
     const rerollEvent = gameState.visualEvents.find(e => e.type === 'select_reroll');
     const effectEvent = gameState.visualEvents.find(e => e.type === 'select_effect');
     const diceRollEvent = gameState.visualEvents.find(e => e.type === 'dice_roll');
     const firstAttackResult = gameState.visualEvents.find(e => e.type === 'attack_result');
+
+    if (clashEvent) {
+        // 优先显示 Ace 拼点
+        showClashModal(clashEvent.details);
+        // 拼点弹窗不会阻塞其他弹窗的立即显示，但视觉上它是最重要的
+        // 注意：如果有后续的掷骰（因为 AI 抢攻），我们可能需要处理队列显示。
+        // 现在的简单处理是：clash 弹窗 3秒消失。如果有 diceRollEvent，它会在这之后依然存在（因为这里是页面加载时检查）。
+        // 为了体验，我们可以在 clashModal 关闭后再显示其他的。
+        // (这里暂不实现复杂的队列，让它们重叠显示或者依次显示)
+    }
 
     if (rerollEvent) {
         // 优先显示重投弹窗
@@ -1201,12 +1288,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     } else if (diceRollEvent) {
         // 其次显示普通掷骰弹窗
-        const eventData = diceRollEvent;
-        showDiceRollModal(
-            eventData.details, eventData.action_name,
-            eventData.attacker_name, eventData.defender_name,
-            false // false = 不可交互
-        );
+        // 如果是 clashEvent 刚刚发生，我们可以延迟显示这个
+        const delay = clashEvent ? 3000 : 0;
+        setTimeout(() => {
+            const eventData = diceRollEvent;
+            showDiceRollModal(
+                eventData.details, eventData.action_name,
+                eventData.attacker_name, eventData.defender_name,
+                false // false = 不可交互
+            );
+        }, delay);
+
     } else if (firstAttackResult) {
         // 最后，如果都没有，显示攻击结果 (例如 '击穿')
         showAttackEffect(firstAttackResult.defender_pos, firstAttackResult.result_text);

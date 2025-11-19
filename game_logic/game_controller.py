@@ -9,6 +9,8 @@ from .dice_roller import roll_black_die
 from .game_logic import is_back_attack, run_projectile_logic, GameState, run_drone_logic
 # AI 逻辑
 from .ai_system import run_ai_turn
+# [NEW] 导入 Ace 逻辑
+from . import ace_logic
 
 
 # --- 辅助函数 ---
@@ -222,14 +224,89 @@ def handle_select_timing(game_state, player_mech, timing):
 
 
 def handle_confirm_timing(game_state, player_mech):
-    """(玩家) 阶段 1：确认时机"""
+    """(玩家) 阶段 1：确认时机
+    [NEW] Ace AI 抢先手逻辑已移动至此。
+    """
     log = []
+    result_data = {}
+
     if player_mech.turn_phase == 'timing' and player_mech.timing and not game_state.game_over:
+
+        # [Ace Logic] 检查是否触发抢先手
+        ai_mech = game_state.get_ai_mech()
+        # 模糊匹配以兼容 "【Raven】"
+        if ai_mech and ai_mech.pilot and "Raven" in ai_mech.pilot.name:
+            log.append("--- [⚠️ WARNING] 遭遇王牌机师！ ---")
+
+            # 1. Ace 决定时机
+            ai_timing = ace_logic.decide_ace_timing(ai_mech, player_mech, game_state)
+
+            # 2. 拼点
+            winner, reason = ace_logic.check_initiative(player_mech.timing, ai_timing, player_mech.pilot, ai_mech.pilot)
+            log.append(f"> [拼刀] 玩家选择 [{player_mech.timing}] vs AI选择 [{ai_timing}]")
+            log.append(f"> [结果] {reason}")
+
+            clash_event_data = {
+                'player_timing': player_mech.timing,
+                'ai_timing': ai_timing,
+                'winner': winner,
+                'reason': reason
+            }
+
+            # 告知前端发生了拼点 (用于触发 reload)
+            result_data['clash_occurred'] = True
+
+            if winner == 'ai':
+                log.append("> [严重警告] 你的先手时机被 Ace 夺取！AI 将立即行动！")
+
+                # 3. 执行 AI 回合 (作为中断)
+                # 标记为已行动，这样 End Turn 时会跳过
+                ai_mech.has_acted_early = True
+
+                # 直接调用 run_ai_turn
+                ai_mech.last_pos = ai_mech.pos
+                entity_log, attacks = run_ai_turn(ai_mech, game_state)
+                log.extend(entity_log)
+
+                # 立即结算所有攻击
+                attack_queue = []
+                for attack in attacks:
+                    attack_queue.append({
+                        'attacker_id': attack['attacker'].id,
+                        'defender_id': attack['defender'].id,
+                        'action_dict': attack['action'].to_dict()
+                    })
+
+                # 循环结算
+                game_ended_mid_turn = False
+                for i, attack_data in enumerate(attack_queue):
+                    game_state, log, rd, game_ended_mid_turn = _resolve_queued_attack(
+                        game_state, log, attack_data, attack_queue[i + 1:]
+                    )
+                    if rd:  # 如果有重投中断
+                        result_data.update(rd)  # 传递给前端
+                    if game_ended_mid_turn:
+                        break
+
+                # 添加特殊的视觉事件
+                game_state.add_visual_event('clash_result', details=clash_event_data)
+
+            else:
+                log.append("> [系统] 你赢得了先手！继续回合。")
+                game_state.add_visual_event('clash_result', details=clash_event_data)
+
+        # 正常推进阶段
         player_mech.turn_phase = 'stance'
         game_state = _clear_transient_state(game_state)
-        game_state.visual_events = []
+
+        # 注意：如果 AI 抢先手并杀死了玩家，check_game_over 会在 _resolve_queued_attack 中处理
+
         log.append(f"> 时机已确认为 [{player_mech.timing}]。进入姿态选择阶段。")
-        return game_state, log, None, None, None
+
+        # [FIX] 返回值位置修正：result_data 必须在第4个位置
+        # 签名: game_state, log, unused, result_data, error
+        return game_state, log, None, result_data, None
+
     return game_state, log, None, None, "Please select a timing first."
 
 
@@ -1087,6 +1164,13 @@ def handle_end_turn(game_state):
 
             # 1. AI 机甲逻辑
             if entity.entity_type == 'mech':
+
+                # [Ace Logic] 如果 Ace 已经抢先行动，跳过此阶段
+                if hasattr(entity, 'has_acted_early') and entity.has_acted_early:
+                    log.append(f"> [系统] {entity.name} 已经在回合初行动过，跳过本阶段。")
+                    entity.has_acted_early = False  # 重置状态
+                    continue
+
                 if game_state.game_mode == 'range':
                     log.append("> [靶场模式] AI 跳过回合。")
                     entity.last_pos = None
@@ -1112,7 +1196,7 @@ def handle_end_turn(game_state):
                         if game_ended_mid_turn:
                             break
 
-                            # 2. AI 无人机逻辑
+            # 2. AI 无人机逻辑
             elif entity.entity_type == 'drone':
                 entity_log, attacks = run_drone_logic(entity, game_state)
                 log.extend(entity_log)

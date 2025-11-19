@@ -61,6 +61,19 @@ AI_LOADOUT_LIGHTB = {
     }
 }
 
+# [NEW] 王牌机师配置
+AI_LOADOUT_RAVEN = {
+    'name': "AC: NIGHTFALL (Raven)",
+    'pilot': "Raven", # 关联 _pilots.py 中的 PILOT_RAVEN
+    'selection': {
+        'core': 'HC-2000/BC “渡鸦”核心',
+        'legs': '2C-2000 探查型双足',
+        'left_arm': 'RF-025 突击步枪 + SONGBIRDS 榴弹加农炮',
+        'right_arm': 'PB-033M 打桩机 + BML-G1 双向飞弹',
+        'backpack': 'ASSAULT 突击装甲'
+    }
+}
+
 # AI 加载项的主字典
 AI_LOADOUTS = {
     "heavy": AI_LOADOUT_HEAVY,
@@ -68,4 +81,5 @@ AI_LOADOUTS = {
     "standard": AI_LOADOUT_STANDARD,
     "lighta": AI_LOADOUT_LIGHTA,
     "lightb": AI_LOADOUT_LIGHTB,
+    "raven": AI_LOADOUT_RAVEN, # 注册新的 Ace
 }
