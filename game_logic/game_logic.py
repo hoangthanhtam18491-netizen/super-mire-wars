@@ -26,6 +26,20 @@ def _get_distance(pos1, pos2):
     return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
 
+def _get_orientation_to_target(start_pos, target_pos):
+    """
+    [NEW] 计算从 start_pos 到 target_pos 的最佳朝向。
+    从 ai_system.py 移动至此，作为通用工具函数。
+    """
+    dx = target_pos[0] - start_pos[0]
+    dy = target_pos[1] - start_pos[1]
+
+    if abs(dx) > abs(dy):
+        return 'E' if dx > 0 else 'W'
+    else:
+        return 'S' if dy > 0 else 'N'
+
+
 def is_in_forward_arc(viewer_pos, viewer_orientation, target_pos):
     """检查目标是否在观察者的前向90度弧形区域内。"""
     vx, vy = viewer_pos

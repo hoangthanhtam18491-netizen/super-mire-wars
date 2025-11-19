@@ -1,10 +1,10 @@
 import random
 import heapq
 import re
-# [重构] 从 .game_logic 导入
+# [重构] 从 .game_logic 导入，现在包含 _get_orientation_to_target
 from .game_logic import (
     is_in_forward_arc, get_ai_lock_status, _is_adjacent, _is_tile_locked_by_opponent,
-    _get_distance,
+    _get_distance, _get_orientation_to_target, # <--- 新导入
     # [修复] 移除 'check_interception'，因为它已移至 controller
     run_projectile_logic,
 )
@@ -153,16 +153,7 @@ def _get_action_cost(action):
 
 # --- AI 辅助函数 ---
 
-def _get_orientation_to_target(start_pos, target_pos):
-    """计算朝向目标的最佳方向。"""
-    dx = target_pos[0] - start_pos[0]
-    dy = target_pos[1] - start_pos[1]
-
-    if abs(dx) > abs(dy):
-        return 'E' if dx > 0 else 'W'
-    else:
-        return 'S' if dy > 0 else 'N'
-
+# [REMOVED] _get_orientation_to_target 定义已移除，改用导入
 
 def _calculate_ai_attack_range(game_state, attacker_mech, action, start_pos, orientation, target_pos, current_tp=0):
     """

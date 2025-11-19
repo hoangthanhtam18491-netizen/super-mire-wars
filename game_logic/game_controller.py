@@ -5,12 +5,13 @@ from .data_models import Mech, Projectile, Action
 from .combat_system import CombatState
 from .dice_roller import roll_black_die
 # 核心游戏规则
-# [重构] 移除了 'check_interception'
 from .game_logic import is_back_attack, run_projectile_logic, GameState, run_drone_logic
 # AI 逻辑
 from .ai_system import run_ai_turn
 # [NEW] 导入 Ace 逻辑
 from . import ace_logic
+# [NEW] 导入新的 Ace AI 系统
+from . import ace_ai_system
 
 
 # --- 辅助函数 ---
@@ -263,9 +264,9 @@ def handle_confirm_timing(game_state, player_mech):
                 # 标记为已行动，这样 End Turn 时会跳过
                 ai_mech.has_acted_early = True
 
-                # 直接调用 run_ai_turn
+                # [NEW] 调用 Ace AI 系统
                 ai_mech.last_pos = ai_mech.pos
-                entity_log, attacks = run_ai_turn(ai_mech, game_state)
+                entity_log, attacks = ace_ai_system.run_ace_turn(ai_mech, game_state)
                 log.extend(entity_log)
 
                 # 立即结算所有攻击
@@ -1176,7 +1177,14 @@ def handle_end_turn(game_state):
                     entity.last_pos = None
                 else:
                     entity.last_pos = entity.pos
-                    entity_log, attacks = run_ai_turn(entity, game_state)
+
+                    # [NEW] 智能切换：如果是 Ace，调用 Ace 系统
+                    is_ace = entity.pilot and "Raven" in entity.pilot.name
+                    if is_ace:
+                        entity_log, attacks = ace_ai_system.run_ace_turn(entity, game_state)
+                    else:
+                        entity_log, attacks = run_ai_turn(entity, game_state)
+
                     log.extend(entity_log)
 
                     # 序列化攻击队列
