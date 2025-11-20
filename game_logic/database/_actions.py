@@ -34,8 +34,8 @@ ACTION_DUNJI = Action(name="盾击", action_type="近战", cost="S", dice="5黄"
                         effects=build_effects(EFFECT_SHOCK))
 ACTION_CIJI_PB = Action(name="刺击【PB】", action_type="近战", cost="S", dice="2黄2红", range_val=1,
                         effects=build_effects(EFFECT_AP_1))
-ACTION_CHUANCI_PB = Action(name="穿刺【PB】", action_type="近战", cost="L", dice="2黄4红", range_val=1,
-                        effects=build_effects((EFFECT_AP_2), EFFECT_DEVASTATING))
+ACTION_CHUANCI_PB = Action(name="穿刺【PB】", action_type="近战", cost="L", dice="4黄4红", range_val=1,
+                        effects=build_effects((EFFECT_AP_2), EFFECT_DEVASTATING, EFFECT_SHOCK))
 
 # --- 射击 (Ranged) ---
 ACTION_DIANSHE = Action(name="点射", action_type="射击", cost="M", dice="1黄3红", range_val=6,

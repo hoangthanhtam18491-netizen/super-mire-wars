@@ -3,20 +3,17 @@
 负责处理 Ace (王牌) AI 的特殊行为，包括：
 1. 抢先手 (Initiative Clash) 判定逻辑
 2. 王牌 AI 在玩家回合开始时的战术决策 (Pre-computation)
-3. [NEW] 指令重投决策 (Reroll Decision)
+3. 指令重投决策 (Reroll Decision) - [v2.5 优化] 防御计算与概率学
 
 依赖于:
 - game_logic (基础计算函数)
-- ai_system (用于部分评估逻辑)
+- ace_ai_system (引入规划器，确保言行一致)
 """
 
 import random
-from .ai_system import _evaluate_action_strength, _get_distance
-# 需要了解骰子面及其含义来做决策
-from .dice_roller import DICE_FACES
+# 引入规划器 (延迟导入或仅在函数内导入以防循环)
 
 # === 1. 优先级定义 (Priority Constants) ===
-# 数值越小，优先级越高
 TIMING_PRIORITY = {
     '快速': 1,
     '近战': 2,
@@ -37,76 +34,60 @@ def get_timing_priority(timing_str):
 def decide_ace_timing(ai_mech, player_mech, game_state):
     """
     Ace AI 在玩家回合开始阶段 (Phase 1) 就要决定它的战术时机。
-    这种决策比普通 AI 更具侵略性和预判性。
     """
+    # 延迟导入以避免循环依赖
+    from .ace_ai_system import AceTacticalPlanner
+
     if not player_mech or player_mech.status == 'destroyed':
         return '移动'
 
-    dist = _get_distance(ai_mech.pos, player_mech.pos)
+    # 1. 模拟回合开始时的资源状态
+    sim_ap = 2
+    sim_tp = 1
+    if ai_mech.stance == 'downed':
+        sim_ap = 1
+        sim_tp = 0
 
-    # --- 战术分析 ---
+    # 技能：乘胜追击模拟 (Phase 1 预判)
+    # 如果有乘胜追击且敌人受损，AI 应该意识到自己会有 3 AP，从而规划更贪婪的动作
+    if ai_mech.pilot and "pursuit" in ai_mech.pilot.skills:
+        has_compromised = False
+        for part in player_mech.parts.values():
+            if part and part.status in ['damaged', 'destroyed']:
+                has_compromised = True
+                break
+        if has_compromised:
+            sim_ap += 1
 
-    # 1. 斩杀检查 (Kill Shot)
-    # 如果玩家核心受损且在近战范围，尝试斩杀
-    player_core = player_mech.parts.get('core')
-    if player_core and player_core.status == 'damaged' and dist <= 2:
-        # 检查是否有近战武器
-        if any(a.action_type == '近战' for a, s in ai_mech.get_all_actions()):
-            return '近战'
+    # 2. 临时应用模拟资源
+    original_ap = ai_mech.player_ap
+    original_tp = ai_mech.player_tp
 
-    # 2. 距离与武装分析
-    # 检查可用动作
-    melee_actions = []
-    shoot_actions = []
-    projectile_actions = []
+    ai_mech.player_ap = sim_ap
+    ai_mech.player_tp = sim_tp
 
-    for action, slot in ai_mech.get_all_actions():
-        # 过滤掉不可用的部件和无弹药的动作
-        part = ai_mech.parts.get(slot)
-        if not part or part.status == 'destroyed': continue
-        if action.ammo > 0:
-            ammo_key = (ai_mech.id, slot, action.name)
-            if game_state.ammo_counts.get(ammo_key, 0) <= 0: continue
-
-        if action.action_type == '近战':
-            melee_actions.append(action)
-        elif action.action_type == '射击':
-            shoot_actions.append(action)
-        elif action.action_type == '抛射':
-            projectile_actions.append(action)
-
-    # A. 极近距离 (1-2格)
-    if dist <= 2:
-        # 优先近战，拼刀！
-        if melee_actions: return '近战'
-        # 如果没近战，可能是射击型 Ace，尝试拉开距离或贴脸射击
-        pass
-
-    # B. 中距离 (3-5格)
-    if 3 <= dist <= 5:
-        # 抛射物此时很有威胁 (特别是直射火箭或近距离导弹)
-        if projectile_actions: return '抛射'
-        if shoot_actions: return '射击'
-        pass
-
-    # C. 远距离 (6+格)
-    if dist >= 6:
-        # 只有射击或抛射
-        best_shoot = max(shoot_actions, key=lambda a: a.range_val, default=None)
-        best_proj = max(projectile_actions, key=lambda a: a.range_val, default=None)
-
-        shoot_range = best_shoot.range_val if best_shoot else 0
-        proj_range = best_proj.range_val if best_proj else 0
-
-        if shoot_range >= dist: return '射击'
-        if proj_range >= dist: return '抛射'
-        # 都够不着，必须移动
+    best_plan = None
+    try:
+        # 3. 运行规划器生成真实方案
+        planner = AceTacticalPlanner(ai_mech, game_state)
+        best_plan = planner.generate_best_plan()
+    except Exception as e:
+        print(f"[AceLogic Error] 规划器出错: {e}")
+        # 回退安全值
+        ai_mech.player_ap = original_ap
+        ai_mech.player_tp = original_tp
         return '移动'
 
-    # --- 默认回退逻辑 (基于 Raven 的性格：压迫感) ---
-    if melee_actions: return '近战'
-    if shoot_actions: return '射击'
-    if projectile_actions: return '抛射'
+    # 4. 恢复原始资源状态
+    ai_mech.player_ap = original_ap
+    ai_mech.player_tp = original_tp
+
+    # 5. 缓存计划
+    if best_plan:
+        ai_mech.cached_ace_plan = best_plan
+        # [Log] 可以在这里记录 AI 的心理活动
+        # print(f"> [Ace预判] 生成计划: {best_plan.description} (时机: {best_plan.timing})")
+        return best_plan.timing
 
     return '移动'
 
@@ -142,37 +123,33 @@ def check_initiative(player_timing, ai_timing, player_pilot, ai_pilot):
     return 'player', f"时机与速度完全一致，玩家险胜。"
 
 
-# === 4. [NEW] 重投决策逻辑 (Reroll Decision) ===
+# === 4. 重投决策逻辑 (Reroll Decision) ===
+# [v2.5 优化] 增强版重投逻辑
 
 def decide_reroll(ace_entity, enemy_entity, action, attack_roll_summary, defense_roll_summary, attack_raw_rolls, defense_raw_rolls, is_attacker):
     """
     决定 Ace 是否应该消耗链接值进行重投。
-
-    Args:
-        ace_entity: Ace 机甲实体
-        enemy_entity: 对手机甲实体
-        action: 当前使用的 Action 对象
-        attack_roll_summary: 攻击结果摘要 (e.g. {'轻击': 2, '重击': 1})
-        defense_roll_summary: 防御结果摘要 (e.g. {'防御': 1, '闪避': 0})
-        attack_raw_rolls: 原始攻击骰子 (dict of lists)
-        defense_raw_rolls: 原始防御骰子 (dict of lists)
-        is_attacker: Ace 是否是攻击方
-
-    Returns:
-        list: 需要重投的骰子列表 [{'color': 'yellow', 'index': 0}, ...]，如果不重投则返回 []
+    基于：
+    1. 资源 (Link Points)
+    2. 局势 (Threat Level)
+    3. 技能 (Pilot Skills)
+    4. 期望收益 (Expected Value)
     """
     if not ace_entity.pilot or ace_entity.pilot.link_points <= 0:
         return []
 
     selections = []
+    current_links = ace_entity.pilot.link_points
+    has_pursuit = "pursuit" in ace_entity.pilot.skills
 
-    # 计算当前净伤害
+    # 解析当前净伤害
     hits = attack_roll_summary.get('轻击', 0)
     crits = attack_roll_summary.get('重击', 0)
     defenses = defense_roll_summary.get('防御', 0)
     dodges = defense_roll_summary.get('闪避', 0)
+    attack_lightning = attack_roll_summary.get('闪电', 0)
 
-    # 简单模拟伤害结算
+    # 模拟伤害结算
     cancelled_hits = min(hits, defenses)
     hits_remaining = hits - cancelled_hits
 
@@ -185,65 +162,122 @@ def decide_reroll(ace_entity, enemy_entity, action, attack_roll_summary, defense
 
     net_damage = hits_remaining + crits_remaining
 
-    # --- 场景 A: Ace 是攻击方 ---
+    # --- 场景 A: Ace 是攻击方 (Attack Mode) ---
     if is_attacker:
-        # 策略 1: 斩杀 (Kill Confirm)
-        # 如果目标核心受损且伤害不足以击杀(假设1点结构)，或者目标濒临宕机
-        target_critical = False
+        target_part = None
+        # 尝试猜测目标部件 (此处简化，假设打核心或已受损部件)
+        # 在真实的 CombatState 中我们知道 target_part_name，但此函数签名未传入
+        # 我们假设 Ace 总是想最大化输出
+
+        # 1. [斩杀判定] Kill Confirm
+        # 如果伤害为0，或者伤害不足以致命，但重投有望致命
+        enemy_hp_estimate = 3 # 假设平均结构
+        enemy_is_compromised = False
         enemy_core = enemy_entity.parts.get('core')
+
         if enemy_core and enemy_core.status == 'damaged':
-            target_critical = True
+            enemy_hp_estimate = enemy_core.structure
+            enemy_is_compromised = True
 
-        # 如果本来能杀掉 (伤害>0) 就不重投了。如果杀不掉 (伤害=0) 且有机会，就重投。
-        if target_critical and net_damage == 0:
-            # 重投所有无效骰子 (空白, 空心)
-            selections.extend(_collect_bad_dice(attack_raw_rolls, ace_entity.stance))
+        # 技能协同: 乘胜追击 (Pursuit)
+        # 如果有此技能，且敌人处于受损状态，Ace 极度渴望击杀以刷新 AP/TP
+        pursuit_bonus_weight = 2 if (has_pursuit and enemy_is_compromised) else 0
 
-        # 策略 2: 高价值动作挽救 (High Value)
-        # L 动作成本高，如果全空，必须救
-        elif action.cost == 'L' and net_damage == 0:
-             selections.extend(_collect_bad_dice(attack_raw_rolls, ace_entity.stance))
+        # 策略 A-1: 确保击杀/击穿 (Secure Penetration)
+        # 如果当前未击穿 (net_damage == 0)，但只要多 1-2 点伤害就能击穿
+        if net_damage == 0:
+            # 只有当手里有烂骰子时才重投
+            bad_dice = _collect_bad_dice(attack_raw_rolls, ace_entity.stance)
+            if bad_dice:
+                # 如果是 L 动作 (高投入)，必定重投
+                if action.cost == 'L':
+                    selections.extend(bad_dice)
+                # 如果有乘胜追击且值得一搏 (剩余防御不高)
+                elif has_pursuit and dodges_remaining <= 1 and defenses <= 1:
+                     selections.extend(bad_dice)
+                # 链接值充裕时
+                elif current_links >= 3:
+                     selections.extend(bad_dice)
 
-        # 策略 3: 爆发 (Burst)
-        # 如果有大量红骰子但没出重击
-        elif '红' in action.dice and crits == 0:
-            selections.extend(_collect_dice_by_face(attack_raw_rolls, ['blank', 'hollow_heavy_hit', 'hollow_light_hit', 'eye']))
+        # 策略 A-2: 追求爆发 (Burst Damage)
+        # 如果已经击穿，但可以用 Link 换取更多暴击 (红骰)
+        elif net_damage > 0:
+             # 检查是否有“空心重击”或者“空白”的红骰
+             red_duds = _collect_dice_by_face(attack_raw_rolls, ['blank', 'hollow_heavy_hit', 'hollow_light_hit', 'eye'], color_filter=['red'])
+             if red_duds and current_links >= 2:
+                 selections.extend(red_duds)
 
-    # --- 场景 B: Ace 是防御方 ---
+    # --- 场景 B: Ace 是防御方 (Defense Mode) ---
     else:
-        # 策略 1: 保命 (Survival)
-        # 如果将被击穿且核心受损 -> 必须重投
         ace_core = ace_entity.parts.get('core')
-        if ace_core and ace_core.status == 'damaged' and net_damage > 0:
-            selections.extend(_collect_bad_defense_dice(defense_raw_rolls, ace_entity.stance))
+        ace_hp = ace_core.structure if ace_core.status == 'damaged' else ace_core.armor
 
-        # 策略 2: 止损 (Damage Control)
-        # 如果伤害极高 (>=3)，尝试减少伤害
-        elif net_damage >= 3:
-             selections.extend(_collect_bad_defense_dice(defense_raw_rolls, ace_entity.stance))
+        # 判定危险程度
+        is_dangerous = net_damage > 0
+
+        if is_dangerous:
+             # 收集防御骰中的坏结果 (空白/眼/错姿态的空心)
+             bad_dice = _collect_bad_defense_dice(defense_raw_rolls, ace_entity.stance)
+
+             if bad_dice:
+                 # 估算潜在收益 (Heuristic Calculation)
+                 # 白骰: 约 50% 概率出有效阻挡 (防御 or 空心防御x2 or 闪避)
+                 # 蓝骰: 约 25% 概率出闪避 (在机动姿态下)
+                 # 注意：如果当前是机动姿态，空心防御是无效的，所以白骰效率其实较低 (25%)
+                 # 如果当前是防御姿态，白骰效率极高 (62.5%)
+
+                 efficiency_white = 0.6 if ace_entity.stance == 'defense' else 0.25
+                 efficiency_blue = 0.25 # 机动姿态下才有蓝骰
+
+                 expected_block = 0
+                 for d in bad_dice:
+                     if d['color'] == 'white': expected_block += efficiency_white
+                     if d['color'] == 'blue': expected_block += efficiency_blue
+
+                 # 决策逻辑:
+                 # 1. 绝境: 伤害足以摧毁核心 -> 无论概率如何，只要有机会就重投
+                 is_fatal = (ace_core.status == 'damaged' and net_damage >= ace_hp) or (ace_core.status == 'ok' and net_damage >= ace_hp + 3) # 估算击穿装甲后的溢出
+
+                 # 2. 高概率防御: 潜在阻挡数 >= 当前伤害的一半
+                 is_high_probability = expected_block >= (net_damage * 0.5)
+
+                 if is_fatal:
+                     selections.extend(bad_dice)
+                 elif is_high_probability:
+                     # 如果不是绝境，但我们有很大把握能防住，也重投
+                     selections.extend(bad_dice)
 
     return selections
 
-def _collect_bad_dice(raw_rolls, stance):
-    """收集攻击骰中的坏结果 (空白、眼睛、非姿态加成的空心)"""
-    bad_selections = []
+# --- 辅助函数 ---
 
-    # 黄骰: 空白, 眼睛, 空心(如果不是攻击姿态)
-    for i, face in enumerate(raw_rolls.get('yellow_rolls', [])):
-        if face in ['blank', 'eye'] or (face == 'hollow_light_hit' and stance != 'attack'):
+def _collect_bad_dice(raw_rolls, stance):
+    """收集攻击骰中的坏结果 (空白、眼、不匹配姿态的空心)"""
+    bad_selections = []
+    # 黄骰: 空白, 眼, 空心轻击(非攻击姿态)
+    for i, face_list in enumerate(raw_rolls.get('yellow_rolls', [])):
+        face = face_list # 它是字符串
+
+        if face in ['blank', 'eye']:
+            bad_selections.append({'color': 'yellow', 'index': i})
+        elif face == 'hollow_light_hit' and stance != 'attack':
             bad_selections.append({'color': 'yellow', 'index': i})
 
-    # 红骰: 眼睛, 空心(如果不是攻击姿态)
+    # 红骰: 空白, 眼, 空心重/轻(非攻击姿态)
     for i, face in enumerate(raw_rolls.get('red_rolls', [])):
-        if face in ['blank', 'eye'] or (face in ['hollow_heavy_hit', 'hollow_light_hit'] and stance != 'attack'):
+        if face in ['blank', 'eye']:
+            bad_selections.append({'color': 'red', 'index': i})
+        elif face in ['hollow_heavy_hit', 'hollow_light_hit'] and stance != 'attack':
             bad_selections.append({'color': 'red', 'index': i})
 
     return bad_selections
 
-def _collect_dice_by_face(raw_rolls, target_faces):
+def _collect_dice_by_face(raw_rolls, target_faces, color_filter=None):
     """收集特定面的骰子"""
     selections = []
-    for color in ['yellow', 'red', 'white', 'blue']:
+    colors = color_filter if color_filter else ['yellow', 'red', 'white', 'blue']
+
+    for color in colors:
         key = f"{color}_rolls"
         for i, face in enumerate(raw_rolls.get(key, [])):
             if face in target_faces:
@@ -253,13 +287,15 @@ def _collect_dice_by_face(raw_rolls, target_faces):
 def _collect_bad_defense_dice(raw_rolls, stance):
     """收集防御骰中的坏结果"""
     bad_selections = []
-
-    # 白骰: 空白, 眼睛, 空心(如果不是防御姿态)
+    # 白骰
     for i, face in enumerate(raw_rolls.get('white_rolls', [])):
-        if face in ['blank', 'eye'] or (face == 'hollow_defense_2' and stance != 'defense'):
+        if face in ['blank', 'eye']:
+            bad_selections.append({'color': 'white', 'index': i})
+        # 如果不是防御姿态，空心防御也是坏结果
+        elif face == 'hollow_defense_2' and stance != 'defense':
             bad_selections.append({'color': 'white', 'index': i})
 
-    # 蓝骰: 空白, 眼睛
+    # 蓝骰
     for i, face in enumerate(raw_rolls.get('blue_rolls', [])):
         if face in ['blank', 'eye']:
             bad_selections.append({'color': 'blue', 'index': i})

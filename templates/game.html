@@ -30,6 +30,9 @@
             --cell-size: 50px;
             --grid-width: {{ game.board_width }};
             --grid-height: {{ game.board_height }};
+            /* [新增] Raven 深红色 */
+            --raven-dark-red: #8B0000;
+            --raven-text-red: #c53030;
         }
         body { font-family: sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: flex-start; padding: 2rem; gap: 2rem; }
         .panel { background-color: var(--hover-bg-color); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1.5rem; }
@@ -437,6 +440,39 @@
             background-color: var(--bg-color);
         }
 
+        /* [NEW] Raven 登场全屏闪烁 */
+        #raven-intro-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: black;
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+        #raven-intro-overlay.active {
+            display: flex;
+        }
+        @keyframes red-flash {
+            0% { opacity: 0; }
+            10% { opacity: 1; }
+            20% { opacity: 0; }
+            30% { opacity: 1; }
+            40% { opacity: 0; }
+            50% { opacity: 1; }
+            100% { opacity: 1; }
+        }
+        .flash-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            animation: red-flash 2s ease-in-out;
+            filter: drop-shadow(0 0 20px red);
+        }
+
     </style>
 </head>
 <body>
@@ -447,6 +483,11 @@
     -->
     {% set player_mech = game.get_player_mech() %}
     {% set ai_mech = game.get_ai_mech() %}
+
+    <!-- [NEW] Raven 登场遮罩层 -->
+    <div id="raven-intro-overlay">
+        <img src="https://placehold.co/800x600/000000/FF0000?text=WARNING" alt="Warning" class="flash-image">
+    </div>
 
     <!-- [顶部栏] -->
     <!-- [MODIFIED] 侧边栏结构调整 -->
@@ -489,8 +530,8 @@
             <div id="player-pilot-info" class="bg-gray-900 p-3 rounded-lg border border-blue-500">
                 {% if player_pilot %}
                     <h5 class="font-bold text-lg text-blue-300">{{ player_pilot.name }}</h5>
-                    <p class="text-sm">链接值: <span class="font-bold text-white">{{ player_pilot.link_points }}</span></p>
-                    <div class="text-xs grid grid-cols-2 gap-x-2 mt-1 text-gray-400">
+                    <p class="text-sm">链接值: <span class="font-bold text-red-400">{{ player_pilot.link_points }}</span></p>
+                    <div class="text-xs grid grid-cols-2 gap-x-2 mt-1 text-red-500">
                         {% for stat_name, value in player_pilot.speed_stats.items() %}
                         <span>{{ stat_name }}: {{ value }}</span>
                         {% endfor %}
@@ -677,14 +718,36 @@
 
     <!-- [右侧栏] -->
     <div class="sidebar panel">
+        <!-- [DYNAMIC STYLE] Raven 判定 (提升到顶部以供整个侧边栏使用) -->
+        {% set is_raven = ai_pilot and ('Raven' in ai_pilot.name or 'raven' in ai_pilot.name) %}
+
+        <!-- [MODIFIED] 标题样式恢复默认颜色 -->
         <h4>AI机甲状态</h4>
 
-        <!-- [MODIFIED v2.2] AI 驾驶员信息 -->
-        <div id="ai-pilot-info" class="bg-gray-900 p-3 rounded-lg border border-red-500 mb-4">
+        <!-- [MODIFIED] AI 驾驶员信息 -->
+        {% set raven_style_name = 'color: #f56565;' if is_raven else '' %}
+        {% set raven_style_value = 'color: #f56565;' if is_raven else 'color: #e2e8f0;' %}
+        {% set raven_border = 'border-color: #4b5563;' %}
+
+        <div id="ai-pilot-info" class="bg-gray-900 p-3 rounded-lg border mb-4" style="{{ raven_border }}">
             {% if ai_pilot %}
-                <h5 class="font-bold text-lg text-red-300">{{ ai_pilot.name }}</h5>
-                <p class="text-sm">链接值: <span class="font-bold text-white">{{ ai_pilot.link_points }}</span></p>
-                <div class="text-xs grid grid-cols-2 gap-x-2 mt-1 text-gray-400">
+                <!-- 驾驶员姓名 (Raven 变红) -->
+                <h5 class="font-bold text-lg" style="{{ raven_style_name }}">{{ ai_pilot.name }}</h5>
+
+                <!-- [NEW] 图片插入位置：在名字下方 -->
+                {% if is_raven %}
+                <div class="my-2">
+                     <img src="{{ url_for('static', filename='images/badge/Raven.png') }}"
+                         alt="Raven Emblem"
+                         style="width: 100%; max-width: 80px; height: auto; object-fit: contain; opacity: 0.9; filter: drop-shadow(0 0 5px #f56565);"
+                         onerror="this.style.display='none'">
+                </div>
+                {% endif %}
+
+                <!-- 链接值 -->
+                <p class="text-sm" style="color: #9ca3af;">链接值: <span class="font-bold" style="{{ raven_style_value }}">{{ ai_pilot.link_points }}</span></p>
+                <!-- 属性统计 -->
+                <div class="text-xs grid grid-cols-2 gap-x-2 mt-1" style="color: #9ca3af;">
                     {% for stat_name, value in ai_pilot.speed_stats.items() %}
                     <span>{{ stat_name }}: {{ value }}</span>
                     {% endfor %}
@@ -702,11 +765,19 @@
         {% endif %}
         <!-- [修改结束] -->
 
-        <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
+        <!-- [MODIFIED] 表格样式 (仅文字变红，线条保持默认) -->
+        <!-- [NOTE] 如果 is_raven 为真，给 table 添加 text-red-400 类 -->
+        <table class="{{ 'text-red-400' if is_raven else '' }}">
+            <thead>
+                <tr>
+                    <th>槽位</th>
+                    <th>名称</th>
+                    <th>状态</th>
+                </tr>
+            </thead>
             <tbody>
                 {% if ai_mech %}
                 {% for slot, part in ai_mech.parts.items() %}
-                <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
                 <tr style="cursor: pointer;" data-controller="ai" data-part-slot="{{ slot }}">
                     <td>{{ slot }}</td>
                     <td>{{ part.name if part else 'N/A' }}</td>
@@ -868,6 +939,24 @@
 <!-- [NEW] 加载新的 JS 模块 -->
 <!-- [v_REFACTOR_FIX] 修复 Flask 的 url_for 语法 -->
 <script type="module" src="{{ url_for('static', filename='js/game.js') }}"></script>
+
+<!-- [NEW] 控制 Raven 闪烁动画 -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // Jinja2 渲染 show_raven_intro 变量
+        const showIntro = {{ 'true' if show_raven_intro else 'false' }};
+        if (showIntro) {
+            const overlay = document.getElementById('raven-intro-overlay');
+            if (overlay) {
+                overlay.classList.add('active');
+                setTimeout(() => {
+                    overlay.classList.remove('active');
+                    // 可以在这里添加音效播放逻辑
+                }, 2500); // 2.5秒后移除，配合动画时长
+            }
+        }
+    });
+</script>
 
 
 <!-- [NEW] 错误弹窗 (用于捕获JS中的fetch错误) -->

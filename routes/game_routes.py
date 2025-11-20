@@ -79,6 +79,10 @@ def game():
     if game_state_obj.projectile_phase_active:
         run_projectile_phase_flag = True
 
+    # [NEW] 检查是否需要显示 Raven 登场动画
+    # 使用 pop 确保只显示一次
+    show_raven_intro = session.pop('show_raven_intro', False)
+
     # 从环境变量读取 Firebase 配置 (用于分析)
     firebase_config = os.environ.get('__firebase_config', '{}')
     app_id = os.environ.get('__app_id', 'default-app-id')
@@ -123,7 +127,8 @@ def game():
         app_id=app_id,
         initial_auth_token=auth_token,
         player_loadout=player_loadout,
-        ai_opponent_name=ai_opponent_name
+        ai_opponent_name=ai_opponent_name,
+        show_raven_intro=show_raven_intro  # [NEW] 传递标志
     )
 
     # 4. 渲染完成后，清除 game_state 中的瞬时状态

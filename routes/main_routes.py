@@ -72,14 +72,10 @@ def index():
     同时加载并解析 Game Introduction.md 以显示规则。
     """
     update_notes = [
-        "版本 v2.3: 基本系统补完",
-        "- [新增] 驾驶员与链接值部分。",
-        "- [新增] 专注重投。",
-        "- [新增] 宕机姿态。",
-        "- [新增] 多个新部件。",
-        "- [修复] 修复近战锁定下移动距离出错的问题。",
-        "- [优化] 程序结构。",
-        "- [问题] 抛射物拦截难以进行专注重投拦截。",
+        "版本 v2.5: 彩蛋",
+        "- [新增] 一个AI，一个部件，数个新效果。",
+        "- [优化] 代码结构。",
+        "- [修正] 拦截问题。",
     ]
     rules_html = ""
 
@@ -176,6 +172,10 @@ def start_game():
     game_mode = request.form.get('game_mode', 'duel')
     ai_opponent_key = request.form.get('ai_opponent')
     player_pilot_name = request.form.get('pilot')  # 获取玩家选择的驾驶员
+
+    # [NEW] 检测 Raven 登场：设置 Session 标志
+    if ai_opponent_key == 'raven':
+        session['show_raven_intro'] = True
 
     # 2. 创建一个新的 GameState 实例
     game = GameState(

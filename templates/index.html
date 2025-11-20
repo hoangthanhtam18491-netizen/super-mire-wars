@@ -46,9 +46,16 @@
     </button>
 
     <div class="text-center">
-        <h1 class="text-5xl font-bold mb-8 animate-pulse">超级泥沼大战</h1>
+        <!-- [MODIFIED] 添加了署名 -->
+        <h1 class="text-5xl font-bold mb-2 animate-pulse">
+            超级泥沼大战
+            <br>
+            <small class="text-sm text-gray-500 font-normal tracking-widest">由RX-105与AI完成</small>
+        </h1>
+
+        <div class="mb-8"></div> <!-- Spacer -->
+
         <!-- 链接到机库 -->
-        <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->
         <a href="{{ url_for('main.hangar') }}" class="bg-blue-600 hover:bg-blue-800 text-white font-bold py-3 px-6 rounded-lg text-2xl transition-all duration-300 shadow-lg hover:shadow-xl">
             进入机库
         </a>
