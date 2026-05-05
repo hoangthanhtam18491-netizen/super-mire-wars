@@ -11,6 +11,10 @@
 """
 
 import random
+import logging
+
+logger = logging.getLogger(__name__)
+
 # 引入规划器 (延迟导入或仅在函数内导入以防循环)
 
 # === 1. 优先级定义 (Priority Constants) ===
@@ -72,7 +76,7 @@ def decide_ace_timing(ai_mech, player_mech, game_state):
         planner = AceTacticalPlanner(ai_mech, game_state)
         best_plan = planner.generate_best_plan()
     except Exception as e:
-        print(f"[AceLogic Error] 规划器出错: {e}")
+        logger.error(f"规划器出错: {e}")
         # 回退安全值
         ai_mech.player_ap = original_ap
         ai_mech.player_tp = original_tp

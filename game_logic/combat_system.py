@@ -3,8 +3,6 @@ import re
 import traceback
 from .dice_roller import roll_dice, process_rolls, reroll_specific_dice
 from .data_models import Mech, Projectile, Part, Action
-# [NEW] 导入 Ace 逻辑
-from . import ace_logic
 
 
 def parse_dice_string(dice_str):
@@ -27,9 +25,15 @@ class CombatState:
     """
 
     def __init__(self, attacker_entity, defender_entity, action, target_part_name,
-                 is_back_attack=False, is_interception_attack=False):
+                 is_back_attack=False, is_interception_attack=False,
+                 ace_reroll_callback=None):
         """
         初始化一个新的战斗会话。
+
+        ace_reroll_callback: 可选，Ace AI 重投决策函数。
+            签名: (mech, opponent, action, attack_summary, defense_summary,
+                   attack_raw_rolls, defense_raw_rolls, is_attacker) -> list | None
+            由 game_controller 注入，避免 combat_system 直接依赖 ace_logic。
         """
         # --- 核心上下文 (在战斗中不变) ---
         self.attacker_entity = attacker_entity
@@ -38,6 +42,7 @@ class CombatState:
         self.target_part_name = target_part_name
         self.is_back_attack = is_back_attack
         self.is_interception_attack = is_interception_attack  # 拦截攻击不能被重投
+        self.ace_reroll_callback = ace_reroll_callback
 
         # --- 状态管理 ---
         self.stage = 'INITIAL_ROLL'
@@ -75,8 +80,9 @@ class CombatState:
         }
 
     @classmethod
-    def from_dict(cls, data, game_state):
-        """从字典和 game_state 恢复战斗状态机。"""
+    def from_dict(cls, data, game_state, ace_reroll_callback=None):
+        """从字典和 game_state 恢复战斗状态机。
+        ace_reroll_callback 不会被序列化，需要在恢复时重新注入。"""
         attacker = game_state.get_entity_by_id(data['attacker_id'])
         defender = game_state.get_entity_by_id(data['defender_id'])
         action = Action.from_dict(data['action_dict'])
@@ -90,7 +96,8 @@ class CombatState:
             action,
             data['target_part_name'],
             data.get('is_back_attack', False),
-            data.get('is_interception_attack', False)
+            data.get('is_interception_attack', False),
+            ace_reroll_callback=ace_reroll_callback,
         )
 
         # 恢复所有内部状态
@@ -349,12 +356,12 @@ class CombatState:
         # === [NEW] Ace AI 指令重投逻辑 (Synchronous) ===
         # 在玩家做出决定前，Ace AI 优先决定是否重投
 
-        if not self.ace_rerolled and not self.is_interception_attack:
+        if not self.ace_rerolled and not self.is_interception_attack and self.ace_reroll_callback:
             # A. Ace 是攻击方
             if is_mech_attacker and self.attacker_entity.controller == 'ai':
                 # 检测 Ace 特征 (有 Link Points)
                 if self.attacker_entity.pilot and self.attacker_entity.pilot.link_points > 0:
-                    reroll_selections = ace_logic.decide_reroll(
+                    reroll_selections = self.ace_reroll_callback(
                         self.attacker_entity, self.defender_entity, self.action,
                         attack_roll_summary, defense_roll_summary,
                         self.attack_raw_rolls, self.defense_raw_rolls,
@@ -379,7 +386,7 @@ class CombatState:
             if is_mech_defender and self.defender_entity.controller == 'ai':
                 # 检测 Ace 特征
                 if self.defender_entity.pilot and self.defender_entity.pilot.link_points > 0:
-                    reroll_selections = ace_logic.decide_reroll(
+                    reroll_selections = self.ace_reroll_callback(
                         self.defender_entity, self.attacker_entity, self.action,
                         attack_roll_summary, defense_roll_summary,
                         self.attack_raw_rolls, self.defense_raw_rolls,

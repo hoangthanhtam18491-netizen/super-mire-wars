@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Bash(node --check static/js/game.js)",
+      "Bash(node --check static/js/game-board.js)",
+      "Bash(node --check static/js/game-combat.js)"
+    ]
+  }
+}

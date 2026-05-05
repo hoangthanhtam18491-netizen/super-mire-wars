@@ -1,11 +1,15 @@
 import math
 import heapq
+import logging
 import random
+
+logger = logging.getLogger(__name__)
 
 # 基础数据模型
 from .data_models import (
     Mech, Part, Action, GameEntity, Projectile, Drone, Pilot
 )
+from .config import BOARD_WIDTH, BOARD_HEIGHT
 # 数据库
 from .database import (
     ALL_PARTS, CORES, LEGS, LEFT_ARMS, RIGHT_ARMS, BACKPACKS,
@@ -259,7 +263,7 @@ def create_mech_from_selection(name, selection, entity_id, controller, pilot_nam
         right_arm_part = Part.from_dict(RIGHT_ARMS[selection['right_arm']].to_dict())
         backpack_part = Part.from_dict(BACKPACKS[selection['backpack']].to_dict())
     except KeyError as e:
-        print(f"创建机甲时出错：找不到部件 {e}。使用默认部件。")
+        logger.error(f"创建机甲时出错：找不到部件 {e}。使用默认部件。")
         core_part = Part.from_dict(list(CORES.values())[0].to_dict())
         legs_part = Part.from_dict(list(LEGS.values())[0].to_dict())
         left_arm_part = Part.from_dict(list(LEFT_ARMS.values())[0].to_dict())
@@ -275,7 +279,7 @@ def create_mech_from_selection(name, selection, entity_id, controller, pilot_nam
             pilot_template = pilot_data_source[pilot_name]
             pilot_obj = Pilot.from_dict(pilot_template.to_dict())
         else:
-            print(f"警告: 找不到驾驶员 '{pilot_name}' (controller: {controller})。将不分配驾驶员。")
+            logger.warning(f"找不到驾驶员 '{pilot_name}' (controller: {controller})。将不分配驾驶员。")
 
     return Mech(
         id=entity_id,
@@ -297,7 +301,7 @@ def create_ai_mech(ai_loadout_key=None, entity_id="ai_1"):
     创建一个AI机甲。
     """
     if ai_loadout_key not in AI_LOADOUTS:
-        print(f"警告: AI配置键 '{ai_loadout_key}' 无效。将使用 'standard' 后备AI。")
+        logger.warning(f"AI配置键 '{ai_loadout_key}' 无效。将使用 'standard' 后备AI。")
         ai_loadout_key = "standard"
 
     chosen_loadout = AI_LOADOUTS[ai_loadout_key]
@@ -307,13 +311,13 @@ def create_ai_mech(ai_loadout_key=None, entity_id="ai_1"):
     # 验证部件是否存在
     missing_parts = [part_name for part_name in selection.values() if part_name not in ALL_PARTS]
     if missing_parts:
-        print(f"警告: AI配置 '{name}' 中的部件 {missing_parts} 在数据库中不存在。将使用 'standard' 后备AI。")
+        logger.warning(f"AI配置 '{name}' 中的部件 {missing_parts} 在数据库中不存在。将使用 'standard' 后备AI。")
         chosen_loadout = AI_LOADOUTS["standard"]
         selection = chosen_loadout['selection']
         name = chosen_loadout['name']
         missing_standard_parts = [part_name for part_name in selection.values() if part_name not in ALL_PARTS]
         if missing_standard_parts:
-            print(f"严重错误: 标准AI配置中的部件 {missing_standard_parts} 也不存在！请检查 .database 包。")
+            logger.critical(f"标准AI配置中的部件 {missing_standard_parts} 也不存在！请检查 .database 包。")
             return None
 
     mech = create_mech_from_selection(
@@ -336,8 +340,8 @@ class GameState:
         """
         初始化游戏状态，创建玩家和AI机甲，并根据游戏模式设置它们的起始位置。
         """
-        self.board_width = 10
-        self.board_height = 10
+        self.board_width = BOARD_WIDTH
+        self.board_height = BOARD_HEIGHT
         self.entities = {}  # 核心状态：{ 'player_1': <Mech>, 'ai_1': <Mech>, 'proj_123': <Projectile> }
 
         self.game_mode = game_mode
@@ -502,7 +506,7 @@ class GameState:
         在目标位置生成一个抛射物实体。
         """
         if projectile_key not in PROJECTILE_TEMPLATES:
-            print(f"错误: 找不到抛射物模板 '{projectile_key}'")
+            logger.error(f"找不到抛射物模板 '{projectile_key}'")
             return None, None
 
         template = PROJECTILE_TEMPLATES[projectile_key]
@@ -525,7 +529,7 @@ class GameState:
         )
 
         self.entities[new_id] = new_projectile
-        print(f"生成了实体: {new_id} at {target_pos}")
+        logger.info(f"生成了实体: {new_id} at {target_pos}")
         return new_id, new_projectile
 
     def check_game_over(self):
@@ -625,8 +629,8 @@ class GameState:
             return cls()
 
         game_state = cls.__new__(cls)
-        game_state.board_width = 10
-        game_state.board_height = 10
+        game_state.board_width = BOARD_WIDTH
+        game_state.board_height = BOARD_HEIGHT
 
         game_state.entities = {}
         entities_data = data.get('entities', {})

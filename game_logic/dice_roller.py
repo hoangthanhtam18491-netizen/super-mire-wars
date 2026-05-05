@@ -1,5 +1,8 @@
 import random
+import logging
 from collections import Counter
+
+logger = logging.getLogger(__name__)
 
 # 定义每种颜色骰子的面
 # 注意: 'light_hit_2' 代表结果为2个轻击, 'hollow_defense_2' 代表2个空心防御
@@ -220,6 +223,6 @@ def reroll_specific_dice(raw_rolls_dict, selections_to_reroll):
             raw_rolls_dict[color_key][index] = new_die_roll
         else:
             # 记录一个无害的警告，以防前端发送了无效数据
-            print(f"警告: 收到无效的重投请求: {selection}")
+            logger.warning(f"收到无效的重投请求: {selection}")
 
     return raw_rolls_dict
