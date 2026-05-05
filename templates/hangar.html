@@ -177,7 +177,7 @@
             <!-- 机甲总览与示意图 -->
             <div class="mb-10 p-4 md:p-6 bg-gray-900 rounded-lg shadow-inner grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div class="md:col-span-2 bg-gray-800 p-4 rounded-lg flex justify-center items-center">
-                    <div class="grid grid-cols-5 gap-2 w-full max-w-2xl text-center text-sm">
+                    <div class="grid grid-cols-3 sm:grid-cols-5 gap-2 w-full max-w-2xl text-center text-sm">
                         <div id="overview-core" class="overview-box col-span-1 min-h-[8rem] cursor-pointer" onclick="showPartCategory('core')"><span>核心</span></div>
                         <div id="overview-legs" class="overview-box col-span-1 min-h-[8rem] cursor-pointer" onclick="showPartCategory('legs')"><span>下肢</span></div>
                         <div id="overview-left_arm" class="overview-box col-span-1 min-h-[8rem] cursor-pointer" onclick="showPartCategory('left_arm')"><span>左臂</span></div>
@@ -213,7 +213,7 @@
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">核心</h3>
                     <div class="flex flex-wrap justify-center gap-4">
                     {% for name, part in cores.items() %}
-                    <div class="mb-4 w-56">
+                    <div class="mb-4 w-full sm:w-56">
                         <input type="radio" id="core_{{ name }}" name="core" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
                                data-part-type="core" data-evasion="{{ part.evasion|default(0) }}" data-electronics="{{ part.electronics|default(0) }}" data-adjust-move="0" data-image-url="{{ part.image_url|default('') }}">
                         <label for="core_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
@@ -264,7 +264,7 @@
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">下肢</h3>
                     <div class="flex flex-wrap justify-center gap-4">
                     {% for name, part in legs.items() %}
-                    <div class="mb-4 w-56">
+                    <div class="mb-4 w-full sm:w-56">
                         <input type="radio" id="legs_{{ name }}" name="legs" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
                                data-part-type="legs" data-evasion="{{ part.evasion|default(0) }}" data-electronics="{{ part.electronics|default(0) }}" data-adjust-move="{{ part.adjust_move|default(0) }}" data-image-url="{{ part.image_url|default('') }}">
                         <label for="legs_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
@@ -301,7 +301,7 @@
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">左臂</h3>
                     <div class="flex flex-wrap justify-center gap-4">
                     {% for name, part in left_arms.items() %}
-                    <div class="mb-4 w-56">
+                    <div class="mb-4 w-full sm:w-56">
                         <input type="radio" id="left_arm_{{ name }}" name="left_arm" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
                                data-part-type="left_arm" data-evasion="{{ part.evasion|default(0) }}" data-electronics="{{ part.electronics|default(0) }}" data-adjust-move="0" data-image-url="{{ part.image_url|default('') }}">
                         <label for="left_arm_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
@@ -336,7 +336,7 @@
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">右臂</h3>
                     <div class="flex flex-wrap justify-center gap-4">
                     {% for name, part in right_arms.items() %}
-                    <div class="mb-4 w-56">
+                    <div class="mb-4 w-full sm:w-56">
                         <input type="radio" id="right_arm_{{ name }}" name="right_arm" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
                                data-part-type="right_arm" data-evasion="{{ part.evasion|default(0) }}" data-electronics="{{ part.electronics|default(0) }}" data-adjust-move="0" data-image-url="{{ part.image_url|default('') }}">
                         <label for="right_arm_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
@@ -371,7 +371,7 @@
                     <h3 class="text-2xl font-semibold mb-4 text-center border-b-2 border-blue-500 pb-2">背包</h3>
                     <div class="flex flex-wrap justify-center gap-4">
                     {% for name, part in backpacks.items() %}
-                    <div class="mb-4 w-56">
+                    <div class="mb-4 w-full sm:w-56">
                         <input type="radio" id="backpack_{{ name }}" name="backpack" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}
                                data-part-type="backpack" data-evasion="{{ part.evasion|default(0) }}" data-electronics="{{ part.electronics|default(0) }}" data-adjust-move="0" data-image-url="{{ part.image_url|default('') }}">
                         <label for="backpack_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer h-full">
@@ -411,7 +411,7 @@
                     {% for name, pilot in player_pilots.items() %}
                     <div class="mb-4">
                         <input type="radio" id="pilot_{{ name }}" name="pilot" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
-                        <label for="pilot_{{ name }}" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-72">
+                        <label for="pilot_{{ name }}" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-full sm:w-72">
                             <h4 class="font-bold text-xl text-blue-300">{{ name }}</h4>
                             <p class="text-sm mt-2">链接值: {{ pilot.link_points }}</p>
                             <div class="text-sm grid grid-cols-2 gap-x-4 mt-2 text-gray-400">
@@ -434,7 +434,7 @@
                     <div class="mb-4 {{ 'hidden' if key == 'raven' else '' }}" id="container_ai_{{ key }}">
                         <input type="radio" id="ai_{{ key }}" name="ai_opponent" value="{{ key }}" class="hidden" required {% if loop.first %}checked{% endif %}>
                         <!-- [MODIFIED] 如果是 Raven, 应用 .raven-card 样式, 否则应用标准样式 -->
-                        <label for="ai_{{ key }}" class="part-card block p-6 rounded-lg border-2 cursor-pointer w-72 {{ 'raven-card' if key == 'raven' else 'bg-gray-700 border-gray-600' }}">
+                        <label for="ai_{{ key }}" class="part-card block p-6 rounded-lg border-2 cursor-pointer w-full sm:w-72 {{ 'raven-card' if key == 'raven' else 'bg-gray-700 border-gray-600' }}">
                             <!-- [MODIFIED] Raven 文字变红 -->
                             <h4 class="font-bold text-xl {{ 'text-red-500' if key == 'raven' else 'text-blue-300' }}">{{ loadout.name }}</h4>
                             <p class="text-sm mt-2">核心: {{ loadout.selection.core }}</p>
@@ -451,21 +451,21 @@
                 <div class="flex justify-center flex-wrap gap-6">
                     <div class="mb-4">
                         <input type="radio" id="mode_duel" name="game_mode" value="duel" class="hidden" required checked>
-                        <label for="mode_duel" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-72">
+                        <label for="mode_duel" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-full sm:w-72">
                             <h4 class="font-bold text-xl text-blue-300">决斗模式 (1v1)</h4>
                             <p class="text-sm mt-2">正面对决。</p>
                         </label>
                     </div>
                     <div class="mb-4">
                         <input type="radio" id="mode_horde" name="game_mode" value="horde" class="hidden" required>
-                        <label for="mode_horde" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-72">
+                        <label for="mode_horde" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-full sm:w-72">
                             <h4 class="font-bold text-xl text-blue-300">生存模式 (Horde)</h4>
                             <p class="text-sm mt-2">迎战从底部不断刷新的敌人。</p>
                         </label>
                     </div>
                      <div class="mb-4">
                          <input type="radio" id="mode_range" name="game_mode" value="range" class="hidden" required>
-                         <label for="mode_range" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-72">
+                         <label for="mode_range" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-full sm:w-72">
                              <h4 class="font-bold text-xl text-blue-300">靶场模式</h4>
                              <p class="text-sm mt-2">AI不会行动。被击败后可重置。</p>
                          </label>

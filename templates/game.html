@@ -44,7 +44,9 @@
 
     <!-- 移动端侧边栏抽屉 -->
     <div id="mobile-sidebar-drawer">
-        <button id="mobile-drawer-close">&times;</button>
+        <div id="mobile-drawer-header">
+            <button id="mobile-drawer-close">&times;</button>
+        </div>
         <div id="mobile-drawer-content"></div>
     </div>
 
@@ -75,7 +77,7 @@
         Jinja 在服务器端渲染所有实体，JS 在客户端将其定位。
         -->
         <!-- 实体 wrappers 容器，AJAX 刷新时整体替换 -->
-        <div id=”entity-wrappers-container”>
+        <div id="entity-wrappers-container">
             {% include '_board_entities.html' %}
         </div>
 
