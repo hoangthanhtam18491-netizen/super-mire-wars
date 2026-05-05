@@ -1,0 +1,51 @@
+<!--
+[v1.25 修复]
+恢复 v1.22 的绝对定位逻辑。
+Jinja 在服务器端渲染所有实体，JS 在客户端将其定位。
+-->
+{% for entity in game.get_all_renderable_entities() %}
+<div class="mech-icon-wrapper" id="entity-{{ entity.id }}-wrapper"
+     data-last-pos="{{ entity.last_pos | tojson | safe }}"
+     data-current-pos="{{ entity.pos | tojson | safe }}"
+     style="position: absolute; left: -9999px; top: -9999px; /* JS会设置正确位置 */">
+
+    <!-- [图标更新] 替换 SVG 为 <img> 标签，使用占位符 URL -->
+    <div class="mech-icon {{ entity.controller_css }}">
+
+        <!-- 你可以在这里替换为你自己的图片 URL -->
+        {% set icon_url = 'https://placehold.co/64x64/718096/E2E8F0?text=?' %} <!-- 默认图标 -->
+
+        {% if entity.entity_type == 'mech' %}
+            {% if entity.controller == 'player' %}
+                <!-- 玩家机甲图标 -->
+                {% set icon_url = 'static/images/icon/player2.png' %}
+            {% else %}
+                <!-- AI 机甲图标 -->
+                {% set icon_url = 'static/images/icon/AI2.png' %}
+            {% endif %}
+
+        <!-- [MODIFIED] 抛射物图标 -->
+        {% elif entity.entity_type == 'projectile' %}
+            {% if entity.name == 'MC-3 "利剑"导弹' %}
+                {% set icon_url = 'static/images/icon/rocket.jpg' %}
+            {% elif entity.name == 'RA-81火箭弹' %}
+                {% set icon_url = 'static/images/icon/rocket.jpg' %}
+            {% else %}
+                {% set icon_url = 'https://placehold.co/64x64/A0AEC0/FFFFFF?text=PROJ' %}
+            {% endif %}
+
+        {% elif entity.entity_type == 'drone' %}
+            <!-- 无人机图标 -->
+            {% set icon_url = 'https://placehold.co/64x64/9F7AEA/FFFFFF?text=DRONE' %}
+        {% endif %}
+
+        <!-- [朝向] 添加 id="img-{{ entity.id }}" -->
+        <img src="{{ icon_url }}" alt="{{ entity.entity_type }}"
+             id="img-{{ entity.id }}"
+             style="width: 100%; height: 100%; object-fit: contain;"
+             onerror="this.onerror=null; this.src='https://placehold.co/64x64/718096/E2E8F0?text=?';">
+
+        <span class="orientation-arrow" id="arrow-{{ entity.id }}">{{ orientationMap[entity.orientation] }}</span>
+    </div>
+</div>
+{% endfor %}

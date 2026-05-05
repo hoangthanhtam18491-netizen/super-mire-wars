@@ -23,8 +23,11 @@
         }
     </script>
     <style>
-        .part-card { transition: all 0.2s ease-in-out; }
-        .part-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+        .part-card { transition: all 0.2s ease-in-out; touch-action: manipulation; }
+        @media (hover: hover) {
+            .part-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+        }
+        .part-card:active { transform: translateY(-2px); }
 
         /* 默认选中样式 (蓝色) */
         input[type="radio"]:checked + label:not(.raven-card) { border-color: #3b82f6; background-color: #2563eb20; }
@@ -36,9 +39,14 @@
             color: #fc8181; /* 红色文字 */
             box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
         }
-        .raven-card:hover {
-            border-color: #e53e3e !important; /* 悬停变亮红 */
-            box-shadow: 0 0 15px rgba(229, 62, 62, 0.4);
+        @media (hover: hover) {
+            .raven-card:hover {
+                border-color: #e53e3e !important;
+                box-shadow: 0 0 15px rgba(229, 62, 62, 0.4);
+            }
+        }
+        .raven-card:active {
+            border-color: #e53e3e !important;
         }
         /* Raven 选中样式 */
         input[type="radio"]:checked + label.raven-card {
@@ -137,12 +145,20 @@
             z-index: 50;
             transition: opacity 0.5s ease;
         }
-        #raven-trigger:hover {
-            opacity: 0.3;
+        @media (hover: hover) {
+            #raven-trigger:hover {
+                opacity: 0.3;
+            }
         }
         #raven-trigger.activated {
             opacity: 1 !important;
             filter: drop-shadow(0 0 10px red);
+        }
+
+        @media (max-width: 640px) {
+            #start-game-btn {
+                width: 100%;
+            }
         }
     </style>
 </head>

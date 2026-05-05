@@ -208,8 +208,61 @@ def handle_resolve_effect_choice(game_state, player_mech, choice):
     else:
         player_mech.pending_combat = None
 
+    # --- 继续处理剩余 AI 实体（中断后恢复） ---
+    # 仅在 AI 回合进行中（projectile_phase_active）且玩家回合已结束时续行
+    if not game_state.game_over and getattr(game_state, 'projectile_phase_active', False):
+        attacker_id = combat_session.attacker_entity.id
+        entities = list(game_state.entities.values())
+        found_current = False
+        game_ended_mid_turn = False
+        turn_continued = False
+
+        for entity in entities:
+            if entity.id == attacker_id:
+                found_current = True
+                continue
+            if not found_current:
+                continue
+
+            if game_ended_mid_turn:
+                break
+
+            if entity.controller == 'ai' and entity.status == 'ok':
+                if entity.entity_type == 'mech':
+                    entity.last_pos = entity.pos
+
+                    is_ace = entity.pilot and "Raven" in entity.pilot.name
+                    if is_ace:
+                        from game_logic.ace_ai_system import run_ace_turn
+                        entity_log, attacks = run_ace_turn(entity, game_state)
+                    else:
+                        entity_log, attacks = run_ai_turn(entity, game_state)
+
+                    log.extend(entity_log)
+                    turn_continued = True
+
+                    attack_queue = []
+                    for attack in attacks:
+                        attack_queue.append({
+                            'attacker_id': attack['attacker'].id,
+                            'defender_id': attack['defender'].id,
+                            'action_dict': attack['action'].to_dict()
+                        })
+
+                    for i, attack_data in enumerate(attack_queue):
+                        game_state, log, result_data, game_ended_mid_turn = _resolve_queued_attack(
+                            game_state, log, attack_data, attack_queue[i + 1:]
+                        )
+                        if game_ended_mid_turn:
+                            break
+
+        if not game_ended_mid_turn:
+            log.append("--- AI 机甲阶段结束 ---")
+            result_data = result_data or {}
+            result_data['run_projectile_phase'] = True
+
     game_state.check_game_over()
-    return game_state, log, None, None, None
+    return game_state, log, None, result_data, None
 
 
 def handle_resolve_reroll(game_state, player_mech, data):
@@ -322,6 +375,58 @@ def handle_resolve_reroll(game_state, player_mech, data):
 
             if game_ended_mid_turn:
                 return game_state, log, None, result_data, None
+
+    # --- 继续处理剩余 AI 实体（中断后恢复） ---
+    # 仅在 AI 回合进行中（projectile_phase_active）且玩家回合已结束时续行
+    if combat_session.stage == 'RESOLVED' and not game_ended_mid_turn and getattr(game_state, 'projectile_phase_active', False):
+        current_id = combat_session.attacker_entity.id
+        entities = list(game_state.entities.values())
+        found_current = False
+        turn_continued = False
+
+        for entity in entities:
+            if entity.id == current_id:
+                found_current = True
+                continue
+            if not found_current:
+                continue
+
+            if game_ended_mid_turn:
+                break
+
+            if entity.controller == 'ai' and entity.status == 'ok':
+                if entity.entity_type == 'mech':
+                    entity.last_pos = entity.pos
+
+                    is_ace = entity.pilot and "Raven" in entity.pilot.name
+                    if is_ace:
+                        from game_logic.ace_ai_system import run_ace_turn
+                        entity_log, attacks = run_ace_turn(entity, game_state)
+                    else:
+                        entity_log, attacks = run_ai_turn(entity, game_state)
+
+                    log.extend(entity_log)
+                    turn_continued = True
+
+                    attack_queue = []
+                    for attack in attacks:
+                        attack_queue.append({
+                            'attacker_id': attack['attacker'].id,
+                            'defender_id': attack['defender'].id,
+                            'action_dict': attack['action'].to_dict()
+                        })
+
+                    for i, attack_data in enumerate(attack_queue):
+                        game_state, log, result_data, game_ended_mid_turn = _resolve_queued_attack(
+                            game_state, log, attack_data, attack_queue[i + 1:]
+                        )
+                        if game_ended_mid_turn:
+                            break
+
+        if not game_ended_mid_turn:
+            log.append("--- AI 机甲阶段结束 ---")
+            result_data = result_data or {}
+            result_data['run_projectile_phase'] = True
 
     game_state.check_game_over()
     return game_state, log, None, result_data, None

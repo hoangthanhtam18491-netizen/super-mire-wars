@@ -5,7 +5,9 @@
       "Bash(pip install *)",
       "Bash(node --check static/js/game.js)",
       "Bash(node --check static/js/game-board.js)",
-      "Bash(node --check static/js/game-combat.js)"
+      "Bash(node --check static/js/game-combat.js)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(venv/Scripts/python.exe -c ' *)"
     ]
   }
 }

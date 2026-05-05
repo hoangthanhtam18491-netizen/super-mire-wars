@@ -36,6 +36,19 @@
         #rules-modal-content::-webkit-scrollbar { width: 8px; }
         #rules-modal-content::-webkit-scrollbar-thumb { background-color: #4a5568; border-radius: 4px; }
         #rules-modal-content::-webkit-scrollbar-track { background-color: #2d3748; }
+
+        @media (max-width: 768px) {
+            #rules-modal-content {
+                width: 95%;
+                max-height: 90vh;
+                padding: 1rem;
+            }
+            #rules-modal-content button {
+                width: 44px;
+                height: 44px;
+                font-size: 2rem;
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-800 text-white flex items-center justify-center h-screen font-mono relative">

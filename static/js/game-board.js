@@ -16,8 +16,10 @@
                 const img = document.getElementById(`img-${entityId}`);
                 if (!img) return;
 
-                const lastPos = JSON.parse(wrapper.dataset.lastPos);
-                const currentPos = JSON.parse(wrapper.dataset.currentPos);
+                const lastPos = entityData.last_pos || null;
+                const currentPos = entityData.pos;
+                wrapper.dataset.lastPos = JSON.stringify(lastPos);
+                wrapper.dataset.currentPos = JSON.stringify(currentPos);
 
                 const defaultScaleX = (entityData.controller === 'ai') ? -1 : 1;
                 let desiredScaleX = defaultScaleX;
@@ -128,7 +130,6 @@
             if(endTurnBtn) {
                 endTurnBtn.classList.add('disabled');
                 endTurnBtn.title = '机甲宕机中，无法行动';
-                document.getElementById('end-turn-form').onsubmit = (e) => { e.preventDefault(); return false; };
             }
             return;
         }
@@ -190,6 +191,12 @@
                 endTurnBtn.title = '';
             }
         }
+
+        const mobileEndTurnBtn = document.getElementById('mobile-end-turn-btn');
+        if (mobileEndTurnBtn) {
+            mobileEndTurnBtn.classList.toggle('disabled', isInterrupted);
+            mobileEndTurnBtn.title = isInterrupted ? message : '';
+        }
     }
 
     function clearHighlights() {
@@ -243,6 +250,15 @@
     function showOrientationSelector(x, y, isRotationOnly = false) {
         const cell = document.getElementById(`cell-${x}-${y}`);
         const s = document.getElementById('orientation-selector');
+
+        const btnSize = Math.min(40, Math.floor(S.CELL_SIZE_PX * 0.8));
+        const fontSize = Math.max(10, Math.floor(btnSize * 0.5));
+        s.querySelectorAll('.orientation-button').forEach(btn => {
+            btn.style.width = btnSize + 'px';
+            btn.style.height = btnSize + 'px';
+            btn.style.fontSize = fontSize + 'px';
+        });
+
         if (cell) {
             cell.appendChild(s);
         } else {

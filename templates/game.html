@@ -36,6 +36,18 @@
     {% set player_mech = game.get_player_mech() %}
     {% set ai_mech = game.get_ai_mech() %}
 
+    <!-- 移动端汉堡菜单按钮 -->
+    <button id="mobile-nav-toggle" aria-label="菜单">&#9776;</button>
+
+    <!-- 移动端侧边栏遮罩 -->
+    <div id="mobile-sidebar-overlay"></div>
+
+    <!-- 移动端侧边栏抽屉 -->
+    <div id="mobile-sidebar-drawer">
+        <button id="mobile-drawer-close">&times;</button>
+        <div id="mobile-drawer-content"></div>
+    </div>
+
     <!-- [NEW] Raven 登场遮罩层 -->
     <div id="raven-intro-overlay">
         <img src="https://placehold.co/800x600/000000/FF0000?text=WARNING" alt="Warning" class="flash-image">
@@ -44,157 +56,7 @@
     <!-- [顶部栏] -->
     <!-- [MODIFIED] 侧边栏结构调整 -->
     <div class="sidebar panel">
-
-        <!-- === 1. 顶部固定区 (始终可见) === -->
-        <h4>玩家机甲</h4>
-        {% if game_mode == 'horde' %}
-        <div style="text-align: center; font-size: 1.5rem; color: var(--phase-color);">
-            击败数: <span id="defeat-count">{{ ai_defeat_count }}</span>
-        </div>
-        {% endif %}
-
-        {% if player_mech %}
-
-            <!-- [新规则：宕机显示] -->
-            {% if player_mech.stance == 'downed' %}
-            <div class="phase-indicator" style="color: var(--status-destroyed); border-color: var(--status-destroyed); background-color: #4a2121;">
-                系统宕机！
-            </div>
-            {% else %}
-            <div class="phase-indicator">阶段: {{ {'timing': '1. 选择时机', 'stance': '2. 选择姿态', 'adjustment': '3. 调整阶段', 'main': '4. 执行动作'}[player_mech.turn_phase] }}</div>
-            {% endif %}
-            <!-- [修改结束] -->
-
-            {% if player_mech.pending_effect_data %}
-            <div id="pending-effect-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
-                待处理：请选择效果
-            </div>
-            {% endif %}
-            <!-- [v_REROLL] 新增重投警告 -->
-            {% if player_mech.pending_reroll_data %}
-            <div id="pending-reroll-warning" style="padding: 1rem; background-color: #c53030; color: white; border-radius: 0.25rem; text-align: center; font-weight: bold;">
-                待处理：请解决重投
-            </div>
-            {% endif %}
-
-
-            <!-- [MODIFIED v2.2] 驾驶员信息 -->
-            <div id="player-pilot-info" class="bg-gray-900 p-3 rounded-lg border border-blue-500">
-                {% if player_pilot %}
-                    <h5 class="font-bold text-lg text-blue-300">{{ player_pilot.name }}</h5>
-                    <p class="text-sm">链接值: <span class="font-bold text-red-400">{{ player_pilot.link_points }}</span></p>
-                    <div class="text-xs grid grid-cols-2 gap-x-2 mt-1 text-red-500">
-                        {% for stat_name, value in player_pilot.speed_stats.items() %}
-                        <span>{{ stat_name }}: {{ value }}</span>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <h5 class="font-bold text-lg text-gray-500">无驾驶员</h5>
-                {% endif %}
-            </div>
-
-            <div style="display: flex; justify-content: space-around; text-align: center;">
-                <div><div style="font-size: 0.875rem; color: var(--disabled-color);">行动时点 (AP)</div><div style="font-size: 1.75rem; font-weight: bold;">{{ player_mech.player_ap }}</div></div>
-                <div><div style="font-size: 0.875rem; color: var(--disabled-color);">调整时点 (TP)</div><div style="font-size: 1.75rem; font-weight: bold;">{{ player_mech.player_tp }}</div></div>
-            </div>
-
-        <!-- === 2. 标签页按钮区 (新) === -->
-        <div class="tab-buttons">
-            <button id="tab-btn-actions" class="tab-button active">
-                动作
-            </button>
-            <button id="tab-btn-status" class="tab-button">
-                状态
-            </button>
-        </div>
-
-        <!-- === 3. 标签页内容区 (新) === -->
-
-        <!-- 动作面板 (默认显示) -->
-        <div id="tab-panel-actions" class="tab-panel">
-            <!-- [MODIFIED] 将所有 phase-controls 移到这里 -->
-            <div id="phase-timing-controls"><h4>选择时机</h4><div class="selector-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"><button id="timing-近战">近战</button><button id="timing-射击">射击</button><button id="timing-移动">移动</button><button id="timing-抛射">抛射</button><button id="timing-快速" style="grid-column: span 2;">快速</button></div><button class="btn" id="confirm-timing-btn" style="margin-top: 1rem; background-color: var(--primary-color);">确认时机</button></div>
-            <div id="phase-stance-controls"><h4>姿态选择</h4><div class="selector-group" style="display: flex;"><button id="stance-defense" class="{{ 'active' if player_mech.stance == 'defense' else '' }}">防御</button><button id="stance-agile" class="{{ 'active' if player_mech.stance == 'agile' else '' }}">机动</button><button id="stance-attack" class="{{ 'active' if player_mech.stance == 'attack' else '' }}">攻击</button></div><button class="btn" id="confirm-stance-btn" style="margin-top: 1rem; background-color: var(--primary-color);">确认姿态</button></div>
-            <div id="phase-adjustment-controls"><h4>调整时点动作 (TP)</h4><div id="action-adjust-move" class="action-item"><span>调整移动</span><span class="action-cost">1 TP</span></div><div id="action-change-orientation" class="action-item"><span>仅转向</span><span class="action-cost">1 TP</span></div><button class="btn" id="skip-adjustment-btn" style="margin-top: 1rem;">跳过调整</button></div>
-
-            <!-- [MODIFIED] 主动作面板 -->
-            <div id="phase-main-controls">
-                <h4>行动时点动作 (AP)</h4>
-
-                <!-- [NEW] 新增的包裹容器，用于实现滚动条 -->
-                <div id="main-action-list-wrapper">
-
-                    {% for action, part_slot in player_mech.get_all_actions() %}
-                    {% if action.action_type != '被动' %}
-                    {% set action_id = (part_slot, action.name) %}
-                    <!-- [BUG 修复] JSON 序列化/反序列化会将 tuple 变为 list。
-                         Jinja 在比较时需要匹配类型，所以我们将 (str, str) 元组转换为 [str, str] 列表。 -->
-                    {% set action_id_list = [part_slot, action.name] %}
-                    {% set is_used = action_id_list in player_actions_used %}
-                    {% set ammo_key = (player_mech.id, part_slot, action.name) %}
-                    {% set current_ammo = game.ammo_counts.get(ammo_key, 0) %}
-                    {% set out_of_ammo = (action.ammo > 0 and current_ammo <= 0) %}
-                    <!-- [MODIFIED] 弃置动作的特殊处理 -->
-                    {% set is_jettison = action.name == '【弃置】' %}
-                    <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
-                    <div class="action-item {{ 'disabled' if is_used or out_of_ammo else '' }}"
-                         id="action-{{ action.name }}-{{ part_slot }}"
-                         data-action-name="{{ action.name }}"
-                         data-action-range="{{ action.range_val }}"
-                         data-action-type="{{ action.action_type }}"
-                         data-action-cost="{{ action.cost }}"
-                         data-part-slot="{{ part_slot }}"
-                         data-is-jettison="{{ 'true' if is_jettison else 'false' }}"
-                         title="{{ '本回合已使用' if is_used else ('弹药耗尽' if out_of_ammo else '') }}">
-                        <span>
-                            {{ action.name }} ({{ part_slot }})
-                            {% if action.ammo > 0 %}
-                                <span style="color: var(--phase-color); font-size: 0.8rem;"> [{{ current_ammo }}/{{ action.ammo }}]</span>
-                            {% endif %}
-                        </span>
-                        {% if action.cost == 'L' %}
-                            <span class="action-cost">2 AP + 1 TP</span>
-                        {% else %}
-                            <span class="action-cost">{{ action.cost.count('M')*2 + action.cost.count('S')*1 }} AP</span>
-                        {% endif %}
-                    </div>
-                    {% endif %}
-                    {% endfor %}
-
-                </div>
-                <!-- [NEW] 包裹容器结束 -->
-
-            </div>
-            <!-- [MODIFIED] 主动作面板结束 -->
-
-        </div>
-
-        <!-- 状态面板 (默认隐藏) -->
-        <div id="tab-panel-status" class="tab-panel" style="display: none;">
-            <!-- [MODIFIED] 将 <table> 移到这里 -->
-            <table><thead><tr><th>槽位</th><th>名称</th><th>状态</th></tr></thead>
-                <tbody>
-                    {% for slot, part in player_mech.parts.items() %}
-                    <!-- [MODIFIED] 移除 onclick, 添加 data-* 属性 -->
-                    <tr style="cursor: pointer;" data-controller="player" data-part-slot="{{ slot }}">
-                        <td>{{ slot }}</td>
-                        <td>{{ part.name if part else 'N/A' }}</td>
-                        <td class="status-{{ part.status if part else 'destroyed' }}">{{ part.status if part else 'destroyed' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-        {% else %}
-        <!-- 如果玩家机甲未加载 -->
-        <div class="phase-indicator" style="color: var(--status-destroyed);">玩家机甲未加载</div>
-        {% endif %}
-
-        <!-- === 4. 结束回合按钮 (始终可见) === -->
-        <!-- [MODIFIED] 移除 onclick -->
-        <form id="end-turn-form" action="{{ url_for('game.end_turn') }}" method="POST" style="display: none;"><button type="submit"></button></form>
-        <button id="end-turn-btn" class="btn" style="background-color: #c53030;">结束回合</button>
+        {% include '_sidebar_left.html' %}
     </div>
 
     <!-- [棋盘] -->
@@ -212,52 +74,10 @@
         恢复 v1.22 的绝对定位逻辑。
         Jinja 在服务器端渲染所有实体，JS 在客户端将其定位。
         -->
-        {% for entity in game.get_all_renderable_entities() %}
-        <div class="mech-icon-wrapper" id="entity-{{ entity.id }}-wrapper"
-             data-last-pos="{{ entity.last_pos | tojson | safe }}"
-             data-current-pos="{{ entity.pos | tojson | safe }}"
-             style="position: absolute; left: -9999px; top: -9999px; /* JS会设置正确位置 */">
-
-            <!-- [图标更新] 替换 SVG 为 <img> 标签，使用占位符 URL -->
-            <div class="mech-icon {{ entity.controller_css }}">
-
-                <!-- 你可以在这里替换为你自己的图片 URL -->
-                {% set icon_url = 'https://placehold.co/64x64/718096/E2E8F0?text=?' %} <!-- 默认图标 -->
-
-                {% if entity.entity_type == 'mech' %}
-                    {% if entity.controller == 'player' %}
-                        <!-- 玩家机甲图标 -->
-                        {% set icon_url = 'static/images/icon/player2.png' %}
-                    {% else %}
-                        <!-- AI 机甲图标 -->
-                        {% set icon_url = 'static/images/icon/AI2.png' %}
-                    {% endif %}
-
-                <!-- [MODIFIED] 抛射物图标 -->
-                {% elif entity.entity_type == 'projectile' %}
-                    {% if entity.name == 'MC-3 “利剑”导弹' %}
-                        {% set icon_url = 'static/images/icon/rocket.jpg' %}
-                    {% elif entity.name == 'RA-81火箭弹' %}
-                        {% set icon_url = 'static/images/icon/rocket.jpg' %}
-                    {% else %}
-                        {% set icon_url = 'https://placehold.co/64x64/A0AEC0/FFFFFF?text=PROJ' %}
-                    {% endif %}
-
-                {% elif entity.entity_type == 'drone' %}
-                    <!-- 无人机图标 -->
-                    {% set icon_url = 'https://placehold.co/64x64/9F7AEA/FFFFFF?text=DRONE' %}
-                {% endif %}
-
-                <!-- [朝向] 添加 id="img-{{ entity.id }}" -->
-                <img src="{{ icon_url }}" alt="{{ entity.entity_type }}"
-                     id="img-{{ entity.id }}"
-                     style="width: 100%; height: 100%; object-fit: contain;"
-                     onerror="this.onerror=null; this.src='https://placehold.co/64x64/718096/E2E8F0?text=?';">
-
-                <span class="orientation-arrow" id="arrow-{{ entity.id }}">{{ orientationMap[entity.orientation] }}</span>
-            </div>
+        <!-- 实体 wrappers 容器，AJAX 刷新时整体替换 -->
+        <div id=”entity-wrappers-container”>
+            {% include '_board_entities.html' %}
         </div>
-        {% endfor %}
 
         <!-- [MODIFIED] 为方向按钮添加 ID -->
         <div id="orientation-selector" class="orientation-selector">
@@ -270,79 +90,7 @@
 
     <!-- [右侧栏] -->
     <div class="sidebar panel">
-        <!-- [DYNAMIC STYLE] Raven 判定 (提升到顶部以供整个侧边栏使用) -->
-        {% set is_raven = ai_pilot and ('Raven' in ai_pilot.name or 'raven' in ai_pilot.name) %}
-
-        <!-- [MODIFIED] 标题样式恢复默认颜色 -->
-        <h4>AI机甲状态</h4>
-
-        <!-- [MODIFIED] AI 驾驶员信息 -->
-        {% set raven_style_name = 'color: #f56565;' if is_raven else '' %}
-        {% set raven_style_value = 'color: #f56565;' if is_raven else 'color: #e2e8f0;' %}
-        {% set raven_border = 'border-color: #4b5563;' %}
-
-        <div id="ai-pilot-info" class="bg-gray-900 p-3 rounded-lg border mb-4" style="{{ raven_border }}">
-            {% if ai_pilot %}
-                <!-- 驾驶员姓名 (Raven 变红) -->
-                <h5 class="font-bold text-lg" style="{{ raven_style_name }}">{{ ai_pilot.name }}</h5>
-
-                <!-- [NEW] 图片插入位置：在名字下方 -->
-                {% if is_raven %}
-                <div class="my-2">
-                     <img src="{{ url_for('static', filename='images/badge/Raven.png') }}"
-                         alt="Raven Emblem"
-                         style="width: 100%; max-width: 80px; height: auto; object-fit: contain; opacity: 0.9; filter: drop-shadow(0 0 5px #f56565);"
-                         onerror="this.style.display='none'">
-                </div>
-                {% endif %}
-
-                <!-- 链接值 -->
-                <p class="text-sm" style="color: #9ca3af;">链接值: <span class="font-bold" style="{{ raven_style_value }}">{{ ai_pilot.link_points }}</span></p>
-                <!-- 属性统计 -->
-                <div class="text-xs grid grid-cols-2 gap-x-2 mt-1" style="color: #9ca3af;">
-                    {% for stat_name, value in ai_pilot.speed_stats.items() %}
-                    <span>{{ stat_name }}: {{ value }}</span>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <h5 class="font-bold text-lg text-gray-500">无驾驶员</h5>
-            {% endif %}
-        </div>
-
-        <!-- [新规则：宕机显示] -->
-        {% if ai_mech and ai_mech.stance == 'downed' %}
-        <div class="phase-indicator" style="color: var(--status-destroyed); border-color: var(--status-destroyed); background-color: #4a2121; margin-bottom: 1rem;">
-            系统宕机！
-        </div>
-        {% endif %}
-        <!-- [修改结束] -->
-
-        <!-- [MODIFIED] 表格样式 (仅文字变红，线条保持默认) -->
-        <!-- [NOTE] 如果 is_raven 为真，给 table 添加 text-red-400 类 -->
-        <table class="{{ 'text-red-400' if is_raven else '' }}">
-            <thead>
-                <tr>
-                    <th>槽位</th>
-                    <th>名称</th>
-                    <th>状态</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% if ai_mech %}
-                {% for slot, part in ai_mech.parts.items() %}
-                <tr style="cursor: pointer;" data-controller="ai" data-part-slot="{{ slot }}">
-                    <td>{{ slot }}</td>
-                    <td>{{ part.name if part else 'N/A' }}</td>
-                    <td class="status-{{ part.status if part else 'destroyed' }}">{{ part.status if part else 'destroyed' }}</td>
-                </tr>
-                {% endfor %}
-                {% else %}
-                <tr><td colspan="3" style="text-align: center;">AI已被击败</td></tr>
-                {% endif %}
-            </tbody>
-        </table>
-        <h4>战斗日志</h4>
-        <div class="combat-log">{% for entry in combat_log %}<div class="log-entry">{{ entry }}</div>{% else %}<div>暂无战斗记录。</div>{% endfor %}</div>
+        {% include '_sidebar_right.html' %}
     </div>
 
     <!-- [弹窗] -->
@@ -466,10 +214,12 @@
     "playerLoadout": {{ player_loadout | tojson | safe }},
     "aiOpponentName": {{ ai_opponent_name | tojson | safe }},
     "apiUrls": {
+        "gameState": "{{ url_for('api.get_game_state') }}",
         "runProjectilePhase": "{{ url_for('game.run_projectile_phase') }}",
         "resetGame": "{{ url_for('game.reset_game') }}",
         "respawnAi": "{{ url_for('game.respawn_ai') }}",
         "endTurn": "{{ url_for('game.end_turn') }}",
+        "endTurnAjax": "{{ url_for('api.end_turn_ajax') }}",
         "selectTiming": "{{ url_for('api.select_timing') }}",
         "confirmTiming": "{{ url_for('api.confirm_timing') }}",
         "changeStance": "{{ url_for('api.change_stance') }}",
@@ -641,6 +391,11 @@
         }
     };
 </script>
+
+<!-- 移动端底部操作栏 -->
+<div id="mobile-bottom-bar">
+    <button id="mobile-end-turn-btn" class="btn" style="background-color: #c53030;">结束回合</button>
+</div>
 
 </body>
 </html>

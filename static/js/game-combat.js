@@ -81,22 +81,32 @@
         let modal = document.getElementById('clash-modal');
 
         if (!modal) {
+            const isMobile = window.innerWidth <= 768;
+            const h2Size = isMobile ? '1.5rem' : '3rem';
+            const timingSize = isMobile ? '1.2rem' : '2.5rem';
+            const timingPad = isMobile ? '0.5rem 1rem' : '1rem 2rem';
+            const vsGap = isMobile ? '1rem' : '4rem';
+            const vsSize = isMobile ? '1.5rem' : '3rem';
+            const resultSize = isMobile ? '1.2rem' : '2rem';
+            const h2Margin = isMobile ? '0.5rem' : '2rem';
+            const vsMargin = isMobile ? '1rem' : '2rem';
+
             const modalHtml = `
-                <div id="clash-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.85); z-index: 1000; justify-content: center; align-items: center; flex-direction: column;">
-                    <h2 style="font-size: 3rem; color: #fff; margin-bottom: 2rem; font-family: 'Impact', sans-serif; letter-spacing: 2px; text-shadow: 0 0 10px #4299e1;">SPEED CLASH</h2>
-                    <div style="display: flex; justify-content: center; align-items: center; gap: 4rem; margin-bottom: 2rem;">
+                <div id="clash-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.85); z-index: 1000; justify-content: center; align-items: center; flex-direction: column; padding: 1rem;">
+                    <h2 style="font-size: ${h2Size}; color: #fff; margin-bottom: ${h2Margin}; font-family: 'Impact', sans-serif; letter-spacing: 2px; text-shadow: 0 0 10px #4299e1; text-align: center;">SPEED CLASH</h2>
+                    <div style="display: flex; justify-content: center; align-items: center; gap: ${vsGap}; margin-bottom: ${vsMargin}; flex-wrap: wrap;">
                         <div style="text-align: center;">
-                            <div style="color: #63b3ed; font-size: 1.2rem; margin-bottom: 0.5rem;">PLAYER</div>
-                            <div id="clash-player-timing" style="font-size: 2.5rem; font-weight: bold; color: white; border: 2px solid #63b3ed; padding: 1rem 2rem; border-radius: 8px; background: rgba(49, 130, 206, 0.2);"></div>
+                            <div style="color: #63b3ed; font-size: 1rem; margin-bottom: 0.25rem;">PLAYER</div>
+                            <div id="clash-player-timing" style="font-size: ${timingSize}; font-weight: bold; color: white; border: 2px solid #63b3ed; padding: ${timingPad}; border-radius: 8px; background: rgba(49, 130, 206, 0.2);"></div>
                         </div>
-                        <div style="font-size: 3rem; font-weight: bold; color: #cbd5e0; font-style: italic;">VS</div>
+                        <div style="font-size: ${vsSize}; font-weight: bold; color: #cbd5e0; font-style: italic;">VS</div>
                         <div style="text-align: center;">
-                            <div style="color: #fc8181; font-size: 1.2rem; margin-bottom: 0.5rem;">ACE AI</div>
-                            <div id="clash-ai-timing" style="font-size: 2.5rem; font-weight: bold; color: white; border: 2px solid #fc8181; padding: 1rem 2rem; border-radius: 8px; background: rgba(229, 62, 62, 0.2);"></div>
+                            <div style="color: #fc8181; font-size: 1rem; margin-bottom: 0.25rem;">ACE AI</div>
+                            <div id="clash-ai-timing" style="font-size: ${timingSize}; font-weight: bold; color: white; border: 2px solid #fc8181; padding: ${timingPad}; border-radius: 8px; background: rgba(229, 62, 62, 0.2);"></div>
                         </div>
                     </div>
-                    <div id="clash-reason" style="font-size: 1rem; color: #a0aec0; margin-bottom: 2rem; max-width: 600px; text-align: center;"></div>
-                    <div id="clash-result" style="font-size: 2rem; font-weight: bold; text-transform: uppercase; animation: pulse 1s infinite;"></div>
+                    <div id="clash-reason" style="font-size: 0.85rem; color: #a0aec0; margin-bottom: 1.5rem; max-width: 90vw; text-align: center;"></div>
+                    <div id="clash-result" style="font-size: ${resultSize}; font-weight: bold; text-transform: uppercase; animation: pulse 1s infinite;"></div>
                 </div>
                 <style>
                     @keyframes pulse {

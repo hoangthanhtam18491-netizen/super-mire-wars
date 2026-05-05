@@ -12,9 +12,24 @@
 
     // 共享状态变量
     S.selectedAction = {};
-    S.CELL_SIZE_PX = 51;
     S.diceModalTimer = null;
     S.clashModalTimer = null;
+
+    function updateCellSize() {
+        const style = getComputedStyle(document.documentElement);
+        const raw = style.getPropertyValue('--cell-size').trim();
+        if (raw.startsWith('calc')) {
+            const w = window.innerWidth;
+            const gutter = 8;
+            const rawSize = Math.floor((w - gutter) / 10);
+            S.CELL_SIZE_PX = Math.max(30, Math.min(50, rawSize));
+        } else {
+            const parsed = parseFloat(raw);
+            S.CELL_SIZE_PX = isNaN(parsed) ? 50 : parsed;
+        }
+        document.documentElement.style.setProperty('--cell-size', S.CELL_SIZE_PX + 'px');
+    }
+    updateCellSize();
 
     // 从 data 对象解构所有动态数据
     S.allEntities = data.allEntities;
@@ -57,8 +72,6 @@
 
     // DOM 缓存
     let partDetailModalBackdrop, partDetailTitle, partDetailImage, partDetailStatsContainer, partDetailStatsList, partDetailActionsList;
-    let tabBtnActions, tabBtnStatus, tabPanelActions, tabPanelStatus;
-
     // --- 2. 动作执行与事件处理 ---
 
     function showErrorModal(title, message) {
@@ -251,8 +264,52 @@
                     return;
                 }
 
-                console.log("No action required, reloading.");
-                window.location.reload();
+                // 可能需要运行抛射物阶段（AI 回合延续等场景）
+                if (data.run_projectile_phase) {
+                    console.log("run_projectile_phase triggered from action response, processing...");
+                    setTimeout(function() {
+                        fetch(S.apiUrls.runProjectilePhase, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({player_id: S.playerID})
+                        })
+                        .then(function(res) { return res.json(); })
+                        .then(function(pdata) {
+                            if (pdata && pdata.success) {
+                                if (pdata.action_required === 'select_reroll') {
+                                    window.__actionInFlight = false;
+                                    S.gameState.pendingReroll = true;
+                                    S.updateUIForPhase();
+                                    if (pdata.dice_details) {
+                                        S.showDiceRollModal(pdata.dice_details, pdata.action_name, pdata.attacker_name, pdata.defender_name, true,
+                                            pdata.attacker_name && pdata.attacker_name.includes('玩家'),
+                                            pdata.defender_name && pdata.defender_name.includes('玩家'));
+                                    }
+                                    return;
+                                }
+                                if (pdata.action_required === 'select_effect') {
+                                    window.__actionInFlight = false;
+                                    S.gameState.pendingEffect = true;
+                                    S.updateUIForPhase();
+                                    if (pdata.options) S.showEffectSelector(pdata.options);
+                                    return;
+                                }
+                                refreshGameUI();
+                            } else if (pdata) {
+                                window.__actionInFlight = false;
+                                S.showErrorModal('抛射物阶段失败', pdata.message || '未能运行抛射物阶段。');
+                            }
+                        })
+                        .catch(function(e) {
+                            window.__actionInFlight = false;
+                            S.showErrorModal('抛射物阶段错误', e.message);
+                        });
+                    }, 1500);
+                    return;
+                }
+
+                console.log("No action required, refreshing UI via AJAX.");
+                refreshGameUI();
 
             } else {
                 console.warn("Operation failed:", data.message);
@@ -266,6 +323,325 @@
         });
     }
 
+    // --- AJAX 局部刷新 ---
+
+    function refreshGameUI() {
+        fetch(S.apiUrls.gameState || '/api/game_state')
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success) {
+                    if (data.redirect) window.location.href = data.redirect;
+                    else window.location.reload();
+                    return;
+                }
+
+                // 更新数据岛
+                const gameDataEl = document.getElementById('game-data');
+                if (gameDataEl) gameDataEl.textContent = JSON.stringify(data.game_data);
+
+                // 更新 S 命名空间
+                const gd = data.game_data;
+                S.allEntities = gd.allEntities;
+                S.playerID = gd.playerID;
+                S.playerEntity = gd.playerEntity;
+                S.aiEntity = gd.aiEntity;
+                S.orientationMap = gd.orientationMap;
+                S.apiUrls = gd.apiUrls;
+                S.playerLoadout = gd.playerLoadout;
+                S.aiOpponentName = gd.aiOpponentName;
+
+                S.gameState = {
+                    turnPhase: S.playerEntity ? S.playerEntity.turn_phase : 'timing',
+                    timing: S.playerEntity ? S.playerEntity.timing : null,
+                    openingMoveTaken: S.playerEntity ? S.playerEntity.opening_move_taken : false,
+                    isPlayerLocked: gd.isPlayerLocked,
+                    gameOver: gd.gameOver,
+                    pendingEffect: S.playerEntity && S.playerEntity.pending_combat && S.playerEntity.pending_combat.stage && S.playerEntity.pending_combat.stage.includes('EFFECT') ? true : false,
+                    pendingReroll: S.playerEntity && S.playerEntity.pending_combat && S.playerEntity.pending_combat.stage && S.playerEntity.pending_combat.stage.includes('REROLL') ? true : false,
+                    visualEvents: gd.visualEvents,
+                    runProjectilePhase: gd.runProjectilePhase,
+                    gameMode: gd.gameMode,
+                    defeatCount: gd.defeatCount
+                };
+
+                try {
+                    // 更新侧边栏 HTML
+                    const sidebars = document.querySelectorAll('.sidebar');
+                    if (sidebars[0] && data.sidebar_left_html) sidebars[0].innerHTML = data.sidebar_left_html;
+                    if (sidebars[1] && data.sidebar_right_html) sidebars[1].innerHTML = data.sidebar_right_html;
+
+                    // 更新棋盘实体 wrappers（新抛射物、已销毁实体、机甲位置等）
+                    if (data.board_entities_html) {
+                        var entityContainer = document.getElementById('entity-wrappers-container');
+                        if (entityContainer) {
+                            entityContainer.innerHTML = data.board_entities_html;
+                        }
+                    }
+
+                    // 更新移动端抽屉（下次打开时重新克隆）
+                    const mobileContent = document.getElementById('mobile-drawer-content');
+                    if (mobileContent) mobileContent.innerHTML = '';
+                    S._drawerPopulated = false;
+
+                    // 清除高亮
+                    S.clearHighlights();
+
+                    // 重新初始化棋盘（读取新的 S.allEntities + DOM wrappers）
+                    S.initializeBoardVisuals();
+
+                    // 重新绑定侧边栏事件
+                    bindSidebarEvents();
+
+                    // 刷新阶段 UI
+                    S.updateUIForPhase();
+
+                    // 滚动战斗日志到底部
+                    const log = document.querySelector('.combat-log');
+                    if (log) log.scrollTop = log.scrollHeight;
+
+                    // 处理视觉事件
+                    const events = gd.visualEvents || [];
+                    if (events.length > 0) {
+                        S.processVisualEvents(events);
+                    }
+
+                    // 处理游戏结束
+                    if (gd.gameOver) {
+                        S.showGameOverModal(gd.gameOver);
+                    }
+                } catch (domError) {
+                    console.error('DOM update in refreshGameUI failed, reloading:', domError);
+                    window.location.reload();
+                    return;
+                }
+
+                window.__actionInFlight = false;
+            })
+            .catch(e => {
+                console.error('AJAX refresh failed, falling back to reload:', e);
+                window.location.reload();
+            });
+    }
+
+    function bindSidebarEvents() {
+        // 标签页切换
+        const tabBtnActions = document.getElementById('tab-btn-actions');
+        const tabBtnStatus = document.getElementById('tab-btn-status');
+        const tabPanelActions = document.getElementById('tab-panel-actions');
+        const tabPanelStatus = document.getElementById('tab-panel-status');
+        if (tabBtnActions) {
+            tabBtnActions.addEventListener('click', () => {
+                tabBtnActions.classList.add('active');
+                if (tabBtnStatus) tabBtnStatus.classList.remove('active');
+                if (tabPanelActions) tabPanelActions.style.display = 'block';
+                if (tabPanelStatus) tabPanelStatus.style.display = 'none';
+            });
+        }
+        if (tabBtnStatus) {
+            tabBtnStatus.addEventListener('click', () => {
+                tabBtnStatus.classList.add('active');
+                if (tabBtnActions) tabBtnActions.classList.remove('active');
+                if (tabPanelStatus) tabPanelStatus.style.display = 'block';
+                if (tabPanelActions) tabPanelActions.style.display = 'none';
+            });
+        }
+
+        // 阶段 1: 时机
+        document.getElementById('timing-近战')?.addEventListener('click', () => S.selectTiming('近战'));
+        document.getElementById('timing-射击')?.addEventListener('click', () => S.selectTiming('射击'));
+        document.getElementById('timing-移动')?.addEventListener('click', () => S.selectTiming('移动'));
+        document.getElementById('timing-抛射')?.addEventListener('click', () => S.selectTiming('抛射'));
+        document.getElementById('timing-快速')?.addEventListener('click', () => S.selectTiming('快速'));
+        document.getElementById('confirm-timing-btn')?.addEventListener('click', S.confirmTiming);
+
+        // 阶段 2: 姿态
+        document.getElementById('stance-defense')?.addEventListener('click', () => S.changeStance('defense'));
+        document.getElementById('stance-agile')?.addEventListener('click', () => S.changeStance('agile'));
+        document.getElementById('stance-attack')?.addEventListener('click', () => S.changeStance('attack'));
+        document.getElementById('confirm-stance-btn')?.addEventListener('click', S.confirmStance);
+
+        // 阶段 3: 调整
+        document.getElementById('action-adjust-move')?.addEventListener('click', () => S.selectAction('调整移动', 0, 'TP', '', 'system'));
+        document.getElementById('action-change-orientation')?.addEventListener('click', () => S.selectAction('仅转向', 0, 'TP', '', 'system'));
+        document.getElementById('skip-adjustment-btn')?.addEventListener('click', S.skipAdjustment);
+
+        // 阶段 4: 主动作
+        document.querySelectorAll('#phase-main-controls .action-item').forEach(item => {
+            const actionName = item.dataset.actionName;
+            if (actionName) {
+                const actionRange = item.dataset.actionRange;
+                const actionType = item.dataset.actionType;
+                const actionCost = item.dataset.actionCost;
+                const partSlot = item.dataset.partSlot;
+                const isJettison = item.dataset.isJettison === 'true';
+                item.addEventListener('click', () => {
+                    if (item.classList.contains('disabled')) return;
+                    if (isJettison) {
+                        S.initiateJettison(partSlot);
+                    } else {
+                        S.selectAction(actionName, parseInt(actionRange, 10), actionType, actionCost, partSlot);
+                    }
+                });
+            }
+        });
+
+        // 结束回合
+        document.getElementById('end-turn-btn')?.addEventListener('click', () => {
+            if (!document.getElementById('end-turn-btn').classList.contains('disabled')) {
+                executeEndTurn();
+            }
+        });
+
+        // 状态标签页部件行点击
+        document.querySelectorAll('#tab-panel-status tr[data-part-slot]').forEach(row => {
+            row.addEventListener('click', () => {
+                S.showPartDetail(row.dataset.controller, row.dataset.partSlot);
+            });
+        });
+
+        // AI 侧边栏部件行点击
+        document.querySelectorAll('.sidebar table tr[data-part-slot][data-controller="ai"]').forEach(row => {
+            row.addEventListener('click', () => {
+                S.showPartDetail(row.dataset.controller, row.dataset.partSlot);
+            });
+        });
+    }
+
+    function executeEndTurn() {
+        if (S.gameState.pendingEffect || S.gameState.pendingReroll) return;
+        if (window.__actionInFlight) return;
+        window.__actionInFlight = true;
+
+        // 禁用按钮防止重复点击
+        document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
+            if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal') && !el.closest('#error-modal-backdrop')) {
+                el.disabled = true;
+                el.style.cursor = 'wait';
+            }
+        });
+
+        fetch(S.apiUrls.endTurnAjax || '/api/end_turn', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({player_id: S.playerID})
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data && data.success) {
+                // 处理中断
+                if (data.action_required === 'select_reroll') {
+                    window.__actionInFlight = false;
+                    S.gameState.pendingReroll = true;
+                    S.updateUIForPhase();
+                    var rd = data;
+                    if (rd.dice_details) {
+                        var aip = rd.attacker_name && rd.attacker_name.includes('玩家');
+                        var dip = rd.defender_name && rd.defender_name.includes('玩家');
+                        S.showDiceRollModal(rd.dice_details, rd.action_name, rd.attacker_name, rd.defender_name, true, aip, dip);
+                    }
+                    return;
+                }
+                if (data.action_required === 'select_effect') {
+                    window.__actionInFlight = false;
+                    S.gameState.pendingEffect = true;
+                    S.updateUIForPhase();
+                    if (data.options) S.showEffectSelector(data.options);
+                    return;
+                }
+
+                // 需要运行抛射物阶段
+                if (data.run_projectile_phase) {
+                    setTimeout(function() {
+                        fetch(S.apiUrls.runProjectilePhase, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({player_id: S.playerID})
+                        })
+                        .then(res => res.json())
+                        .then(function(pdata) {
+                            if (pdata && pdata.success) {
+                                if (pdata.action_required === 'select_reroll') {
+                                    window.__actionInFlight = false;
+                                    S.gameState.pendingReroll = true;
+                                    S.updateUIForPhase();
+                                    var prd = pdata;
+                                    if (prd.dice_details) {
+                                        var paip = prd.attacker_name && prd.attacker_name.includes('玩家');
+                                        var pdip = prd.defender_name && prd.defender_name.includes('玩家');
+                                        S.showDiceRollModal(prd.dice_details, prd.action_name, prd.attacker_name, prd.defender_name, true, paip, pdip);
+                                    }
+                                    return;
+                                }
+                                if (pdata.action_required === 'select_effect') {
+                                    window.__actionInFlight = false;
+                                    S.gameState.pendingEffect = true;
+                                    S.updateUIForPhase();
+                                    if (pdata.options) S.showEffectSelector(pdata.options);
+                                    return;
+                                }
+                                refreshGameUI();
+                            } else if (pdata) {
+                                window.__actionInFlight = false;
+                                S.showErrorModal('抛射物阶段失败', pdata.message || '后端未能运行抛射物阶段。');
+                            }
+                        })
+                        .catch(function(e) {
+                            window.__actionInFlight = false;
+                            S.showErrorModal('抛射物阶段错误', e.message);
+                        });
+                    }, 1500);
+                    return;
+                }
+
+                refreshGameUI();
+            } else if (data) {
+                window.__actionInFlight = false;
+                S.showErrorModal('结束回合失败', data.message || '后端返回错误。');
+            }
+        })
+        .catch(function(e) {
+            window.__actionInFlight = false;
+            S.showErrorModal('结束回合错误', e.message);
+        });
+    }
+
+    function processVisualEvents(events) {
+        if (!events || events.length === 0) return;
+
+        const clashEvent = events.find(e => e.type === 'clash_result');
+        const rerollEvent = events.find(e => e.type === 'select_reroll');
+        const effectEvent = events.find(e => e.type === 'select_effect');
+        const diceRollEvent = events.find(e => e.type === 'dice_roll');
+        const attackResult = events.find(e => e.type === 'attack_result');
+
+        if (clashEvent) {
+            S.showClashModal(clashEvent.details);
+            var delay = 3000;
+        }
+
+        if (rerollEvent) {
+            var rd = rerollEvent.details;
+            if (rd.dice_details) {
+                var aip = rd.attacker_name.includes('玩家');
+                var dip = rd.defender_name.includes('玩家');
+                setTimeout(function() {
+                    S.showDiceRollModal(rd.dice_details, rd.action_name, rd.attacker_name, rd.defender_name, true, aip, dip);
+                }, clashEvent ? 3000 : 0);
+            }
+        } else if (effectEvent) {
+            if (effectEvent.details && effectEvent.details.options) {
+                S.showEffectSelector(effectEvent.details.options);
+            }
+        } else if (diceRollEvent) {
+            setTimeout(function() {
+                var dd = diceRollEvent;
+                S.showDiceRollModal(dd.details, dd.action_name, dd.attacker_name, dd.defender_name, false);
+            }, clashEvent ? 3000 : 0);
+        } else if (attackResult) {
+            S.showAttackEffect(attackResult.defender_pos, attackResult.result_text);
+        }
+    }
+    S.processVisualEvents = processVisualEvents;
 
     // --- 乐观 UI 函数 ---
 
@@ -400,13 +776,72 @@
     // --- 3. 初始化和事件绑定 ---
 
     document.addEventListener('DOMContentLoaded', () => {
-        tabBtnActions = document.getElementById('tab-btn-actions');
-        tabBtnStatus = document.getElementById('tab-btn-status');
-        tabPanelActions = document.getElementById('tab-panel-actions');
-        tabPanelStatus = document.getElementById('tab-panel-status');
-
         S.updateUIForPhase();
         S.initializeBoardVisuals();
+
+        // 窗口大小变化时重新计算棋盘尺寸
+        let resizeDebounce;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeDebounce);
+            resizeDebounce = setTimeout(() => {
+                const oldSize = S.CELL_SIZE_PX;
+                updateCellSize();
+                if (S.CELL_SIZE_PX !== oldSize) {
+                    S.initializeBoardVisuals();
+                }
+            }, 150);
+        });
+
+        // 移动端侧边栏抽屉
+        const mobileToggle = document.getElementById('mobile-nav-toggle');
+        const mobileSidebar = document.getElementById('mobile-sidebar-drawer');
+        const mobileOverlay = document.getElementById('mobile-sidebar-overlay');
+        const mobileClose = document.getElementById('mobile-drawer-close');
+        const mobileDrawerContent = document.getElementById('mobile-drawer-content');
+
+        if (mobileToggle && mobileSidebar) {
+            function populateDrawer() {
+                if (S._drawerPopulated) return;
+                const sidebars = document.querySelectorAll('.sidebar');
+                const leftClone = sidebars[0] ? sidebars[0].cloneNode(true) : null;
+                const rightClone = sidebars[1] ? sidebars[1].cloneNode(true) : null;
+                if (leftClone) {
+                    leftClone.style.display = 'flex';
+                    leftClone.style.width = '100%';
+                    mobileDrawerContent.appendChild(leftClone);
+                }
+                if (rightClone) {
+                    rightClone.style.display = 'flex';
+                    rightClone.style.width = '100%';
+                    mobileDrawerContent.appendChild(rightClone);
+                }
+                S._drawerPopulated = true;
+            }
+
+            function openDrawer() {
+                populateDrawer();
+                mobileSidebar.classList.add('open');
+                mobileOverlay.classList.add('open');
+            }
+            function closeDrawer() {
+                mobileSidebar.classList.remove('open');
+                mobileOverlay.classList.remove('open');
+            }
+
+            mobileToggle.addEventListener('click', openDrawer);
+            mobileClose.addEventListener('click', closeDrawer);
+            mobileOverlay.addEventListener('click', closeDrawer);
+        }
+
+        // 移动端底部结束回合按钮
+        const mobileEndTurnBtn = document.getElementById('mobile-end-turn-btn');
+        if (mobileEndTurnBtn) {
+            mobileEndTurnBtn.addEventListener('click', () => {
+                if (!mobileEndTurnBtn.classList.contains('disabled')) {
+                    executeEndTurn();
+                }
+            });
+        }
 
         partDetailModalBackdrop = document.getElementById('part-detail-modal-backdrop');
         partDetailTitle = document.getElementById('part-detail-title');
@@ -475,8 +910,8 @@
                             return;
                         }
 
-                        console.log("Projectile phase complete, no interrupts. Reloading for player turn.");
-                        window.location.reload();
+                        console.log("Projectile phase complete, no interrupts. Refreshing UI for player turn.");
+                        refreshGameUI();
 
                     } else if (data) {
                         console.error("抛射物阶段运行失败:", data.message);
@@ -490,143 +925,22 @@
             }, 2000);
         }
 
-        const clashEvent = S.gameState.visualEvents.find(e => e.type === 'clash_result');
+        S.processVisualEvents(S.gameState.visualEvents);
+
+        // 状态不一致检测
         const rerollEvent = S.gameState.visualEvents.find(e => e.type === 'select_reroll');
         const effectEvent = S.gameState.visualEvents.find(e => e.type === 'select_effect');
-        const diceRollEvent = S.gameState.visualEvents.find(e => e.type === 'dice_roll');
-        const firstAttackResult = S.gameState.visualEvents.find(e => e.type === 'attack_result');
-
-        if (clashEvent) {
-            S.showClashModal(clashEvent.details);
-        }
-
-        if (rerollEvent) {
-            const rerollData = rerollEvent.details;
-            if (!rerollData.dice_details) {
-                console.error("Reroll interrupt missing dice_details!", rerollData);
-                showErrorModal('前端错误', '重投中断缺少 dice_details，无法显示弹窗。');
-            } else {
-                const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
-                const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
-                S.showDiceRollModal(
-                    rerollData.dice_details, rerollData.action_name,
-                    rerollData.attacker_name, rerollData.defender_name,
-                    true, attackerIsPlayer, defenderIsPlayer
-                );
-            }
-        } else if (effectEvent) {
-            console.log("VisualEvents: Action required: select_effect. Showing modal.");
-            if (!effectEvent.details || !effectEvent.details.options) {
-                console.error("Effect interrupt missing options!", effectEvent);
-                showErrorModal('前端错误', '效果中断缺少 options，无法显示弹窗。');
-            } else {
-                S.showEffectSelector(effectEvent.details.options);
-            }
-
-        } else if (diceRollEvent) {
-            const delay = clashEvent ? 3000 : 0;
-            setTimeout(() => {
-                const eventData = diceRollEvent;
-                S.showDiceRollModal(
-                    eventData.details, eventData.action_name,
-                    eventData.attacker_name, eventData.defender_name,
-                    false
-                );
-            }, delay);
-
-        } else if (firstAttackResult) {
-            S.showAttackEffect(firstAttackResult.defender_pos, firstAttackResult.result_text);
-        }
-
         if (S.gameState.pendingReroll && !rerollEvent) {
-            console.error(
-                "--- [状态不一致错误] ---",
-                "\n游戏可能已卡死！",
-                "\n原因: gameState.pendingReroll 为 true (应显示红色警告条)，",
-                "但是 gameState.visualEvents 中 *没有* 找到 'select_reroll' 事件。",
-                "\nVisual Events 内容:", S.gameState.visualEvents,
-                "\nPlayer Entity:", S.playerEntity
-            );
             showErrorModal('状态不同步', '检测到状态不同步 (pendingReroll=true 但缺少事件)。将尝试强制重载。');
             setTimeout(() => window.location.reload(), 3000);
         }
         if (S.gameState.pendingEffect && !effectEvent) {
-            console.error(
-                "--- [状态不一致错误] ---",
-                "\n游戏可能已卡死！",
-                "\n原因: gameState.pendingEffect 为 true (应显示红色警告条)，",
-                "但是 gameState.visualEvents 中 *没有* 找到 'select_effect' 事件。",
-                "\nVisual Events 内容:", S.gameState.visualEvents,
-                "\nPlayer Entity:", S.playerEntity
-            );
             showErrorModal('状态不同步', '检测到状态不同步 (pendingEffect=true 但缺少事件)。将尝试强制重载。');
             setTimeout(() => window.location.reload(), 3000);
         }
 
-
-        // --- 绑定所有 UI 事件 ---
-
-        tabBtnActions.addEventListener('click', () => {
-            tabBtnActions.classList.add('active');
-            tabBtnStatus.classList.remove('active');
-            tabPanelActions.style.display = 'block';
-            tabPanelStatus.style.display = 'none';
-        });
-
-        tabBtnStatus.addEventListener('click', () => {
-            tabBtnStatus.classList.add('active');
-            tabBtnActions.classList.remove('active');
-            tabPanelStatus.style.display = 'block';
-            tabPanelActions.style.display = 'none';
-        });
-
-        // 阶段 1: 时机
-        document.getElementById('timing-近战')?.addEventListener('click', () => selectTiming('近战'));
-        document.getElementById('timing-射击')?.addEventListener('click', () => selectTiming('射击'));
-        document.getElementById('timing-移动')?.addEventListener('click', () => selectTiming('移动'));
-        document.getElementById('timing-抛射')?.addEventListener('click', () => selectTiming('抛射'));
-        document.getElementById('timing-快速')?.addEventListener('click', () => selectTiming('快速'));
-        document.getElementById('confirm-timing-btn')?.addEventListener('click', confirmTiming);
-
-        // 阶段 2: 姿态
-        document.getElementById('stance-defense')?.addEventListener('click', () => changeStance('defense'));
-        document.getElementById('stance-agile')?.addEventListener('click', () => changeStance('agile'));
-        document.getElementById('stance-attack')?.addEventListener('click', () => changeStance('attack'));
-        document.getElementById('confirm-stance-btn')?.addEventListener('click', confirmStance);
-
-        // 阶段 3: 调整
-        document.getElementById('action-adjust-move')?.addEventListener('click', () => selectAction('调整移动', 0, 'TP', '', 'system'));
-        document.getElementById('action-change-orientation')?.addEventListener('click', () => selectAction('仅转向', 0, 'TP', '', 'system'));
-        document.getElementById('skip-adjustment-btn')?.addEventListener('click', skipAdjustment);
-
-        // 阶段 4: 主要动作 (动态绑定)
-        document.querySelectorAll('#phase-main-controls .action-item').forEach(item => {
-            const actionName = item.dataset.actionName;
-            if (actionName) {
-                const actionRange = item.dataset.actionRange;
-                const actionType = item.dataset.actionType;
-                const actionCost = item.dataset.actionCost;
-                const partSlot = item.dataset.partSlot;
-                const isJettison = item.dataset.isJettison === 'true';
-
-                item.addEventListener('click', () => {
-                    if (item.classList.contains('disabled')) return;
-
-                    if (isJettison) {
-                        initiateJettison(partSlot);
-                    } else {
-                        selectAction(actionName, parseInt(actionRange, 10), actionType, actionCost, partSlot);
-                    }
-                });
-            }
-        });
-
-        // 结束回合
-        document.getElementById('end-turn-btn')?.addEventListener('click', () => {
-            if (!document.getElementById('end-turn-btn').classList.contains('disabled')) {
-                document.getElementById('end-turn-form').submit();
-            }
-        });
+        // --- 绑定侧边栏 UI 事件 ---
+        bindSidebarEvents();
 
         // 弹窗事件 — 函数来自 game-board.js / game-combat.js，通过 S 访问
         document.getElementById('part-selector-cancel-btn')?.addEventListener('click', S.closePartSelector);

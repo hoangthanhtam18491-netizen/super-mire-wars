@@ -1,6 +1,6 @@
 import functools
 import traceback
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request, session, url_for
 from game_logic.game_logic import GameState
 from game_logic.data_models import Mech
 from game_logic.config import MAX_LOG_ENTRIES
@@ -82,7 +82,13 @@ def _handle_controller_response(game_state, log_entries, result_data, error):
     # 2. [关键] 保存控制器返回的、已经更新过的游戏状态
     session['game_state'] = game_state.to_dict()
 
-    # 3. 准备 JSON 响应
+    # 3. 清理已解决的中断（如果没有新的中断产生）
+    if result_data and not result_data.get('action_required'):
+        session.pop('pending_interrupt_data', None)
+    elif not result_data:
+        session.pop('pending_interrupt_data', None)
+
+    # 4. 准备 JSON 响应
     response = {'success': True}
     if result_data:
         response.update(result_data)
@@ -274,6 +280,7 @@ def resolve_effect_choice():
 
     new_state, logs, _, result, err = controller.handle_resolve_effect_choice(game_state, player_mech,
                                                                               data.get('choice'))
+
     return _handle_controller_response(new_state, logs, result, err)
 
 
@@ -287,6 +294,7 @@ def resolve_reroll():
 
     # 重投请求是最高优先级的，不需要检查其他中断
     new_state, logs, _, result_data, err = controller.handle_resolve_reroll(game_state, player_mech, data)
+
     return _handle_controller_response(new_state, logs, result_data, err)
 
 
@@ -388,3 +396,162 @@ def get_attack_range():
         })
 
     return jsonify({'valid_targets': [], 'valid_launch_cells': []})
+
+
+# === AJAX 局部刷新 ===
+
+@api_bp.route('/game_state', methods=['GET'])
+@handle_errors
+def get_game_state():
+    """返回完整游戏状态 JSON + 渲染后的侧边栏 HTML 片段，供 AJAX 局部刷新使用。"""
+    from flask import render_template, url_for
+    from game_logic.game_logic import get_player_lock_status
+
+    if 'game_state' not in session:
+        return jsonify({'success': False, 'message': 'Session expired', 'redirect': url_for('main.hangar')}), 401
+
+    game_state_obj = GameState.from_dict(session['game_state'])
+
+    player_mech = game_state_obj.get_player_mech()
+    ai_mech = game_state_obj.get_ai_mech()
+    player_pilot = player_mech.pilot if player_mech else None
+    ai_pilot = ai_mech.pilot if ai_mech else None
+
+    if not player_mech:
+        return jsonify({'success': False, 'message': 'No player mech', 'redirect': url_for('main.hangar')}), 400
+
+    is_player_locked, _ = get_player_lock_status(game_state_obj, player_mech)
+    log = session.get('combat_log', [])
+
+    player_loadout = {}
+    if player_mech and player_mech.parts:
+        player_loadout = {slot: part.name for slot, part in player_mech.parts.items() if part}
+
+    ai_opponent_name = "Unknown AI"
+    if ai_mech and ai_mech.name:
+        ai_opponent_name = ai_mech.name
+
+    orientation_map = {
+        'N': '↑', 'S': '↓', 'E': '→', 'W': '←',
+        'NONE': ''
+    }
+
+    player_actions_used_tuples = player_mech.actions_used_this_turn if player_mech else []
+    player_actions_used_lists = [list(t) for t in player_actions_used_tuples]
+
+    sidebar_left_html = render_template(
+        '_sidebar_left.html',
+        game_mode=game_state_obj.game_mode,
+        ai_defeat_count=game_state_obj.ai_defeat_count,
+        player_mech=player_mech,
+        player_pilot=player_pilot,
+        player_actions_used=player_actions_used_lists,
+        game=game_state_obj
+    )
+
+    sidebar_right_html = render_template(
+        '_sidebar_right.html',
+        ai_mech=ai_mech,
+        ai_pilot=ai_pilot,
+        combat_log=log
+    )
+
+    board_entities_html = render_template(
+        '_board_entities.html',
+        game=game_state_obj,
+        orientationMap=orientation_map
+    )
+
+    game_data = {
+        'allEntities': game_state_obj.get_all_entities_as_dict(),
+        'playerID': player_mech.id if player_mech else '',
+        'playerEntity': player_mech.to_dict() if player_mech else None,
+        'aiEntity': ai_mech.to_dict() if ai_mech else None,
+        'isPlayerLocked': is_player_locked,
+        'gameOver': game_state_obj.game_over or '',
+        'visualEvents': game_state_obj.visual_events or [],
+        'runProjectilePhase': session.get('run_projectile_phase', False),
+        'gameMode': game_state_obj.game_mode,
+        'defeatCount': game_state_obj.ai_defeat_count,
+        'orientationMap': orientation_map,
+        'playerLoadout': player_loadout,
+        'aiOpponentName': ai_opponent_name,
+        'apiUrls': {
+            'gameState': url_for('api.get_game_state'),
+            'runProjectilePhase': url_for('game.run_projectile_phase'),
+            'resetGame': url_for('game.reset_game'),
+            'respawnAi': url_for('game.respawn_ai'),
+            'endTurn': url_for('game.end_turn'),
+            'endTurnAjax': url_for('api.end_turn_ajax'),
+            'selectTiming': url_for('api.select_timing'),
+            'confirmTiming': url_for('api.confirm_timing'),
+            'changeStance': url_for('api.change_stance'),
+            'confirmStance': url_for('api.confirm_stance'),
+            'skipAdjustment': url_for('api.skip_adjustment'),
+            'jettisonPart': url_for('api.jettison_part'),
+            'resolveEffectChoice': url_for('api.resolve_effect_choice'),
+            'resolveReroll': url_for('api.resolve_reroll'),
+            'getMoveRange': url_for('api.get_move_range'),
+            'getAttackRange': url_for('api.get_attack_range'),
+            'executeAttack': url_for('api.execute_attack'),
+            'movePlayer': url_for('api.move_player'),
+            'executeAdjustMove': url_for('api.execute_adjust_move'),
+            'changeOrientation': url_for('api.change_orientation')
+        }
+    }
+
+    # 清除已消费的视觉事件（与 /game 路由保持一致）
+    if game_state_obj.visual_events:
+        if player_mech and not player_mech.pending_combat:
+            game_state_obj.visual_events = []
+            session['game_state'] = game_state_obj.to_dict()
+
+    return jsonify({
+        'success': True,
+        'game_data': game_data,
+        'sidebar_left_html': sidebar_left_html,
+        'sidebar_right_html': sidebar_right_html,
+        'board_entities_html': board_entities_html
+    })
+
+
+# === AJAX 结束回合 ===
+
+@api_bp.route('/end_turn', methods=['POST'])
+@handle_errors
+def end_turn_ajax():
+    """AJAX 版本结束回合：处理 AI 回合，返回 JSON 而非 redirect。"""
+    raw_state = session.get('game_state')
+    if not raw_state:
+        return jsonify({'success': False, 'message': 'Session expired', 'redirect': url_for('main.hangar')}), 401
+
+    game_state_obj = GameState.from_dict(raw_state)
+    log = session.get('combat_log', [])
+
+    updated_state, new_logs, result_data, error = controller.handle_end_turn(game_state_obj)
+
+    log.extend(new_logs)
+    if error:
+        log.append(error)
+
+    if result_data and result_data.get('run_projectile_phase'):
+        session['run_projectile_phase'] = True
+
+    if result_data and result_data.get('action_required'):
+        session['pending_interrupt_data'] = result_data
+        session.pop('run_projectile_phase', None)
+    else:
+        # 无新中断，清理可能残留的旧中断数据
+        session.pop('pending_interrupt_data', None)
+
+    session['game_state'] = updated_state.to_dict()
+
+    if len(log) > MAX_LOG_ENTRIES:
+        log = log[-MAX_LOG_ENTRIES:]
+    session['combat_log'] = log
+
+    response_data = {'success': True}
+    if result_data:
+        response_data.update(result_data)
+
+    return jsonify(response_data)
