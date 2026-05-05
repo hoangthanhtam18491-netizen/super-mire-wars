@@ -251,7 +251,7 @@
         const cell = document.getElementById(`cell-${x}-${y}`);
         const s = document.getElementById('orientation-selector');
 
-        const btnSize = Math.min(40, Math.floor(S.CELL_SIZE_PX * 0.8));
+        const btnSize = Math.max(40, Math.min(44, Math.floor(S.CELL_SIZE_PX * 0.8)));
         const fontSize = Math.max(10, Math.floor(btnSize * 0.5));
         s.querySelectorAll('.orientation-button').forEach(btn => {
             btn.style.width = btnSize + 'px';

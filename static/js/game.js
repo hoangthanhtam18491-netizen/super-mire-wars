@@ -833,6 +833,95 @@
             mobileOverlay.addEventListener('click', closeDrawer);
         }
 
+        // 移动端抽屉事件委托 — cloneNode 不保留 addEventListener 绑定
+        if (mobileDrawerContent) {
+            mobileDrawerContent.addEventListener('click', (e) => {
+                const idEl = e.target.closest('[id]');
+                const id = idEl ? idEl.id : '';
+
+                // 标签页切换
+                if (id === 'tab-btn-actions' || id === 'tab-btn-status') {
+                    const sidebar = e.target.closest('.sidebar');
+                    if (!sidebar) return;
+                    const tabActions = sidebar.querySelector('#tab-btn-actions');
+                    const tabStatus = sidebar.querySelector('#tab-btn-status');
+                    const panelActions = sidebar.querySelector('#tab-panel-actions');
+                    const panelStatus = sidebar.querySelector('#tab-panel-status');
+                    if (id === 'tab-btn-actions') {
+                        tabActions.classList.add('active');
+                        if (tabStatus) tabStatus.classList.remove('active');
+                        if (panelActions) panelActions.style.display = 'block';
+                        if (panelStatus) panelStatus.style.display = 'none';
+                    } else {
+                        tabStatus.classList.add('active');
+                        if (tabActions) tabActions.classList.remove('active');
+                        if (panelStatus) panelStatus.style.display = 'block';
+                        if (panelActions) panelActions.style.display = 'none';
+                    }
+                    return;
+                }
+
+                // 时机选择
+                if (id.startsWith('timing-') && id !== 'confirm-timing-btn') {
+                    S.selectTiming(id.replace('timing-', ''));
+                    return;
+                }
+                if (id === 'confirm-timing-btn') { S.confirmTiming(); return; }
+
+                // 姿态选择
+                if (id.startsWith('stance-') && id !== 'confirm-stance-btn') {
+                    S.changeStance(id.replace('stance-', ''));
+                    return;
+                }
+                if (id === 'confirm-stance-btn') { S.confirmStance(); return; }
+
+                // 调整动作
+                if (id === 'action-adjust-move') {
+                    S.selectAction('调整移动', 0, 'TP', '', 'system');
+                    return;
+                }
+                if (id === 'action-change-orientation') {
+                    S.selectAction('仅转向', 0, 'TP', '', 'system');
+                    return;
+                }
+                if (id === 'skip-adjustment-btn') { S.skipAdjustment(); return; }
+
+                // 结束回合
+                if (id === 'end-turn-btn') {
+                    const btn = e.target.closest('#end-turn-btn');
+                    if (btn && !btn.classList.contains('disabled')) {
+                        executeEndTurn();
+                    }
+                    return;
+                }
+
+                // 主动作项 (.action-item with data-action-name)
+                const actionItem = e.target.closest('.action-item');
+                if (actionItem && actionItem.dataset.actionName) {
+                    if (actionItem.classList.contains('disabled')) return;
+                    if (actionItem.dataset.isJettison === 'true') {
+                        S.initiateJettison(actionItem.dataset.partSlot);
+                    } else {
+                        S.selectAction(
+                            actionItem.dataset.actionName,
+                            parseInt(actionItem.dataset.actionRange, 10),
+                            actionItem.dataset.actionType,
+                            actionItem.dataset.actionCost,
+                            actionItem.dataset.partSlot
+                        );
+                    }
+                    return;
+                }
+
+                // 部件详情行 (状态标签页 + AI侧边栏)
+                const partRow = e.target.closest('tr[data-part-slot]');
+                if (partRow) {
+                    S.showPartDetail(partRow.dataset.controller, partRow.dataset.partSlot);
+                    return;
+                }
+            });
+        }
+
         // 移动端底部结束回合按钮
         const mobileEndTurnBtn = document.getElementById('mobile-end-turn-btn');
         if (mobileEndTurnBtn) {
