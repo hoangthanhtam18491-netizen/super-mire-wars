@@ -411,14 +411,31 @@
                     {% for name, pilot in player_pilots.items() %}
                     <div class="mb-4">
                         <input type="radio" id="pilot_{{ name }}" name="pilot" value="{{ name }}" class="hidden" required {% if loop.first %}checked{% endif %}>
-                        <label for="pilot_{{ name }}" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-full sm:w-72">
-                            <h4 class="font-bold text-xl text-blue-300">{{ name }}</h4>
-                            <p class="text-sm mt-2">链接值: {{ pilot.link_points }}</p>
-                            <div class="text-sm grid grid-cols-2 gap-x-4 mt-2 text-gray-400">
-                                {% for stat_name, value in pilot.speed_stats.items() %}
-                                <span>{{ stat_name }}: {{ value }}</span>
-                                {% endfor %}
+                        <label for="pilot_{{ name }}" class="part-card block bg-gray-700 rounded-lg border-2 border-gray-600 cursor-pointer w-full sm:w-72">
+                            {% if pilot.image_url %}
+                            <div class="part-card-image">
+                                <img src="{{ pilot.image_url }}" alt="{{ name }}" onerror="this.onerror=null; this.src='https://placehold.co/256x384/374151/E5E7EB?text=IMAGE+NOT+FOUND';">
+                                <div class="part-info-overlay">
+                                    <h4 class="font-bold text-lg text-blue-300 truncate">{{ name }}</h4>
+                                    <p class="text-sm">链接值: {{ pilot.link_points }}</p>
+                                    <div class="text-sm grid grid-cols-2 gap-x-4 mt-1 text-gray-400">
+                                        {% for stat_name, value in pilot.speed_stats.items() %}
+                                        <span>{{ stat_name }}: {{ value }}</span>
+                                        {% endfor %}
+                                    </div>
+                                </div>
                             </div>
+                            {% else %}
+                            <div class="p-6">
+                                <h4 class="font-bold text-xl text-blue-300">{{ name }}</h4>
+                                <p class="text-sm mt-2">链接值: {{ pilot.link_points }}</p>
+                                <div class="text-sm grid grid-cols-2 gap-x-4 mt-2 text-gray-400">
+                                    {% for stat_name, value in pilot.speed_stats.items() %}
+                                    <span>{{ stat_name }}: {{ value }}</span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
                         </label>
                     </div>
                     {% endfor %}

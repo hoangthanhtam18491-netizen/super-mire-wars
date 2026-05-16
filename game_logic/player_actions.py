@@ -375,7 +375,7 @@ def _execute_player_direct_attack(game_state, player_mech, attack_action,
         return game_state, log, None, None, error
 
     is_player_locked, _ = get_player_lock_status(game_state, player_mech)
-    if is_player_locked and attack_action.action_type == '射击':
+    if is_player_locked and attack_action.action_type == '射击' and not attack_action.effects.get('melee_shooting'):
         error = f"你被近战锁定，无法执行 [{attack_action.name}]！"
         log.append(f"> [错误] {error}")
         return game_state, log, None, None, error
@@ -530,6 +530,32 @@ def handle_jettison_part(game_state, player_mech, part_slot):
 
     player_mech.parts[part_slot] = new_part
     log.append(f"> 玩家弃置了 [{current_part_name}]，更换为 [{new_part.name}]。")
+
+    game_state = _clear_transient_state(game_state)
+    return game_state, log, None, None, None
+
+
+def handle_debug_skill(game_state, player_mech):
+    """(玩家) 阶段 4：技能【除虫】— 攻击姿态下消耗1链接值获得1AP"""
+    log = []
+    game_state.visual_events = []
+
+    if player_mech.turn_phase != 'main':
+        return game_state, log, None, None, "只能在主阶段使用【除虫】。"
+
+    if player_mech.stance != 'attack':
+        return game_state, log, None, None, "【除虫】只能在攻击姿态下使用。"
+
+    if ('skill', '【除虫】') in player_mech.actions_used_this_turn:
+        return game_state, log, None, None, "【除虫】本回合已使用过。"
+
+    if player_mech.pilot.link_points <= 0:
+        return game_state, log, None, None, "链接值不足，无法使用【除虫】。"
+
+    player_mech.pilot.link_points -= 1
+    player_mech.player_ap += 1
+    player_mech.actions_used_this_turn.append(('skill', '【除虫】'))
+    log.append(f"> 【除虫】消耗 1 点链接值，获得 1 点行动时点 (AP)。剩余链接值: {player_mech.pilot.link_points}")
 
     game_state = _clear_transient_state(game_state)
     return game_state, log, None, None, None

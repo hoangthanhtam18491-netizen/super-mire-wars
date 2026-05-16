@@ -74,6 +74,15 @@
     <div id="phase-main-controls">
         <h4>行动时点动作 (AP)</h4>
 
+        {% if player_pilot and 'debug' in player_pilot.skills %}
+        <div id="debug-skill-btn" class="action-item"
+             style="display: none; border-color: var(--phase-color);"
+             title="">
+            <span>【除虫】消耗1链接值换1AP</span>
+            <span class="action-cost">1 链接值</span>
+        </div>
+        {% endif %}
+
         <!-- [NEW] 新增的包裹容器，用于实现滚动条 -->
         <div id="main-action-list-wrapper">
 
@@ -97,6 +106,7 @@
                  data-action-type="{{ action.action_type }}"
                  data-action-cost="{{ action.cost }}"
                  data-part-slot="{{ part_slot }}"
+                 data-melee-shooting="{{ 'true' if action.effects.get('melee_shooting') else 'false' }}"
                  data-is-jettison="{{ 'true' if is_jettison else 'false' }}"
                  title="{{ '本回合已使用' if is_used else ('弹药耗尽' if out_of_ammo else '') }}">
                 <span>

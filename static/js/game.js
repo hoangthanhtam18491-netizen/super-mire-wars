@@ -485,6 +485,15 @@
             }
         });
 
+        // 【除虫】技能按钮
+        const debugBtn = document.getElementById('debug-skill-btn');
+        if (debugBtn) {
+            debugBtn.addEventListener('click', () => {
+                if (debugBtn.classList.contains('disabled')) return;
+                activateDebugSkill();
+            });
+        }
+
         // 结束回合
         document.getElementById('end-turn-btn')?.addEventListener('click', () => {
             if (!document.getElementById('end-turn-btn').classList.contains('disabled')) {
@@ -756,6 +765,10 @@
         postAndReload(S.apiUrls.executeAttack, body);
     }
 
+    function activateDebugSkill() {
+        postAndReload(S.apiUrls.debugSkill, { player_id: S.playerID });
+    }
+
     // --- 暴露到 SMW 的函数 (供 game-board.js / game-combat.js 调用) ---
     S.showErrorModal = showErrorModal;
     S.showGameOverModal = showGameOverModal;
@@ -765,6 +778,7 @@
     S.initiateLaunch = initiateLaunch;
     S.confirmPartSelection = confirmPartSelection;
     S.postAndReload = postAndReload;
+    S.activateDebugSkill = activateDebugSkill;
     S.selectTiming = selectTiming;
     S.confirmTiming = confirmTiming;
     S.changeStance = changeStance;
@@ -910,6 +924,13 @@
                             actionItem.dataset.partSlot
                         );
                     }
+                    return;
+                }
+
+                // 【除虫】技能按钮
+                if (e.target.closest('#debug-skill-btn')) {
+                    if (e.target.closest('#debug-skill-btn').classList.contains('disabled')) return;
+                    S.activateDebugSkill();
                     return;
                 }
 

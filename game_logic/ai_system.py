@@ -463,7 +463,7 @@ def run_ai_turn(ai_mech, game_state):
         (a, slot) for (a, slot) in available_actions if
         (a.action_type == '射击' or a.action_type == '抛射') and
         _calculate_ai_attack_range(game_state, ai_mech, a, ai_mech.pos, sim_orientation,
-                                   player_pos, current_tp=tp) and (a.action_type == '抛射' or not is_ai_locked)
+                                   player_pos, current_tp=tp) and (a.action_type == '抛射' or not is_ai_locked or a.effects.get('melee_shooting'))
     ]
 
     # 查找最佳 L 动作
@@ -734,7 +734,7 @@ def run_ai_turn(ai_mech, game_state):
              (a.action_type == '射击' or a.action_type == '抛射') and
              _calculate_ai_attack_range(game_state, ai_mech, a, ai_mech.pos, current_orientation,
                                         player_pos, current_tp=tp) and (
-                     a.action_type == '抛射' or not is_ai_locked_now)],
+                     a.action_type == '抛射' or not is_ai_locked_now or a.effects.get('melee_shooting'))],
             key=lambda item: _evaluate_action_strength(item[0], current_available_s_count, is_in_range=True),
             reverse=True
         )

@@ -622,6 +622,11 @@ class CombatState:
                         log.append(f"  > 动作效果【【双手】获得毁伤】触发 (另一只手为【空手】)！")
                         has_devastating = True
 
+            if is_mech_attacker and not has_devastating and self.action.effects.get("stance_devastating", False):
+                if self.attacker_entity.stance == 'attack':
+                    log.append(f"  > 动作效果【攻击姿态】获得毁伤 触发！")
+                    has_devastating = True
+
             has_scattershot = self.action.effects.get("scattershot", False)
             has_cleave = self.action.effects.get("cleave", False)
             has_overflow = (self.overflow_hits > 0 or self.overflow_crits > 0)

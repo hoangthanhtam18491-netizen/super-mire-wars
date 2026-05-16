@@ -65,6 +65,15 @@ def is_back_attack(attacker_pos, defender_pos, defender_orientation):
     return False
 
 
+def _has_no_back_attack_passive(entity):
+    """Check if entity has the '此面向敌' passive — immune to back attacks."""
+    if hasattr(entity, 'get_passive_effects'):
+        for effect in entity.get_passive_effects():
+            if effect.get('no_back_attack'):
+                return True
+    return False
+
+
 def _is_adjacent(pos1, pos2):
     """检查两个坐标是否相邻（包括对角线）。"""
     dx = abs(pos1[0] - pos2[0])
@@ -807,6 +816,8 @@ class GameState:
                         back_attack = False
                         if isinstance(entity, Mech):  # 只有机甲才能被背击
                             back_attack = is_back_attack(start_pos, entity.pos, entity.orientation)
+                            if back_attack and _has_no_back_attack_passive(entity):
+                                back_attack = False
                         valid_targets.append({'pos': entity.pos, 'entity': entity, 'is_back_attack': back_attack})
 
         elif action.action_type == '射击' or action.action_type == '抛射' or action.action_type == '快速':
@@ -822,6 +833,8 @@ class GameState:
                             back_attack = False
                             if isinstance(entity, Mech):
                                 back_attack = is_back_attack(start_pos, entity.pos, entity.orientation)
+                                if back_attack and _has_no_back_attack_passive(entity):
+                                    back_attack = False
                             valid_targets.append({'pos': entity.pos, 'entity': entity, 'is_back_attack': back_attack})
 
             # 如果是抛射, *额外* 查找所有可发射的空格子

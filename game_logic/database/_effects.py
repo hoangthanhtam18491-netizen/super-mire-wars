@@ -59,6 +59,18 @@ EFFECT_PASSIVE_COOLING = {
     },
     "name": "【增强冷却】"
 }
+EFFECT_PASSIVE_COOLING_R = {
+    "logic": {
+        "passive_dice_boost": {
+            "trigger_stance": "attack",
+            "trigger_type": "射击",
+            "ratio_base": 3,
+            "ratio_add": 1,
+            "dice_type": "red_count"
+        }
+    },
+    "name": "【增强冷却】"
+}
 EFFECT_STATIC = {
     "logic": {"is_static": True},
     "name": "【静止】"
@@ -140,7 +152,22 @@ EFFECT_JET_SPRINT = {
     "name": "【直线移动】+2移动距离"
 }
 
+EFFECT_MELEE_SHOOTING = {
+    "logic": {"melee_shooting": True},
+    "name": "【近战射击】"
+}
+
+EFFECT_NO_BACK_ATTACK = {
+    "logic": {"no_back_attack": True},
+    "name": "【此面向敌】"
+}
+
 # [新增] 战斗型OS效果
+EFFECT_STANCE_DEVASTATING = {
+    "logic": {"stance_devastating": True},
+    "name": "【攻击姿态】获得毁伤"
+}
+
 EFFECT_STANCE_MASTERY = {
     "logic": {"stance_mastery": True},
     "name": "【战斗型OS】"

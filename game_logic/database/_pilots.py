@@ -24,8 +24,20 @@ PILOT_RAVEN = Pilot(
     skills=["pursuit"]  # pursuit = 乘胜追击
 )
 
+PILOT_HAMMERHEAD_04 = Pilot(
+    name="【锤头鲨-04-内务能手】",
+    link_points=4,
+    speed_stats={
+        '快速': 4, '近战': 3, '抛射': 2,
+        '射击': 5, '移动': 2, '战术': 6
+    },
+    skills=["debug"],
+    image_url="static/images/pilots/04-2.png"
+)
+
 PLAYER_PILOTS = {
-    "【测试驾驶员】": PILOT_TEST
+    "【测试驾驶员】": PILOT_TEST,
+    "【锤头鲨-04-内务能手】": PILOT_HAMMERHEAD_04
 }
 
 AI_PILOTS = {

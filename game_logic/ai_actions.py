@@ -7,7 +7,7 @@ import random
 from .data_models import Mech, Projectile, Action
 from .combat_system import CombatState
 from .dice_roller import roll_black_die
-from .game_logic import is_back_attack, run_projectile_logic, run_drone_logic
+from .game_logic import is_back_attack, run_projectile_logic, run_drone_logic, _has_no_back_attack_passive
 from .ai_system import run_ai_turn
 from . import ace_logic
 from . import ace_ai_system
@@ -48,6 +48,8 @@ def _resolve_queued_attack(game_state, log, attack_data, remaining_attacks_queue
     if isinstance(defender_entity, Mech):
         if isinstance(attacker_entity, Mech):
             back_attack = is_back_attack(attacker_entity.pos, defender_entity.pos, defender_entity.orientation)
+            if back_attack and _has_no_back_attack_passive(defender_entity):
+                back_attack = False
         elif isinstance(attacker_entity, Projectile):
             back_attack = False
 

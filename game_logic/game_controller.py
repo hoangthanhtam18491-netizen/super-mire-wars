@@ -197,6 +197,7 @@ from .player_actions import (
     handle_move_player,
     handle_execute_attack,
     handle_jettison_part,
+    handle_debug_skill,
 )
 
 from .ai_actions import (

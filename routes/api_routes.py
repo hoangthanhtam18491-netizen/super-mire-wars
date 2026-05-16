@@ -264,6 +264,21 @@ def jettison_part():
     return _handle_controller_response(new_state, logs, result, err)
 
 
+@api_bp.route('/debug_skill', methods=['POST'])
+@handle_errors
+def debug_skill():
+    """API: 激活技能【除虫】— 消耗1链接值获得1AP"""
+    data = request.get_json()
+    game_state, player_mech, error_response = _get_game_state_and_player(data)
+    if error_response: return error_response
+
+    error = _check_no_combat(player_mech)
+    if error: return error
+
+    new_state, logs, _, result, err = controller.handle_debug_skill(game_state, player_mech)
+    return _handle_controller_response(new_state, logs, result, err)
+
+
 # === 中断处理 API ===
 
 @api_bp.route('/resolve_effect_choice', methods=['POST'])
@@ -494,6 +509,7 @@ def get_game_state():
             'getMoveRange': url_for('api.get_move_range'),
             'getAttackRange': url_for('api.get_attack_range'),
             'executeAttack': url_for('api.execute_attack'),
+            'debugSkill': url_for('api.debug_skill'),
             'movePlayer': url_for('api.move_player'),
             'executeAdjustMove': url_for('api.execute_adjust_move'),
             'changeOrientation': url_for('api.change_orientation')

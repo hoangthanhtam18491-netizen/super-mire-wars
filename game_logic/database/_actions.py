@@ -28,6 +28,9 @@ ACTION_HUIZHAN = Action(name='挥斩', action_type='近战', cost='S', dice='4�
 ACTION_PIKAN = Action(name='劈砍', action_type='近战', cost='S', dice='3黄1红', range_val=1,
                         effects=build_effects(EFFECT_STROBE_WEAPON)
                         )
+ACTION_PIKAN_CC7 = Action(name='劈砍【CC7】', action_type='近战', cost='S', dice='1黄3红', range_val=1,
+                        effects=build_effects(EFFECT_STROBE_WEAPON)
+                        )
 ACTION_HUIZHAN_ZHONG = Action(name='挥斩【重】', action_type='近战', cost='M', dice='2黄4红', range_val=1,
                         effects=build_effects(EFFECT_STROBE_WEAPON, EFFECT_CLEAVE, EFFECT_TWO_HANDED_DEVASTATING))
 ACTION_DUNJI = Action(name="盾击", action_type="近战", cost="S", dice="5黄", range_val=1,
@@ -42,8 +45,12 @@ ACTION_DIANSHE = Action(name="点射", action_type="射击", cost="M", dice="1�
                         effects=build_effects(EFFECT_TWO_HANDED_RANGE_2))
 ACTION_DIANSHE_CI = Action(name="点射【磁】", action_type="射击", cost="S", dice="3红", range_val=6,
                            effects=build_effects(EFFECT_AP_1, EFFECT_STATIC_RANGE_2))
+ACTION_DIANSHE_R35 = Action(name="点射【R35】", action_type="射击", cost="L", dice="5红", range_val=12,
+                           effects=build_effects(EFFECT_AP_1, EFFECT_STANCE_DEVASTATING))
 ACTION_DIANSHE_XIAN = Action(name="点射【霰射】", action_type="射击", cost="S", dice="2黄2红", range_val=3,
                            effects=build_effects(EFFECT_SCATTERSHOT))
+ACTION_DIANSHE_PC6 = Action(name="点射【霰射(PC-6)】", action_type="射击", cost="M", dice="4黄1红", range_val=6,
+                           effects=build_effects(EFFECT_MELEE_SHOOTING))
 ACTION_DIANSHE_RF = Action(name="点射【RF】", action_type="射击", cost="S", dice="3红", range_val=6)
 ACTION_LIANSHE_RF = Action(name="连射【RF】", action_type="射击", cost="M", dice="2黄3红", range_val=6)
 ACTION_JUJI = Action(name="狙击", action_type="射击", cost="M", dice="2黄2红", range_val=12,
@@ -56,6 +63,8 @@ ACTION_SAOSHE = Action(name="扫射", action_type="射击", cost="S", dice="4黄
 ACTION_SUSHE_BIPAO = Action(name="速射【臂】", action_type="射击", cost="S", dice="4黄", range_val=4)
 ACTION_SUSHE = Action(name="速射", action_type="射击", cost="M", dice="4黄1红", range_val=6,
                         effects=build_effects(EFFECT_TWO_HANDED_RANGE_2))
+ACTION_SUSHE_PC6 = Action(name="速射【霰射(PC-6)】", action_type="射击", cost="S", dice="3黄1红", range_val=3,
+                        effects=build_effects(EFFECT_MELEE_SHOOTING, EFFECT_SCATTERSHOT))
 ACTION_DIANSHE_ZHAN = Action(name="点射【战】", action_type="射击", cost="S", dice="1黄2红", range_val=6)
 
 # --- 快速 (Quick) ---
@@ -82,6 +91,11 @@ ACTION_ARMOR_ASSULT = Action(name="突击装甲", action_type="战术", cost="S"
 ACTION_NONE = Action(name="无动作", action_type="被动", cost="", dice="", range_val=0)
 ACTION_ENHANCED_COOLING = Action(name="增强冷却", action_type="被动", cost="", dice="", range_val=0,
                                  effects=build_effects(EFFECT_PASSIVE_COOLING))
+ACTION_ENHANCED_COOLING_R = Action(name="系统冷却", action_type="被动", cost="", dice="", range_val=0,
+                                 effects=build_effects(EFFECT_PASSIVE_COOLING_R))
+ACTION_CI_MIAN_XIANG_DI = Action(name="此面向敌", action_type="被动", cost="", dice="", range_val=0,
+                                 effects=build_effects(EFFECT_NO_BACK_ATTACK))
+
 # [新增] 战斗型OS 被动动作
 ACTION_BATLLETYPE = Action(name="战斗型OS", action_type="被动", cost="", dice="", range_val=0,
                            effects=build_effects(EFFECT_STANCE_MASTERY))

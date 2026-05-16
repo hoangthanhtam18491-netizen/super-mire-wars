@@ -154,6 +154,8 @@
         const isInterrupted = S.gameState.pendingEffect || S.gameState.pendingReroll;
 
         document.querySelectorAll('#phase-main-controls .action-item, #phase-adjustment-controls .action-item').forEach(item => {
+            if (item.id === 'debug-skill-btn') return;
+
             if (isInterrupted) {
                 item.classList.add('disabled');
                 item.title = message;
@@ -172,7 +174,7 @@
                 if (!S.gameState.openingMoveTaken && item.dataset.actionType !== S.gameState.timing) {
                     isDisabled = true; title = '非当前时机的起手动作';
                 }
-                if (S.gameState.isPlayerLocked && item.dataset.actionType === '射击') {
+                if (S.gameState.isPlayerLocked && item.dataset.actionType === '射击' && item.dataset.meleeShooting !== 'true') {
                     isDisabled = true; title = '被近战锁定，无法射击';
                 }
             }
@@ -180,6 +182,24 @@
             item.classList.toggle('disabled', isDisabled);
             item.title = title;
         });
+
+        const debugBtn = document.getElementById('debug-skill-btn');
+        if (debugBtn) {
+            const debugUsed = (S.playerEntity.actions_used_this_turn || []).some(
+                item => item[0] === 'skill' && item[1] === '【除虫】'
+            );
+            const showDebug = S.gameState.turnPhase === 'main'
+                && S.playerEntity.stance === 'attack'
+                && S.playerEntity.pilot
+                && S.playerEntity.pilot.link_points > 0
+                && !isInterrupted
+                && !debugUsed;
+            debugBtn.style.display = showDebug ? '' : 'none';
+            if (debugUsed) {
+                debugBtn.title = '本回合已使用';
+            }
+            debugBtn.classList.toggle('disabled', !showDebug);
+        }
 
         const endTurnBtn = document.getElementById('end-turn-btn');
         if (endTurnBtn) {

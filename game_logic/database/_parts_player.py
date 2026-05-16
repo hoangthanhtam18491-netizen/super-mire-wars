@@ -20,6 +20,9 @@ from ._actions import *
 PLAYER_CORES = {
     'RT-06 "泥沼"核心': Part(name='RT-06 "泥沼"核心', armor=6, structure=2, electronics=2,
                             image_url='static/images/parts/RT-06.png'),
+    'RTX-06SR "泥沼SR"核心': Part(name='RTX-06SR "泥沼SR"核心', armor=6, structure=2, electronics=2,
+                            actions=[ACTION_CI_MIAN_XIANG_DI],
+                            image_url='static/images/parts/RT-06SR.png'),
 }
 
 # === 玩家部件 - 下肢 (Player Legs) ===
@@ -34,6 +37,9 @@ PLAYER_LEGS = {
     'RL-08 重甲下肢': Part(name='RL-08 重甲下肢', armor=6, structure=1, evasion=3, adjust_move=1,
                             actions=[ACTION_JET_SPRINT],
                            image_url='static/images/parts/RL-08.png'),
+    'RL-08C 重甲下肢': Part(name='RL-08C 重甲下肢', armor=5, structure=1, evasion=3, adjust_move=1,
+                            actions=[ACTION_BENPAO],
+                           image_url='static/images/parts/RL-08C.png'),
 }
 
 # === 玩家部件 - 左臂 (Player Left Arms) ===
@@ -69,6 +75,9 @@ PLAYER_LEFT_ARMS = {
     'G/AC-6 火箭筒（弃置）': Part(name='G/AC-6 火箭筒（弃置）', armor=4, structure=0, parry=0,
                        tags=["【空手】"],
                            image_url='static/images/parts/GAC-6Q.png'),
+    'CC-7战斗刀（左）': Part(name='CC-7战斗刀（左）', armor=4, structure=0,
+                       parry=1, actions=[ACTION_PIKAN],tags=["【空手】"],
+                           image_url='static/images/parts/CC-7L.png'),
 }
 
 # === 玩家部件 - 右臂 (Player Right Arms) ===
@@ -87,12 +96,25 @@ PLAYER_RIGHT_ARMS = {
     'R-20 肩置磁轨炮（右）': Part(name='R-20 肩置磁轨炮（右）', armor=4, structure=0, parry=0, actions=[ACTION_DIANSHE_CI],
                          tags=["【空手】"],
                            image_url='static/images/parts/R-20R.png'),
+    'R-35 重型磁轨炮': Part(name='R-35 重型磁轨炮', armor=4, structure=0, parry=0,evasion=-2, actions=[ACTION_DIANSHE_R35],
+                         tags=["【空手】"],
+                           image_url='static/images/parts/R-35.png'),
+    'R-35 重型磁轨炮（弃置）': Part(name='R-35 重型磁轨炮（弃置）', armor=4, structure=0,
+                                 tags=["【空手】"],
+                                 image_url='static/images/parts/R-35Q.png'),
     'AC-39 战术步枪': Part(name='AC-39 战术步枪', armor=4, structure=0, actions=[ACTION_SUSHE, ACTION_DIANSHE_ZHAN, ACTION_JETTISON],
                          tags=["【手持】"],
                            image_url='static/images/parts/AC-39.png'),
     'AC-39 战术步枪（弃置）': Part(name='AC-39 战术步枪（弃置）', armor=4, structure=0,
                          tags=["【空手】"],
                            image_url='static/images/parts/AC-39Q.png'),
+    'PC-6 霰弹枪': Part(name='PC-6 霰弹枪', armor=4, structure=0,
+                           actions=[ACTION_DIANSHE_PC6,ACTION_SUSHE_PC6,  ACTION_JETTISON],
+                           tags=["【手持】"],
+                           image_url='static/images/parts/PC-6.png'),
+    'PC-6 霰弹枪（弃置）': Part(name='PC-6 霰弹枪（弃置）', armor=4, structure=0,
+                                 tags=["【空手】"],
+                                 image_url='static/images/parts/PC-6Q.png'),
     '63型 臂炮 + CC-20 单手剑（右）': Part(name='63型 臂炮 + CC-20 单手剑（右）', armor=4, structure=0, parry=2,
                          actions=[ACTION_HUIZHAN, ACTION_SUSHE_BIPAO],tags=["【空手】"],
                            image_url='static/images/parts/CC-20R.png'),
@@ -121,6 +143,9 @@ PLAYER_BACKPACKS = {
     'ECS-2 外置冷却器': Part(name='ECS-2 外置冷却器', armor=3, structure=0, evasion=1,
                              actions=[ACTION_ENHANCED_COOLING],
                            image_url='static/images/parts/ECS-2.png'),
+    'ECS-3 外置冷却器': Part(name='ECS-3 外置冷却器', armor=3, structure=0, evasion=1,
+                             actions=[ACTION_ENHANCED_COOLING_R],
+                             image_url='static/images/parts/ECS-3.png'),
     'LGP-80 长程火炮': Part(name='LGP-80 长程火炮', armor=3, structure=0, evasion=-2,
                                     actions=[ACTION_DIANSHE_HUOPAO],
                            image_url='static/images/parts/LGP-80.png'),

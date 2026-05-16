@@ -212,9 +212,10 @@ class Pilot:
     定义一个驾驶员及其属性 (如链接值和速度)。
     """
 
-    def __init__(self, name, link_points=5, speed_stats=None, skills=None):
+    def __init__(self, name, link_points=5, speed_stats=None, skills=None, image_url=''):
         self.name = name
         self.link_points = link_points  # 用于专注重投
+        self.image_url = image_url
 
         # 速度属性，影响 AI 决策和未来可能的先攻
         if speed_stats is None:
@@ -233,6 +234,7 @@ class Pilot:
             'link_points': self.link_points,
             'speed_stats': self.speed_stats,
             'skills': self.skills,
+            'image_url': self.image_url,
         }
 
     @classmethod
@@ -250,7 +252,8 @@ class Pilot:
             name=data.get('name', '未知驾驶员'),
             link_points=data.get('link_points', 5),
             speed_stats=data.get('speed_stats', default_speeds),
-            skills=data.get('skills', [])
+            skills=data.get('skills', []),
+            image_url=data.get('image_url', '')
         )
 
 
