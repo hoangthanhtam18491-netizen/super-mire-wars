@@ -212,6 +212,9 @@
     "runProjectilePhase": {{ 'true' if run_projectile_phase else 'false' }},
     "gameMode": "{{ game_mode }}",
     "defeatCount": {{ ai_defeat_count }},
+    "roundPhase": {{ game.round_phase | tojson | safe }},
+    "phaseIndex": {{ game.phase_index }},
+    "roundNumber": {{ game.round_number }},
     "orientationMap": {{ orientationMap | tojson | safe }},
     "playerLoadout": {{ player_loadout | tojson | safe }},
     "aiOpponentName": {{ ai_opponent_name | tojson | safe }},
@@ -236,7 +239,8 @@
         "changeOrientation": "{{ url_for('api.change_orientation') }}",
         "movePlayer": "{{ url_for('api.move_player') }}",
         "executeAttack": "{{ url_for('api.execute_attack') }}",
-        "debugSkill": "{{ url_for('api.debug_skill') }}"
+        "debugSkill": "{{ url_for('api.debug_skill') }}",
+        "advanceRound": "{{ url_for('api.advance_round') }}"
     }
 }
 </script>

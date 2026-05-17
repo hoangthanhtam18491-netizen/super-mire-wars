@@ -125,6 +125,14 @@ def confirm_timing():
     if error: return error
 
     new_state, logs, _, result, err = controller.handle_confirm_timing(game_state, player_mech)
+    # 仅在没有中断时级联推进阶段
+    if result and result.get('advance_round') and not result.get('action_required'):
+        new_state, logs2, _, result2, err2 = controller.handle_advance_round(new_state)
+        logs.extend(logs2)
+        if result2:
+            result.update(result2)
+        if err2:
+            err = err2
     return _handle_controller_response(new_state, logs, result, err)
 
 
@@ -313,6 +321,25 @@ def resolve_reroll():
     return _handle_controller_response(new_state, logs, result_data, err)
 
 
+# === 阶段推进 API ===
+
+@api_bp.route('/advance_round', methods=['POST'])
+@handle_errors
+def advance_round():
+    """API: 推进回合阶段"""
+    data = request.get_json()
+    game_state, player_mech, error_response = _get_game_state_and_player(data)
+    if error_response:
+        return error_response
+
+    error = _check_no_combat(player_mech)
+    if error:
+        return error
+
+    new_state, logs, _, result, err = controller.handle_advance_round(game_state)
+    return _handle_controller_response(new_state, logs, result, err)
+
+
 # === 范围获取 API (高亮) ===
 
 @api_bp.route('/get_move_range', methods=['POST'])
@@ -491,6 +518,9 @@ def get_game_state():
         'orientationMap': orientation_map,
         'playerLoadout': player_loadout,
         'aiOpponentName': ai_opponent_name,
+        'roundPhase': game_state_obj.round_phase,
+        'phaseIndex': game_state_obj.phase_index,
+        'roundNumber': game_state_obj.round_number,
         'apiUrls': {
             'gameState': url_for('api.get_game_state'),
             'runProjectilePhase': url_for('game.run_projectile_phase'),
@@ -512,7 +542,8 @@ def get_game_state():
             'debugSkill': url_for('api.debug_skill'),
             'movePlayer': url_for('api.move_player'),
             'executeAdjustMove': url_for('api.execute_adjust_move'),
-            'changeOrientation': url_for('api.change_orientation')
+            'changeOrientation': url_for('api.change_orientation'),
+            'advanceRound': url_for('api.advance_round')
         }
     }
 
@@ -544,20 +575,15 @@ def end_turn_ajax():
     game_state_obj = GameState.from_dict(raw_state)
     log = session.get('combat_log', [])
 
-    updated_state, new_logs, result_data, error = controller.handle_end_turn(game_state_obj)
+    updated_state, new_logs, _, result_data, error = controller.handle_advance_round(game_state_obj)
 
     log.extend(new_logs)
     if error:
         log.append(error)
 
-    if result_data and result_data.get('run_projectile_phase'):
-        session['run_projectile_phase'] = True
-
     if result_data and result_data.get('action_required'):
         session['pending_interrupt_data'] = result_data
-        session.pop('run_projectile_phase', None)
     else:
-        # 无新中断，清理可能残留的旧中断数据
         session.pop('pending_interrupt_data', None)
 
     session['game_state'] = updated_state.to_dict()

@@ -291,6 +291,9 @@ class Mech(GameEntity):
 
         # [NEW] 标记：Ace AI 是否在本回合已经抢先行动过
         self.has_acted_early = False
+
+        # [NEW] 标记：本回合是否已经在该机甲选择的阶段入场行动过
+        self.has_acted_this_round = False
         # ---
 
     def get_total_evasion(self):
@@ -443,6 +446,7 @@ class Mech(GameEntity):
             "pending_combat": make_json_safe(self.pending_combat),
             # [NEW] 序列化抢先行动状态
             "has_acted_early": self.has_acted_early,
+            "has_acted_this_round": self.has_acted_this_round,
         })
         return base_dict
 
@@ -487,6 +491,7 @@ class Mech(GameEntity):
 
         # [NEW] 恢复抢先行动状态
         mech.has_acted_early = data.get('has_acted_early', False)
+        mech.has_acted_this_round = data.get('has_acted_this_round', False)
 
         mech.controller_css = data.get('controller_css', 'neutral')
         if mech.controller == 'player':

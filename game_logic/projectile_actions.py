@@ -9,9 +9,10 @@ from .game_controller import _run_interception_checks
 from .ai_actions import _resolve_queued_attack
 
 
-def handle_run_projectile_phase(game_state):
+def handle_run_projectile_phase(game_state, reset_round=True):
     """
     (系统) 运行所有抛射物的'延迟'逻辑并结算攻击。
+    reset_round=False 时跳过回合复位（由 handle_advance_round 统一处理）。
     """
     log = []
     if game_state.game_over:
@@ -100,36 +101,36 @@ def handle_run_projectile_phase(game_state):
             if game_ended_mid_turn:
                 break
 
-    # --- 回合结束，重置玩家状态 ---
+    # --- 回合结束，重置玩家状态（仅在独立调用时） ---
     if not game_state.pending_projectile_queue and not game_ended_mid_turn:
-
         game_state.projectile_phase_active = False
 
-        player_mech = game_state.get_player_mech()
-        if not game_state.game_over and not (player_mech and player_mech.pending_combat):
-            log.append(
-                "> AI回合结束。请开始你的回合。" if game_state.game_mode != 'range' else "> [靶场模式] 请开始你的回合。")
-            log.append("-" * 20)
+        if reset_round:
+            player_mech = game_state.get_player_mech()
+            if not game_state.game_over and not (player_mech and player_mech.pending_combat):
+                log.append(
+                    "> AI回合结束。请开始你的回合。" if game_state.game_mode != 'range' else "> [靶场模式] 请开始你的回合。")
+                log.append("-" * 20)
 
-            if player_mech:
-                if player_mech.stance == 'downed':
-                    log.append("> [系统] 驾驶员链接恢复。机甲 [宕机姿态] 解除。")
-                    log.append("> [警告] 系统冲击！本回合 AP-1, TP-1！")
-                    player_mech.player_ap = 1
-                    player_mech.player_tp = 0
-                    player_mech.stance = 'defense'
-                else:
-                    player_mech.player_ap = 2
-                    player_mech.player_tp = 1
+                if player_mech:
+                    if player_mech.stance == 'downed':
+                        log.append("> [系统] 驾驶员链接恢复。机甲 [宕机姿态] 解除。")
+                        log.append("> [警告] 系统冲击！本回合 AP-1, TP-1！")
+                        player_mech.player_ap = 1
+                        player_mech.player_tp = 0
+                        player_mech.stance = 'defense'
+                    else:
+                        player_mech.player_ap = 2
+                        player_mech.player_tp = 1
 
-                player_mech.turn_phase = 'timing'
-                player_mech.timing = None
-                player_mech.opening_move_taken = False
-                player_mech.actions_used_this_turn = []
-                player_mech.pending_combat = None
+                    player_mech.turn_phase = 'timing'
+                    player_mech.timing = None
+                    player_mech.opening_move_taken = False
+                    player_mech.actions_used_this_turn = []
+                    player_mech.pending_combat = None
 
-            game_state.check_game_over()
-        elif player_mech and player_mech.pending_combat:
-            log.append("> [系统] 玩家有待处理的中断，跳过回合重置。")
+                game_state.check_game_over()
+            elif player_mech and player_mech.pending_combat:
+                log.append("> [系统] 玩家有待处理的中断，跳过回合重置。")
 
     return game_state, log, result_data, None

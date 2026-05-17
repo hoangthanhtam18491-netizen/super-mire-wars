@@ -26,6 +26,10 @@ DEFAULT_PROJECTILE_LIFESPAN = 3
 
 AGILE_ADJUST_MOVE_MULTIPLIER = 2
 
+# --- Turn phases ---
+
+PHASE_ORDER = ['指令', '快速', '近战', '抛射', '射击', '移动', '战术', '自动', '延迟']
+
 # --- Paths ---
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))

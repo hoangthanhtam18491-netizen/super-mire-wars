@@ -164,18 +164,14 @@ def end_turn():
         game_state_obj = GameState.from_dict(session.get('game_state'))
         log = session.get('combat_log', [])
 
-        updated_state, new_logs, result_data, error = controller.handle_end_turn(game_state_obj)
+        updated_state, new_logs, _, result_data, error = controller.handle_advance_round(game_state_obj)
 
         log.extend(new_logs)
         if error:
             log.append(error)
 
-        if result_data and result_data.get('run_projectile_phase'):
-            session['run_projectile_phase'] = True
-
         if result_data and result_data.get('action_required'):
             session['pending_interrupt_data'] = result_data
-            session.pop('run_projectile_phase', None)
 
         session['game_state'] = updated_state.to_dict()
         _truncate_and_save_log(log)

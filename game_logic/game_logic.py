@@ -369,6 +369,11 @@ class GameState:
         # [NEW] 标记当前是否处于抛射物阶段 (防止过早结束回合)
         self.projectile_phase_active = False
 
+        # [NEW] 9 阶段回合系统的回合级状态
+        self.round_phase = None
+        self.phase_index = 0
+        self.round_number = 1
+
         # --- 初始化玩家机甲 ---
         if player_mech_selection:
             player_mech = create_mech_from_selection(
@@ -500,6 +505,9 @@ class GameState:
         self.visual_events = []
         self.pending_projectile_queue = []  # 重置队列
         self.projectile_phase_active = False  # [NEW] 重置阶段标志
+        self.round_phase = None
+        self.phase_index = 0
+        self.round_number = 1
 
     def add_visual_event(self, event_type, **kwargs):
         """
@@ -628,6 +636,9 @@ class GameState:
             'visual_events': self.visual_events,
             'pending_projectile_queue': self.pending_projectile_queue,  # [新增] 序列化队列
             'projectile_phase_active': self.projectile_phase_active,  # [NEW] 序列化
+            'round_phase': self.round_phase,
+            'phase_index': self.phase_index,
+            'round_number': self.round_number,
         }
 
     @classmethod
@@ -658,6 +669,10 @@ class GameState:
 
         # [NEW] 反序列化
         game_state.projectile_phase_active = data.get('projectile_phase_active', False)
+
+        game_state.round_phase = data.get('round_phase', None)
+        game_state.phase_index = data.get('phase_index', 0)
+        game_state.round_number = data.get('round_number', 1)
 
         return game_state
 

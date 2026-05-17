@@ -1,7 +1,15 @@
 import os
+import logging
 import tempfile
 from flask import Flask
 from flask_session import Session
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+    datefmt='%H:%M:%S'
+)
 
 # 导入新的蓝图
 from routes.main_routes import main_bp

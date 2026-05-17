@@ -52,7 +52,10 @@
         visualEvents: data.visualEvents,
         runProjectilePhase: data.runProjectilePhase,
         gameMode: data.gameMode,
-        defeatCount: data.defeatCount
+        defeatCount: data.defeatCount,
+        roundPhase: data.roundPhase,
+        roundNumber: data.roundNumber,
+        phaseIndex: data.phaseIndex
     };
 
     // 静态常量
@@ -264,47 +267,13 @@
                     return;
                 }
 
-                // 可能需要运行抛射物阶段（AI 回合延续等场景）
-                if (data.run_projectile_phase) {
-                    console.log("run_projectile_phase triggered from action response, processing...");
-                    setTimeout(function() {
-                        fetch(S.apiUrls.runProjectilePhase, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({player_id: S.playerID})
-                        })
-                        .then(function(res) { return res.json(); })
-                        .then(function(pdata) {
-                            if (pdata && pdata.success) {
-                                if (pdata.action_required === 'select_reroll') {
-                                    window.__actionInFlight = false;
-                                    S.gameState.pendingReroll = true;
-                                    S.updateUIForPhase();
-                                    if (pdata.dice_details) {
-                                        S.showDiceRollModal(pdata.dice_details, pdata.action_name, pdata.attacker_name, pdata.defender_name, true,
-                                            pdata.attacker_name && pdata.attacker_name.includes('玩家'),
-                                            pdata.defender_name && pdata.defender_name.includes('玩家'));
-                                    }
-                                    return;
-                                }
-                                if (pdata.action_required === 'select_effect') {
-                                    window.__actionInFlight = false;
-                                    S.gameState.pendingEffect = true;
-                                    S.updateUIForPhase();
-                                    if (pdata.options) S.showEffectSelector(pdata.options);
-                                    return;
-                                }
-                                refreshGameUI();
-                            } else if (pdata) {
-                                window.__actionInFlight = false;
-                                S.showErrorModal('抛射物阶段失败', pdata.message || '未能运行抛射物阶段。');
-                            }
-                        })
-                        .catch(function(e) {
-                            window.__actionInFlight = false;
-                            S.showErrorModal('抛射物阶段错误', e.message);
-                        });
-                    }, 1500);
+                // 推进阶段（AI 回合延续等场景）
+                if (data.run_projectile_phase || data.advance_round) {
+                    console.log("Advancing round from action response...");
+                    window.__actionInFlight = false;
+                    S.gameState.pendingEffect = false;
+                    S.gameState.pendingReroll = false;
+                    setTimeout(function() { advanceRound(); }, 500);
                     return;
                 }
 
@@ -326,9 +295,11 @@
     // --- AJAX 局部刷新 ---
 
     function refreshGameUI() {
+        console.log('[refreshGameUI] fetching game state...');
         fetch(S.apiUrls.gameState || '/api/game_state')
             .then(res => res.json())
             .then(data => {
+                console.log('[refreshGameUI] response success:', data.success, 'turnPhase:', data.game_data?.playerEntity?.turn_phase, 'roundNumber:', data.game_data?.roundNumber);
                 if (!data.success) {
                     if (data.redirect) window.location.href = data.redirect;
                     else window.location.reload();
@@ -361,7 +332,10 @@
                     visualEvents: gd.visualEvents,
                     runProjectilePhase: gd.runProjectilePhase,
                     gameMode: gd.gameMode,
-                    defeatCount: gd.defeatCount
+                    defeatCount: gd.defeatCount,
+                    roundPhase: gd.roundPhase,
+                    roundNumber: gd.roundNumber,
+                    phaseIndex: gd.phaseIndex
                 };
 
                 try {
@@ -516,102 +490,80 @@
         });
     }
 
-    function executeEndTurn() {
+    function advanceRound() {
+        console.log('[advanceRound] called, pendingEffect:', S.gameState.pendingEffect, 'pendingReroll:', S.gameState.pendingReroll, 'actionInFlight:', window.__actionInFlight);
         if (S.gameState.pendingEffect || S.gameState.pendingReroll) return;
-        if (window.__actionInFlight) return;
+        if (window.__actionInFlight) { console.log('[advanceRound] BLOCKED by actionInFlight'); return; }
         window.__actionInFlight = true;
 
-        // 禁用按钮防止重复点击
-        document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(el => {
+        document.querySelectorAll('.action-item, .btn, .selector-group button').forEach(function(el) {
             if (!el.closest('#game-over-modal') && !el.closest('#range-continue-modal') && !el.closest('#error-modal-backdrop')) {
                 el.disabled = true;
                 el.style.cursor = 'wait';
             }
         });
 
-        fetch(S.apiUrls.endTurnAjax || '/api/end_turn', {
+        console.log('[advanceRound] fetching', S.apiUrls.advanceRound);
+        fetch(S.apiUrls.advanceRound, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({player_id: S.playerID})
         })
-        .then(res => res.json())
-        .then(data => {
-            if (data && data.success) {
-                // 处理中断
-                if (data.action_required === 'select_reroll') {
-                    window.__actionInFlight = false;
-                    S.gameState.pendingReroll = true;
-                    S.updateUIForPhase();
-                    var rd = data;
-                    if (rd.dice_details) {
-                        var aip = rd.attacker_name && rd.attacker_name.includes('玩家');
-                        var dip = rd.defender_name && rd.defender_name.includes('玩家');
-                        S.showDiceRollModal(rd.dice_details, rd.action_name, rd.attacker_name, rd.defender_name, true, aip, dip);
-                    }
-                    return;
-                }
-                if (data.action_required === 'select_effect') {
-                    window.__actionInFlight = false;
-                    S.gameState.pendingEffect = true;
-                    S.updateUIForPhase();
-                    if (data.options) S.showEffectSelector(data.options);
-                    return;
-                }
-
-                // 需要运行抛射物阶段
-                if (data.run_projectile_phase) {
-                    setTimeout(function() {
-                        fetch(S.apiUrls.runProjectilePhase, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({player_id: S.playerID})
-                        })
-                        .then(res => res.json())
-                        .then(function(pdata) {
-                            if (pdata && pdata.success) {
-                                if (pdata.action_required === 'select_reroll') {
-                                    window.__actionInFlight = false;
-                                    S.gameState.pendingReroll = true;
-                                    S.updateUIForPhase();
-                                    var prd = pdata;
-                                    if (prd.dice_details) {
-                                        var paip = prd.attacker_name && prd.attacker_name.includes('玩家');
-                                        var pdip = prd.defender_name && prd.defender_name.includes('玩家');
-                                        S.showDiceRollModal(prd.dice_details, prd.action_name, prd.attacker_name, prd.defender_name, true, paip, pdip);
-                                    }
-                                    return;
-                                }
-                                if (pdata.action_required === 'select_effect') {
-                                    window.__actionInFlight = false;
-                                    S.gameState.pendingEffect = true;
-                                    S.updateUIForPhase();
-                                    if (pdata.options) S.showEffectSelector(pdata.options);
-                                    return;
-                                }
-                                refreshGameUI();
-                            } else if (pdata) {
-                                window.__actionInFlight = false;
-                                S.showErrorModal('抛射物阶段失败', pdata.message || '后端未能运行抛射物阶段。');
-                            }
-                        })
-                        .catch(function(e) {
-                            window.__actionInFlight = false;
-                            S.showErrorModal('抛射物阶段错误', e.message);
-                        });
-                    }, 1500);
-                    return;
-                }
-
-                refreshGameUI();
-            } else if (data) {
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            console.log('[advanceRound] response:', JSON.stringify(data));
+            if (!data || !data.success) {
                 window.__actionInFlight = false;
-                S.showErrorModal('结束回合失败', data.message || '后端返回错误。');
+                S.showErrorModal('阶段推进失败', (data && data.message) || '后端返回错误。');
+                return;
             }
+
+            // Handle interrupts from phase processing
+            if (data.action_required === 'select_reroll') {
+                console.log('[advanceRound] interrupt: select_reroll');
+                window.__actionInFlight = false;
+                S.gameState.pendingReroll = true;
+                S.updateUIForPhase();
+                if (data.dice_details) {
+                    var aip = data.attacker_name && data.attacker_name.indexOf('玩家') >= 0;
+                    var dip = data.defender_name && data.defender_name.indexOf('玩家') >= 0;
+                    S.showDiceRollModal(data.dice_details, data.action_name, data.attacker_name, data.defender_name, true, aip, dip);
+                }
+                return;
+            }
+            if (data.action_required === 'select_effect') {
+                console.log('[advanceRound] interrupt: select_effect');
+                window.__actionInFlight = false;
+                S.gameState.pendingEffect = true;
+                S.updateUIForPhase();
+                if (data.options) S.showEffectSelector(data.options);
+                return;
+            }
+
+            // Player's turn at their phase
+            if (data.player_turn) {
+                console.log('[advanceRound] player_turn at phase:', data.enter_phase);
+                window.__actionInFlight = false;
+                refreshGameUI();
+                return;
+            }
+
+            // Round complete - refresh for new round
+            console.log('[advanceRound] round_complete, calling refreshGameUI');
+            window.__actionInFlight = false;
+            refreshGameUI();
         })
         .catch(function(e) {
+            console.error('[advanceRound] fetch error:', e);
             window.__actionInFlight = false;
-            S.showErrorModal('结束回合错误', e.message);
+            S.showErrorModal('阶段推进错误', e.message);
         });
+    }
+    S.advanceRound = advanceRound;
+
+    function executeEndTurn() {
+        console.log('[executeEndTurn] called, delegating to advanceRound');
+        advanceRound();
     }
 
     function processVisualEvents(events) {
@@ -682,14 +634,21 @@
         }).then(res => res.json()).then(data => {
             if (data.success) {
                 if (data.clash_occurred) {
-                    console.log("Clash occurred! Reloading...");
+                    console.log("Clash occurred! Reloading for animation...");
                     window.location.reload();
                     return;
                 }
 
-                S.gameState.turnPhase = 'stance';
-                S.playerEntity.turn_phase = 'stance';
-                S.updateUIForPhase();
+                if (data.player_turn) {
+                    // 玩家在自己选择的阶段入场，进入姿态阶段
+                    S.gameState.turnPhase = 'stance';
+                    S.playerEntity.turn_phase = 'stance';
+                    S.updateUIForPhase();
+                } else {
+                    // advance_round 已自动推进并通过了玩家阶段
+                    // 可能是 Ace 抢先手或回合已完成
+                    refreshGameUI();
+                }
             } else { console.warn('确认时机失败, 强制刷新。'); window.location.reload(); }
         }).catch(e => { console.error("Fetch error:", e); window.location.reload(); })
         .finally(() => { window.__actionInFlight = false; });
@@ -974,65 +933,7 @@
                     el.style.cursor = 'wait';
                 }
             });
-            setTimeout(() => {
-                fetch(S.apiUrls.runProjectilePhase, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ player_id: S.playerID })
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data && data.success) {
-                        if (data.action_required === 'select_reroll') {
-                            console.log("Projectile Phase: Action required: select_reroll. Showing modal.");
-                            const rerollData = data;
-                            if (!rerollData.dice_details) {
-                                console.error("Reroll interrupt missing dice_details!", rerollData);
-                                showErrorModal('前端错误', '重投中断缺少 dice_details，无法显示弹窗。');
-                                return;
-                            }
-                            const attackerIsPlayer = (rerollData.attacker_name.includes("玩家"));
-                            const defenderIsPlayer = (rerollData.defender_name.includes("玩家"));
-                            S.showDiceRollModal(
-                                rerollData.dice_details,
-                                rerollData.action_name,
-                                rerollData.attacker_name,
-                                rerollData.defender_name,
-                                true,
-                                attackerIsPlayer,
-                                defenderIsPlayer
-                            );
-                            S.gameState.pendingReroll = true;
-                            S.updateUIForPhase();
-                            return;
-                        }
-
-                        if (data.action_required === 'select_effect') {
-                            console.log("Projectile Phase: Action required: select_effect. Showing modal.");
-                            if (!data.options) {
-                                console.error("Effect interrupt missing options!", data);
-                                showErrorModal('前端错误', '效果中断缺少 options，无法显示弹窗。');
-                                return;
-                            }
-                            S.showEffectSelector(data.options);
-                            S.gameState.pendingEffect = true;
-                            S.updateUIForPhase();
-                            return;
-                        }
-
-                        console.log("Projectile phase complete, no interrupts. Refreshing UI for player turn.");
-                        refreshGameUI();
-
-                    } else if (data) {
-                        console.error("抛射物阶段运行失败:", data.message);
-                        showErrorModal('抛射物阶段失败', data.message || '后端未能运行抛射物阶段。');
-                    }
-                })
-                .catch(e => {
-                    console.error("Fetch error:", e);
-                    showErrorModal('抛射物阶段Fetch失败', e.message || '无法连接到服务器以运行抛射物阶段。');
-                });
-            }, 2000);
+            setTimeout(function() { advanceRound(); }, 2000);
         }
 
         S.processVisualEvents(S.gameState.visualEvents);

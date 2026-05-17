@@ -14,7 +14,10 @@
         系统宕机！
     </div>
     {% else %}
-    <div class="phase-indicator">阶段: {{ {'timing': '1. 选择时机', 'stance': '2. 选择姿态', 'adjustment': '3. 调整阶段', 'main': '4. 执行动作'}[player_mech.turn_phase] }}</div>
+    <div class="phase-indicator">
+        第 {{ game.round_number }} 回合{% if game.round_phase %} · [{{ game.round_phase }}]{% endif %}
+        {% if player_mech.turn_phase != 'timing' %} · {{ {'stance': '选择姿态', 'adjustment': '调整阶段', 'main': '执行动作'}[player_mech.turn_phase] }}{% endif %}
+    </div>
     {% endif %}
     <!-- [修改结束] -->
 

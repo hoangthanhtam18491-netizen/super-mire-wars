@@ -40,56 +40,70 @@ def handle_confirm_timing(game_state, player_mech):
         if ai_mech and ai_mech.pilot and "Raven" in ai_mech.pilot.name:
             log.append("--- [⚠️ WARNING] 遭遇王牌机师！ ---")
 
-            ai_timing = ace_logic.decide_ace_timing(ai_mech, player_mech, game_state)
-            winner, reason = ace_logic.check_initiative(player_mech.timing, ai_timing, player_mech.pilot, ai_mech.pilot)
-            log.append(f"> [拼刀] 玩家选择 [{player_mech.timing}] vs AI选择 [{ai_timing}]")
-            log.append(f"> [结果] {reason}")
-
-            clash_event_data = {
-                'player_timing': player_mech.timing,
-                'ai_timing': ai_timing,
-                'winner': winner,
-                'reason': reason
-            }
-            result_data['clash_occurred'] = True
-
-            if winner == 'ai':
-                log.append("> [严重警告] 你的先手时机被 Ace 夺取！AI 将立即行动！")
-                ai_mech.has_acted_early = True
-
-                from . import ace_ai_system
-                ai_mech.last_pos = ai_mech.pos
-                entity_log, attacks = ace_ai_system.run_ace_turn(ai_mech, game_state)
-                log.extend(entity_log)
-
-                attack_queue = []
-                for attack in attacks:
-                    attack_queue.append({
-                        'attacker_id': attack['attacker'].id,
-                        'defender_id': attack['defender'].id,
-                        'action_dict': attack['action'].to_dict()
-                    })
-
-                # 循环结算 — _resolve_queued_attack 在 game_controller 中
-                from .game_controller import _resolve_queued_attack
-                game_ended_mid_turn = False
-                for i, attack_data in enumerate(attack_queue):
-                    game_state, log, rd, game_ended_mid_turn = _resolve_queued_attack(
-                        game_state, log, attack_data, attack_queue[i + 1:]
-                    )
-                    if rd:
-                        result_data.update(rd)
-                    if game_ended_mid_turn:
-                        break
-
-                game_state.add_visual_event('clash_result', details=clash_event_data)
+            # 守卫：Ace 已在本回合抢先行动过，跳过重复拼刀
+            if ai_mech.has_acted_early:
+                log.append("> [系统] Ace 已抢先行动过，跳过拼刀。")
             else:
-                log.append("> [系统] 你赢得了先手！继续回合。")
-                game_state.add_visual_event('clash_result', details=clash_event_data)
+                ai_timing = ace_logic.decide_ace_timing(ai_mech, player_mech, game_state)
+                ai_mech.timing = ai_timing  # 存储 Ace 选择的时机
+                winner, reason = ace_logic.check_initiative(player_mech.timing, ai_timing, player_mech.pilot, ai_mech.pilot)
+                log.append(f"> [拼刀] 玩家选择 [{player_mech.timing}] vs AI选择 [{ai_timing}]")
+                log.append(f"> [结果] {reason}")
 
-        player_mech.turn_phase = 'stance'
+                clash_event_data = {
+                    'player_timing': player_mech.timing,
+                    'ai_timing': ai_timing,
+                    'winner': winner,
+                    'reason': reason
+                }
+                result_data['clash_occurred'] = True
+
+                if winner == 'ai':
+                    log.append("> [严重警告] 你的先手时机被 Ace 夺取！AI 将立即行动！")
+                    ai_mech.has_acted_early = True
+                    ai_mech.has_acted_this_round = True
+
+                    # 标记抛射物阶段活跃，确保 Ace 攻击触发的中断解决后能正确推进回合
+                    game_state.projectile_phase_active = True
+
+                    from . import ace_ai_system
+                    ai_mech.last_pos = ai_mech.pos
+                    entity_log, attacks = ace_ai_system.run_ace_turn(ai_mech, game_state)
+                    log.extend(entity_log)
+
+                    attack_queue = []
+                    for attack in attacks:
+                        attack_queue.append({
+                            'attacker_id': attack['attacker'].id,
+                            'defender_id': attack['defender'].id,
+                            'action_dict': attack['action'].to_dict()
+                        })
+
+                    # 循环结算 — _resolve_queued_attack 在 game_controller 中
+                    from .game_controller import _resolve_queued_attack
+                    game_ended_mid_turn = False
+                    for i, attack_data in enumerate(attack_queue):
+                        game_state, log, rd, game_ended_mid_turn = _resolve_queued_attack(
+                            game_state, log, attack_data, attack_queue[i + 1:]
+                        )
+                        if rd:
+                            result_data.update(rd)
+                        if game_ended_mid_turn:
+                            break
+
+                    # 若 Ace 攻击触发了玩家中断，移除 clash_occurred 避免前端页面重载
+                    # 冲突动画已通过 visual_events 播放，中断将继续走 refreshGameUI → processVisualEvents
+                    if result_data.get('action_required'):
+                        result_data.pop('clash_occurred', None)
+
+                    game_state.add_visual_event('clash_result', details=clash_event_data)
+                else:
+                    log.append("> [系统] 你赢得了先手！继续回合。")
+                    game_state.add_visual_event('clash_result', details=clash_event_data)
+
         game_state = _clear_transient_state(game_state)
-        log.append(f"> 时机已确认为 [{player_mech.timing}]。进入姿态选择阶段。")
+        log.append(f"> 时机已确认为 [{player_mech.timing}]。推进阶段...")
+        result_data['advance_round'] = True
         return game_state, log, None, result_data, None
 
     return game_state, log, None, None, "Please select a timing first."
@@ -343,7 +357,7 @@ def _execute_player_projectile(game_state, player_mech, attack_action,
             if combat_session.stage != 'RESOLVED':
                 player_mech.pending_combat = combat_session.to_dict()
                 result_data = {
-                    'action_required': 'select_reroll' if combat_session.stage == 'AWAITING_ATTACK_REROLL' else 'select_effect',
+                    'action_required': 'select_reroll' if combat_session.stage in ('AWAITING_ATTACK_REROLL', 'AWAITING_EFFECT_REROLL') else 'select_effect',
                     'dice_details': dice_roll_details,
                     'attacker_name': attacker.name,
                     'defender_name': defender.name,
@@ -461,7 +475,7 @@ def _execute_player_direct_attack(game_state, player_mech, attack_action,
     if combat_session.stage != 'RESOLVED':
         player_mech.pending_combat = combat_session.to_dict()
         result_data = {
-            'action_required': 'select_reroll' if combat_session.stage == 'AWAITING_ATTACK_REROLL' else 'select_effect',
+            'action_required': 'select_reroll' if combat_session.stage in ('AWAITING_ATTACK_REROLL', 'AWAITING_EFFECT_REROLL') else 'select_effect',
             'dice_details': dice_roll_details,
             'attacker_name': player_mech.name,
             'defender_name': defender_entity.name,

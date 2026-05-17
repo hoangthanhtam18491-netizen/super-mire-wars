@@ -8,7 +8,9 @@
       "Bash(node --check static/js/game-combat.js)",
       "Bash(echo \"EXIT: $?\")",
       "Bash(venv/Scripts/python.exe -c ' *)",
-      "Bash(xxd)"
+      "Bash(xxd)",
+      "Bash(where python *)",
+      "Bash(pip list *)"
     ]
   }
 }
