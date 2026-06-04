@@ -292,6 +292,9 @@ class Mech(GameEntity):
         # [NEW] 标记：Ace AI 是否在本回合已经抢先行动过
         self.has_acted_early = False
 
+        # [NEW] 标记：Ace AI 拼刀获胜（相同时机先行动）
+        self.won_clash = False
+
         # [NEW] 标记：本回合是否已经在该机甲选择的阶段入场行动过
         self.has_acted_this_round = False
         # ---
@@ -446,6 +449,7 @@ class Mech(GameEntity):
             "pending_combat": make_json_safe(self.pending_combat),
             # [NEW] 序列化抢先行动状态
             "has_acted_early": self.has_acted_early,
+            "won_clash": self.won_clash,
             "has_acted_this_round": self.has_acted_this_round,
         })
         return base_dict
@@ -491,6 +495,7 @@ class Mech(GameEntity):
 
         # [NEW] 恢复抢先行动状态
         mech.has_acted_early = data.get('has_acted_early', False)
+        mech.won_clash = data.get('won_clash', False)
         mech.has_acted_this_round = data.get('has_acted_this_round', False)
 
         mech.controller_css = data.get('controller_css', 'neutral')
@@ -611,35 +616,135 @@ class Projectile(GameEntity):
 
 class Drone(GameEntity):
     """
-    无人机实体 (目前是一个骨架，未来可以扩展)。
+    无人机实体。
+    只有核心部件，固定姿态，体型小（每格最多4个）。
+    动作分为指令动作（指令阶段）和自动动作（自动阶段）。
     """
 
-    def __init__(self, id, controller, pos, orientation, name):
+    def __init__(self, id, controller, pos, orientation, name,
+                 evasion, stance, actions, electronics=0, move_range=0,
+                 armor=0, structure=1):
         super().__init__(id, 'drone', controller, pos, orientation, name)
-        # TODO: 添加无人机特有的属性 (例如 部件, HP, 动作)
+
+        self.evasion = evasion
+        self.stance = stance
+        self.electronics = electronics
+        self.move_range = move_range
+
+        self.has_acted = False
+        self.command_marker_received = False
+
+        if controller == 'player':
+            self.controller_css = 'drone-player'
+        elif controller == 'ai':
+            self.controller_css = 'drone-ai'
+        else:
+            self.controller_css = 'drone-neutral'
+
+        self.parts = {
+            'core': Part(name=f"{name} 核心", armor=armor, structure=structure,
+                         actions=actions, electronics=electronics)
+        }
+
+    def get_total_evasion(self):
+        return self.evasion if self.status == 'ok' else 0
+
+    def get_total_electronics(self):
+        return self.electronics if self.status == 'ok' else 0
+
+    def get_all_actions(self):
+        all_actions = []
+        part = self.parts.get('core')
+        if part and part.status != 'destroyed':
+            for action in part.actions:
+                all_actions.append((action, 'core'))
+        return all_actions
+
+    def get_action_by_name_and_slot(self, action_name, part_slot):
+        part = self.parts.get(part_slot)
+        if part and part.status != 'destroyed':
+            for action in part.actions:
+                if action.name == action_name:
+                    return action
+        return None
+
+    def get_action_by_timing(self, timing_type):
+        for action, part_slot in self.get_all_actions():
+            if action.action_type == timing_type:
+                return action, part_slot
+        return None, None
+
+    def get_part_by_name(self, name_or_slot):
+        if name_or_slot in self.parts:
+            return self.parts[name_or_slot]
+        for part in self.parts.values():
+            if part and part.name == name_or_slot:
+                return part
+        return None
+
+    def get_active_parts_count(self):
+        core = self.parts.get('core')
+        return 1 if core and core.status != 'destroyed' else 0
+
+    def get_passive_effects(self):
+        passive_effects = []
+        for action, part_slot in self.get_all_actions():
+            if action.action_type == '被动' and action.effects:
+                passive_effects.append(action.effects)
+        return passive_effects
+
+    def get_interceptor_actions(self):
+        interceptor_actions = []
+        for action, part_slot in self.get_all_actions():
+            if action.action_type == '被动' and action.effects and 'interceptor' in action.effects:
+                interceptor_actions.append((action, part_slot))
+        return interceptor_actions
 
     def to_dict(self):
-        """序列化无人机数据。"""
         base_dict = super().to_dict()
-        # TODO: 添加无人机特有的序列化
+        base_dict.update({
+            'evasion': self.evasion,
+            'stance': self.stance,
+            'parts': {'core': self.parts['core'].to_dict() if self.parts.get('core') else None},
+            'electronics': self.electronics,
+            'move_range': self.move_range,
+            'has_acted': self.has_acted,
+            'command_marker_received': self.command_marker_received,
+        })
         return base_dict
 
     @classmethod
     def from_dict(cls, data):
-        """从字典重建无人机。"""
+        core_part_data = data.get('parts', {}).get('core')
+        core_part = Part.from_dict(core_part_data) if core_part_data else None
+        actions = core_part.actions if core_part else []
+
         drone = cls(
             id=data.get('id', f"drone_{random.randint(0, 999)}"),
             controller=data.get('controller', 'neutral'),
             pos=data.get('pos', (1, 1)),
             orientation=data.get('orientation', 'N'),
-            name=data.get('name', 'Unknown Drone')
+            name=data.get('name', 'Unknown Drone'),
+            evasion=data.get('evasion', 0),
+            stance=data.get('stance', 'defense'),
+            actions=actions,
+            electronics=data.get('electronics', 0),
+            move_range=data.get('move_range', 0),
+            armor=core_part_data.get('armor', 0) if core_part_data else 0,
+            structure=core_part_data.get('structure', 1) if core_part_data else 1,
         )
         drone.last_pos = data.get('last_pos', None)
         drone.status = data.get('status', 'ok')
-        drone.controller_css = data.get('controller_css', 'neutral')
+        drone.has_acted = data.get('has_acted', False)
+        drone.command_marker_received = data.get('command_marker_received', False)
+
+        drone.controller_css = data.get('controller_css', 'drone-neutral')
         if drone.controller == 'player':
-            drone.controller_css = 'player'
+            drone.controller_css = 'drone-player'
         elif drone.controller == 'ai':
-            drone.controller_css = 'ai'
+            drone.controller_css = 'drone-ai'
+
+        if core_part:
+            drone.parts['core'].status = core_part_data.get('status', 'ok')
 
         return drone

@@ -3,7 +3,7 @@ import traceback
 from flask import Blueprint, jsonify, request, session, url_for
 from game_logic.game_logic import GameState
 from game_logic.data_models import Mech
-from game_logic.config import MAX_LOG_ENTRIES
+from game_logic.config import MAX_LOG_ENTRIES, BOARD_WIDTH, BOARD_HEIGHT, log_drone, log_err
 import game_logic.game_controller as controller
 
 #
@@ -287,6 +287,148 @@ def debug_skill():
     return _handle_controller_response(new_state, logs, result, err)
 
 
+# === 无人机指令 API ===
+
+@api_bp.route('/get_drone_move_range', methods=['POST'])
+@handle_errors
+def get_drone_move_range():
+    """API: 获取无人机的可移动范围"""
+    data = request.get_json()
+    game_state, player_mech, error_response = _get_game_state_and_player(data)
+    if error_response:
+        return error_response
+
+    drone_id = data.get('drone_id')
+    drone = game_state.get_entity_by_id(drone_id)
+    if not drone or drone.entity_type != 'drone' or drone.controller != 'player':
+        return jsonify({'success': False, 'message': '无效的无人机ID。'})
+
+    move_range = drone.move_range
+    if move_range <= 0:
+        return jsonify({'valid_moves': []})
+
+    possible = game_state.calculate_move_range(drone, move_range, is_flight=True)
+    mech_tiles = game_state.get_mech_occupied_tiles(exclude_id=drone.id)
+    valid_moves = [list(p) for p in possible if p not in mech_tiles]
+    return jsonify({'success': True, 'valid_moves': valid_moves})
+
+
+# === 无人机指令 API ===
+
+@api_bp.route('/assign_drone_command', methods=['POST'])
+@handle_errors
+def assign_drone_command():
+    """API: 玩家分配指令标记给无人机并执行指令动作"""
+    data = request.get_json()
+    game_state, player_mech, error_response = _get_game_state_and_player(data)
+    if error_response:
+        return error_response
+
+    # 跳过指令（消耗剩余标记但不执行动作）
+    if data.get('skip'):
+        game_state.command_markers_available = 0
+        session['game_state'] = game_state.to_dict()
+        return jsonify({'success': True, 'advance_round': True})
+
+    drone_id = data.get('drone_id')
+    drone = game_state.get_entity_by_id(drone_id)
+    if not drone or drone.entity_type != 'drone' or drone.controller != 'player':
+        return jsonify({'success': False, 'message': '无效的无人机ID。'})
+
+    if drone.command_marker_received:
+        return jsonify({'success': False, 'message': '该无人机本回合已获得指令标记。'})
+
+    if game_state.command_markers_available <= 0:
+        return jsonify({'success': False, 'message': '没有可用的指令标记。'})
+
+    log = []
+    game_state.visual_events = []
+
+    drone.command_marker_received = True
+    game_state.command_markers_assigned[drone.id] = True
+    game_state.command_markers_available -= 1
+    log.append(log_drone(f"玩家指定 [{drone.name}] 获得指令标记。"))
+
+    # 查找最近敌人
+    closest_enemy = None
+    min_dist = 999
+    for entity in game_state.entities.values():
+        if entity.controller != drone.controller and entity.status != 'destroyed':
+            dist = abs(drone.pos[0] - entity.pos[0]) + abs(drone.pos[1] - entity.pos[1])
+            if dist < min_dist:
+                min_dist = dist
+                closest_enemy = entity
+
+    # 玩家选择的动作（优先），否则回退到第一个指令动作
+    action_name = data.get('action_name')
+    if action_name:
+        cmd_action = drone.get_action_by_name_and_slot(action_name, 'core')
+    else:
+        cmd_action, _ = drone.get_action_by_timing('指令')
+
+    result_data = {}
+
+    if cmd_action and cmd_action.action_type == '指令' and cmd_action.dice and closest_enemy:
+        # 指令攻击动作
+        log.append(log_drone(f"{drone.name} 执行 [{cmd_action.name}]，目标 {closest_enemy.name}"))
+        from game_logic.ai_actions import _resolve_queued_attack
+        atk_q = [{'attacker_id': drone.id, 'defender_id': closest_enemy.id,
+                   'action_dict': cmd_action.to_dict()}]
+        game_state, log, rd, _ = _resolve_queued_attack(game_state, log, atk_q[0], atk_q[1:])
+        if rd:
+            result_data.update(rd)
+    else:
+        # 指令移动（玩家选的动作或无攻击动作时默认）
+        action_label = cmd_action.name if cmd_action else '指令移动'
+        target_pos = data.get('target_pos')
+
+        if target_pos:
+            tx, ty = target_pos[0], target_pos[1]
+            if (1 <= tx <= BOARD_WIDTH and 1 <= ty <= BOARD_HEIGHT):
+                drone.last_pos = drone.pos
+                drone.pos = (tx, ty)
+                log.append(log_drone(f"{drone.name} 执行 [{action_label}] 移动至 {drone.pos}"))
+            else:
+                log.append(log_err(f"无效移动目标 {target_pos}"))
+        else:
+            controller._execute_drone_auto_move(drone, game_state, closest_enemy, log)
+        result_data = {}
+
+    # 检查是否还有可分配的标记和无人机
+    remaining_drones = [e for e in game_state.entities.values()
+                        if e.controller == 'player' and e.entity_type == 'drone' and e.status == 'ok'
+                        and not e.command_marker_received]
+    if game_state.command_markers_available <= 0 or not remaining_drones:
+        # 所有标记已用完或无剩余无人机，推进阶段
+        result_data['advance_round'] = True
+    else:
+        result_data['drone_command_phase'] = True
+        result_data['command_markers_available'] = game_state.command_markers_available
+        result_data['available_drones'] = [
+            {'id': d.id, 'name': d.name, 'pos': d.pos, 'move_range': d.move_range,
+             'actions': [{'name': a.name, 'type': a.action_type, 'range': a.range_val}
+                         for a, s in d.get_all_actions() if a.action_type == '指令']}
+            for d in remaining_drones
+        ]
+
+    # 传递视觉事件给前端（骰子动画等）
+    if game_state.visual_events:
+        result_data['visual_events'] = game_state.visual_events
+        game_state.visual_events = []
+
+    # 保存 game_state
+    session['game_state'] = game_state.to_dict()
+    combat_log = session.get('combat_log', [])
+    combat_log.extend(log)
+    if len(combat_log) > MAX_LOG_ENTRIES:
+        combat_log = combat_log[-MAX_LOG_ENTRIES:]
+    session['combat_log'] = combat_log
+
+    response = {'success': True}
+    response.update(result_data)
+    return jsonify(response)
+
+
 # === 中断处理 API ===
 
 @api_bp.route('/resolve_effect_choice', methods=['POST'])
@@ -543,7 +685,9 @@ def get_game_state():
             'movePlayer': url_for('api.move_player'),
             'executeAdjustMove': url_for('api.execute_adjust_move'),
             'changeOrientation': url_for('api.change_orientation'),
-            'advanceRound': url_for('api.advance_round')
+            'advanceRound': url_for('api.advance_round'),
+            'assignDroneCommand': url_for('api.assign_drone_command'),
+            'getDroneMoveRange': url_for('api.get_drone_move_range')
         }
     }
 
@@ -579,7 +723,7 @@ def end_turn_ajax():
 
     log.extend(new_logs)
     if error:
-        log.append(error)
+        log.append(log_err(error))
 
     if result_data and result_data.get('action_required'):
         session['pending_interrupt_data'] = result_data

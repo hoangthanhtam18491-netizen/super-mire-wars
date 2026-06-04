@@ -267,6 +267,15 @@
                     return;
                 }
 
+                if (data.drone_command_phase) {
+                    console.log("Drone command phase continuation.");
+                    window.__actionInFlight = false;
+                    S.gameState.pendingEffect = false;
+                    S.gameState.pendingReroll = false;
+                    S.showDroneCommandModal(data);
+                    return;
+                }
+
                 // 推进阶段（AI 回合延续等场景）
                 if (data.run_projectile_phase || data.advance_round) {
                     console.log("Advancing round from action response...");
@@ -369,9 +378,12 @@
                     // 刷新阶段 UI
                     S.updateUIForPhase();
 
-                    // 滚动战斗日志到底部
+                    // 智能滚动战斗日志 (仅在用户已位于底部时自动滚底)
                     const log = document.querySelector('.combat-log');
-                    if (log) log.scrollTop = log.scrollHeight;
+                    if (log) {
+                        const wasAtBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
+                        if (wasAtBottom) log.scrollTop = log.scrollHeight;
+                    }
 
                     // 处理视觉事件
                     const events = gd.visualEvents || [];
@@ -541,6 +553,14 @@
             }
 
             // Player's turn at their phase
+            // 无人机指令阶段
+            if (data.drone_command_phase) {
+                console.log('[advanceRound] drone_command_phase');
+                window.__actionInFlight = false;
+                S.showDroneCommandModal(data);
+                return;
+            }
+
             if (data.player_turn) {
                 console.log('[advanceRound] player_turn at phase:', data.enter_phase);
                 window.__actionInFlight = false;
@@ -548,10 +568,16 @@
                 return;
             }
 
-            // Round complete - refresh for new round
+            // Round complete - show visual events first, then refresh
             console.log('[advanceRound] round_complete, calling refreshGameUI');
             window.__actionInFlight = false;
-            refreshGameUI();
+            if (data.visual_events && data.visual_events.length > 0) {
+                S.gameState.visualEvents = data.visual_events;
+                S.processVisualEvents(data.visual_events);
+                setTimeout(function() { refreshGameUI(); }, 5500);
+            } else {
+                refreshGameUI();
+            }
         })
         .catch(function(e) {
             console.error('[advanceRound] fetch error:', e);
@@ -565,6 +591,224 @@
         console.log('[executeEndTurn] called, delegating to advanceRound');
         advanceRound();
     }
+
+    // --- 无人机指令模态框 ---
+
+    function refreshGameUIForDroneCommand(droneData) {
+        fetch(S.apiUrls.gameState || '/api/game_state')
+            .then(function(res) { return res.json(); })
+            .then(function(gd) {
+                if (gd.success && gd.game_data) {
+                    // 更新 apiUrls（关键：获取 assignDroneCommand URL）
+                    if (gd.game_data.apiUrls) {
+                        S.apiUrls = gd.game_data.apiUrls;
+                    }
+                    // 更新实体数据
+                    S.allEntities = gd.game_data.allEntities;
+                    S.playerEntity = gd.game_data.playerEntity;
+                    S.aiEntity = gd.game_data.aiEntity;
+                    // 处理冲突动画
+                    var events = gd.game_data.visualEvents || [];
+                    if (events.length > 0) {
+                        S.processVisualEvents(events);
+                    }
+                    // 冲突动画后展示无人机指令
+                    var delay = events.some(function(e) { return e.type === 'clash_result'; }) ? 3500 : 500;
+                    setTimeout(function() { S.showDroneCommandModal(droneData); }, delay);
+                } else {
+                    S.showDroneCommandModal(droneData);
+                }
+            })
+            .catch(function() {
+                S.showDroneCommandModal(droneData);
+            });
+    }
+
+    function showDroneCommandModal(data) {
+        S._pendingDroneData = data;  // 保存以便后续移动选择使用
+
+        var modal = document.getElementById('drone-command-modal');
+        var info = document.getElementById('drone-command-info');
+        var buttonsDiv = document.getElementById('drone-command-buttons');
+
+        info.innerText = '可用指令标记: ' + (data.command_markers_available || 0);
+        buttonsDiv.innerHTML = '';
+
+        var drones = data.available_drones || [];
+        if (drones.length === 0) {
+            info.innerText += ' (无可用无人机)';
+            skipDroneCommand();
+            return;
+        }
+
+        drones.forEach(function(drone) {
+            // 无人机标题
+            var header = document.createElement('div');
+            header.style.cssText = 'color: #9f7aea; font-weight: bold; margin-top: 0.75rem;';
+            header.innerText = drone.name + ' (' + drone.pos.join(',') + ')';
+            buttonsDiv.appendChild(header);
+
+            // 每个可用动作一个按钮
+            var actions = drone.actions || [];
+            if (actions.length === 0) {
+                var noAct = document.createElement('div');
+                noAct.style.cssText = 'color: #718096; font-size: 0.8rem;';
+                noAct.innerText = '无可用指令动作';
+                buttonsDiv.appendChild(noAct);
+            }
+            actions.forEach(function(act) {
+                var btn = document.createElement('button');
+                btn.className = 'btn';
+                var isMove = act.type === '指令' && act.range === 0;
+                btn.style.cssText = isMove ? 'background-color: #4299e1;' : 'background-color: #e53e3e;';
+                var label = isMove ? ('移动 (范围' + (drone.move_range || 5) + ')') : (act.name + ' (射程' + act.range + ')');
+                btn.innerHTML = '<strong>' + label + '</strong>';
+                btn.onclick = function() {
+                    assignDroneCommand(drone.id, act.name);
+                };
+                buttonsDiv.appendChild(btn);
+            });
+        });
+
+        modal.style.display = 'block';
+    }
+
+    function hideDroneCommandModal() {
+        document.getElementById('drone-command-modal').style.display = 'none';
+    }
+
+    function assignDroneCommand(droneId, actionName) {
+        hideDroneCommandModal();
+
+        // 移动动作：先让玩家选择目标格子
+        var droneData = null;
+        var availableDrones = S._pendingDroneData ? S._pendingDroneData.available_drones || [] : [];
+        for (var i = 0; i < availableDrones.length; i++) {
+            if (availableDrones[i].id === droneId) { droneData = availableDrones[i]; break; }
+        }
+        var isMoveAction = false;
+        if (droneData) {
+            var acts = droneData.actions || [];
+            for (var j = 0; j < acts.length; j++) {
+                if (acts[j].name === actionName && acts[j].range === 0) { isMoveAction = true; break; }
+            }
+        }
+
+        if (isMoveAction && droneData) {
+            // 获取无人机可移动范围并高亮
+            S.clearHighlights();
+            fetch(S.apiUrls.getDroneMoveRange, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ drone_id: droneId, player_id: S.playerID })
+            }).then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (data.valid_moves) {
+                    data.valid_moves.forEach(function(pos) {
+                        var x = pos[0], y = pos[1];
+                        var cell = document.getElementById('cell-' + x + '-' + y);
+                        if (cell) {
+                            cell.classList.add('highlight-move');
+                            cell.onclick = function() {
+                                S.clearHighlights();
+                                confirmDroneMove(droneId, actionName, [x, y]);
+                            };
+                        }
+                    });
+                }
+            });
+            return;
+        }
+
+        // 攻击动作：直接发送
+        sendDroneCommand(droneId, actionName, null);
+    }
+
+    function confirmDroneMove(droneId, actionName, targetPos) {
+        sendDroneCommand(droneId, actionName, targetPos);
+    }
+
+    function sendDroneCommand(droneId, actionName, targetPos) {
+        if (window.__actionInFlight) return;
+        window.__actionInFlight = true;
+
+        var body = { drone_id: droneId, action_name: actionName, player_id: S.playerID };
+        if (targetPos) { body.target_pos = targetPos; }
+
+        fetch(S.apiUrls.assignDroneCommand, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            window.__actionInFlight = false;
+            if (!data || !data.success) {
+                S.showErrorModal('无人机指令失败', (data && data.message) || '未知错误');
+                return;
+            }
+            // 处理攻击结果视觉事件（骰子弹窗、伤害动画）
+            if (data.visual_events && data.visual_events.length > 0) {
+                // 存入 gameState 以便 closeDiceRollModal 能找到 attack_result
+                S.gameState.visualEvents = data.visual_events;
+                S.processVisualEvents(data.visual_events);
+                // 暂停5.5秒后继续（骰子弹窗5秒自动关闭 + 伤害动画0.5秒）
+                var next = function() {
+                    if (data.drone_command_phase) {
+                        S.showDroneCommandModal(data);
+                    } else if (data.advance_round) {
+                        S.advanceRound();
+                    } else {
+                        refreshGameUI();
+                    }
+                };
+                setTimeout(next, 5500);
+                return;
+            }
+            if (data.drone_command_phase) {
+                S.showDroneCommandModal(data);
+                return;
+            }
+            if (data.advance_round) {
+                setTimeout(function() { S.advanceRound(); }, 300);
+                return;
+            }
+            refreshGameUI();
+        })
+        .catch(function(e) {
+            window.__actionInFlight = false;
+            S.showErrorModal('无人机指令错误', e.message);
+        });
+    }
+
+    function skipDroneCommand() {
+        hideDroneCommandModal();
+        if (window.__actionInFlight) return;
+        window.__actionInFlight = true;
+        fetch(S.apiUrls.assignDroneCommand, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ drone_id: null, player_id: S.playerID, skip: true })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            window.__actionInFlight = false;
+            if (data.advance_round) {
+                setTimeout(function() { S.advanceRound(); }, 300);
+            } else {
+                refreshGameUI();
+            }
+        })
+        .catch(function(e) {
+            window.__actionInFlight = false;
+            setTimeout(function() { S.advanceRound(); }, 300);
+        });
+    }
+
+    S.showDroneCommandModal = showDroneCommandModal;
+    S.hideDroneCommandModal = hideDroneCommandModal;
+    S.assignDroneCommand = assignDroneCommand;
+    S.skipDroneCommand = skipDroneCommand;
 
     function processVisualEvents(events) {
         if (!events || events.length === 0) return;
@@ -633,6 +877,15 @@
             body: JSON.stringify({ player_id: S.playerID })
         }).then(res => res.json()).then(data => {
             if (data.success) {
+                // 无人机指令优先于冲突动画（冲突通过 visual_events 展示）
+                if (data.drone_command_phase) {
+                    console.log("Drone command phase from confirmTiming");
+                    window.__actionInFlight = false;
+                    // 先刷新 UI 获取最新 apiUrls，再展示指令模态框
+                    refreshGameUIForDroneCommand(data);
+                    return;
+                }
+
                 if (data.clash_occurred) {
                     console.log("Clash occurred! Reloading for animation...");
                     window.location.reload();
@@ -958,6 +1211,7 @@
         document.getElementById('dice-roll-close')?.addEventListener('click', S.closeDiceRollModal);
         document.getElementById('dice-roll-skip')?.addEventListener('click', () => S.confirmReroll(true));
         document.getElementById('dice-roll-confirm')?.addEventListener('click', () => S.confirmReroll(false));
+        document.getElementById('drone-command-skip-btn')?.addEventListener('click', () => S.skipDroneCommand());
 
         // 为重投骰子添加事件委托
         const attackerDiceGroup = document.getElementById('dice-roll-attacker-result');

@@ -6,9 +6,9 @@ from flask import Blueprint, render_template, request, session, redirect, url_fo
 from game_logic.game_logic import GameState
 from game_logic.database import (
     PLAYER_CORES, PLAYER_LEGS, PLAYER_LEFT_ARMS, PLAYER_RIGHT_ARMS, PLAYER_BACKPACKS,
-    AI_LOADOUTS, PLAYER_PILOTS
+    AI_LOADOUTS, PLAYER_PILOTS, DRONE_TEMPLATES
 )
-from game_logic.config import MAX_LOG_ENTRIES, load_firebase_config, get_firebase_app_id, get_firebase_auth_token, ROOT_DIR
+from game_logic.config import MAX_LOG_ENTRIES, load_firebase_config, get_firebase_app_id, get_firebase_auth_token, ROOT_DIR, log_action, log_system
 
 main_bp = Blueprint('main', __name__)
 
@@ -20,10 +20,9 @@ def index():
     同时加载并解析 Game Introduction.md 以显示规则。
     """
     update_notes = [
-        "版本 v2.5: 彩蛋",
-        "- [新增] 一个AI，一个部件，数个新效果。",
-        "- [优化] 代码结构。",
-        "- [修正] 拦截问题。",
+        "版本 v3.0: 无人机",
+        "- [新增] 对战包复盟侧。",
+        "- [优化] 重写了游戏流程。",
     ]
     rules_html = ""
 
@@ -85,6 +84,7 @@ def hangar():
         backpacks=player_backpacks,
         player_pilots=PLAYER_PILOTS,
         ai_loadouts=AI_LOADOUTS,
+        drones=DRONE_TEMPLATES,
         firebase_config=firebase_config_dict,
         app_id=app_id,
         initial_auth_token=auth_token
@@ -107,6 +107,7 @@ def start_game():
     game_mode = request.form.get('game_mode', 'duel')
     ai_opponent_key = request.form.get('ai_opponent')
     player_pilot_name = request.form.get('pilot')
+    drone_deployment = request.form.getlist('drones')
 
     if ai_opponent_key == 'raven':
         session['show_raven_intro'] = True
@@ -115,25 +116,26 @@ def start_game():
         player_mech_selection=selection,
         ai_loadout_key=ai_opponent_key,
         game_mode=game_mode,
-        player_pilot_name=player_pilot_name
+        player_pilot_name=player_pilot_name,
+        drone_deployment=drone_deployment
     )
 
     session['game_state'] = game.to_dict()
 
-    log = [f"> 玩家机甲组装完毕。"]
+    log = [log_action("玩家机甲组装完毕。")]
     ai_mech = game.get_ai_mech()
     ai_name = ai_mech.name if ai_mech else "未知AI"
 
     if game_mode == 'horde':
-        log.append(f"> [生存模式] 已启动。")
-        log.append(f"> 第一波遭遇: {ai_name}。")
+        log.append(log_system(f"[生存模式] 已启动。"))
+        log.append(log_action(f"第一波遭遇: {ai_name}。"))
     elif game_mode == 'range':
-        log.append(f"> [靶场模式] 已启动。")
-        log.append(f"> 遭遇敌机: {ai_name}。")
+        log.append(log_system(f"[靶场模式] 已启动。"))
+        log.append(log_action(f"遭遇敌机: {ai_name}。"))
     else:
-        log.append(f"> [决斗模式] 已启动。")
-        log.append(f"> 遭遇敌机: {ai_name}。")
-    log.append("> 战斗开始！")
+        log.append(log_system(f"[决斗模式] 已启动。"))
+        log.append(log_action(f"遭遇敌机: {ai_name}。"))
+    log.append(log_action("战斗开始！"))
 
     if len(log) > MAX_LOG_ENTRIES:
         log = log[-MAX_LOG_ENTRIES:]

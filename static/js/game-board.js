@@ -78,7 +78,41 @@
                 console.error("解析或定位实体时出错:", e, wrapper.id);
             }
         });
+
+        // 无人机同格堆叠偏移
+        applyDroneStacking();
     }
+
+    function applyDroneStacking() {
+        var dronesByTile = {};
+        document.querySelectorAll('.mech-icon-wrapper').forEach(function(wrapper) {
+            var idMatch = wrapper.id.match(/^entity-(.+)-wrapper$/);
+            if (!idMatch) return;
+            var eid = idMatch[1];
+            var entity = null;
+            if (S.allEntities) {
+                for (var i = 0; i < S.allEntities.length; i++) {
+                    if (S.allEntities[i].id === eid) { entity = S.allEntities[i]; break; }
+                }
+            }
+            if (entity && entity.entity_type === 'drone') {
+                var key = entity.pos[0] + ',' + entity.pos[1];
+                if (!dronesByTile[key]) dronesByTile[key] = [];
+                dronesByTile[key].push(wrapper);
+            }
+        });
+        Object.keys(dronesByTile).forEach(function(key) {
+            var wrappers = dronesByTile[key];
+            if (wrappers.length > 1) {
+                wrappers.forEach(function(w, i) {
+                    var offsets = [[-12,-12],[12,-12],[-12,12],[12,12]];
+                    var off = offsets[i] || [0,0];
+                    w.style.transform = 'translate(' + off[0] + 'px, ' + off[1] + 'px)';
+                });
+            }
+        });
+    }
+    S.applyDroneStacking = applyDroneStacking;
 
     function showAttackEffect(pos, text) {
         const [x, y] = pos;

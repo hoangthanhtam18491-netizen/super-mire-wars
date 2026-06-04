@@ -17,7 +17,7 @@ game_logic/      → GameState 类（状态容器）+ 纯函数（射程/寻路/
 combat_system    → CombatState 状态机，封装单次攻击的全生命周期
 dice_roller      → 4色骰子系统 + 黑骰 + 重投
 data_models      → Action / Part / Pilot / GameEntity / Mech / Projectile / Drone
-config           → 共享常量 (MAX_LOG_ENTRIES, BOARD_WIDTH/HEIGHT) + Firebase 配置加载
+config           → 共享常量 (MAX_LOG_ENTRIES, BOARD_WIDTH/HEIGHT) + Firebase 配置加载 + 战斗日志辅助函数
 ai_system        → 普通 AI 回合逻辑（Brawler/Sniper 人格）
 ace_logic        → Ace AI 抢先手判定 + 重投决策
 ace_ai_system    → Ace AI 战术规划器 + 执行器
@@ -69,7 +69,7 @@ session 加载 → from_dict() 反序列化 → controller 修改 GameState
 | `game_logic/game_logic.py` | 842 | GameState类 + 工具函数 |
 | `game_logic/data_models.py` | 636 | 所有数据类定义 |
 | `routes/api_routes.py` | ~280 | 玩家动作 AJAX 端点 |
-| `game_logic/config.py` | ~55 | 共享常量 + Firebase 配置 |
+| `game_logic/config.py` | ~100 | 共享常量 + Firebase 配置 + 战斗日志辅助函数 |
 
 ## 关键约定
 
@@ -82,6 +82,17 @@ session 加载 → from_dict() 反序列化 → controller 修改 GameState
 - **所有 API 路由必须用 `@handle_errors` 装饰器** — 捕获未处理异常，返回 JSON 错误而非 500 页面
 - **CombatState 不直接依赖 ace_logic** — 通过 `ace_reroll_callback` 回调注入，由 game_controller 在构造时传入
 - **共享常量从 `game_logic.config` 导入** — `MAX_LOG_ENTRIES`、`load_firebase_config()` 等不要在各路由文件中重复定义
+- **战斗日志必须结构化** — 使用 `game_logic.config` 中的辅助函数创建日志条目：
+  - `log_action(msg)` → 普通动作 (info/action)
+  - `log_phase(msg)` → 阶段标题 (info/phase, 橙色加粗)
+  - `log_combat(msg)` → 战斗结果 (info/combat)
+  - `log_detail(msg)` → **可折叠骰子详情** (info/combat, collapsible=True)
+  - `log_err(msg)` → 错误 (error/system, 红色加粗)
+  - `log_warn(msg)` → 警告 (warn/system, 橙色)
+  - `log_drone(msg)` → 无人机事件 (info/drone, 紫色)
+  - `log_intercept(msg)` → 拦截事件 (info/intercept, 橙色)
+  - 日志条目是 dict (`{'l': level, 'c': category, 'm': message, 'd': collapsible}`)，模板中支持向后兼容旧字符串条目
+  - 所有新日志必须用这些辅助函数，禁止裸 `log.append("字符串")`
 
 ## 已知陷阱
 
@@ -93,6 +104,19 @@ session 加载 → from_dict() 反序列化 → controller 修改 GameState
 5. **ammo_counts 的 key** — 格式是 `(entity_id, part_slot, action_name)` 三元组，不是简单的字符串。
 6. **controller 返回值签名** — 统一为 `(game_state, log, result_data, error)`，`result_data` 用于中断通知前端。
 7. **新增 CombatState 使用点** — 创建 `CombatState(...)` 时必须传入 `ace_reroll_callback=ace_logic.decide_reroll`，否则 Ace AI 的重投逻辑不会触发。
+
+## 无人机系统 (Drone)
+
+- **Drone 类** (`data_models.py`) 继承 GameEntity，只有核心部件，固定姿态，体型小（每格最多4台）
+- **碾压机制**：机甲移动到无人机格子 → 无人机被推至相邻空格，机甲停止。`calculate_move_range` 使用 `_get_occupied_tiles_by_type()` 区分阻挡格与无人机格
+- **指令阶段**（`round_actions.py` 指令 phase）：消耗指令标记（共享池，友方机甲每台1个/回合）。AI 自动分配，玩家自动分配第一台未标记无人机
+- **自动阶段**（`round_actions.py` 自动 phase）：所有无人机执行 `'自动'` 类型动作，目标最近敌方。`run_drone_logic()` 在 `game_logic.py` 中实现
+- **动作类型** `'自动'`：360度索敌，通过 `calculate_attack_range` 支持
+- **拦截系统**：`_run_interception_checks` 支持 entity_type `'drone'`，ammo=0 视为无限弹药（单发）
+- **数据库**：`DRONE_TEMPLATES` 在 `database/_drones.py`，注册在 `__init__.py`。模板示例：DTG-30M "鬣狗"
+- **部署**：机库选择，`drone_deployment` 传入 `GameState.__init__`，在玩家机甲附近生成
+- **回合重置**：`_reset_round()` 重置 `has_acted`、`command_marker_received`、指令标记池
+- **前端**：无人机图标 `static/images/icon/drone.png`，同格堆叠偏移在 `game-board.js` 的 `applyDroneStacking()`，侧边栏状态面板在 `_sidebar_left.html`，CSS 类 `.mech-icon.drone-player` / `.drone-ai`
 
 ## 修改代码后
 

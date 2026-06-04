@@ -52,6 +52,10 @@ ACTION_DIANSHE_XIAN = Action(name="点射【霰射】", action_type="射击", co
 ACTION_DIANSHE_PC6 = Action(name="点射【霰射(PC-6)】", action_type="射击", cost="M", dice="4黄1红", range_val=6,
                            effects=build_effects(EFFECT_MELEE_SHOOTING))
 ACTION_DIANSHE_RF = Action(name="点射【RF】", action_type="射击", cost="S", dice="3红", range_val=6)
+ACTION_DIANSHE_IGX106 = Action(name="点射【IGX106】", action_type="射击", cost="S", dice="3黄1红", range_val=3,
+                           effects=build_effects(EFFECT_MELEE_SHOOTING, EFFECT_SCATTERSHOT))
+ACTION_DIANSHE_R7K = Action(name="点射【R7K】", action_type="射击", cost="M", dice="5黄", range_val=8,
+                           effects=build_effects(EFFECT_TWO_HANDED_RANGE_2))
 ACTION_LIANSHE_RF = Action(name="连射【RF】", action_type="射击", cost="M", dice="2黄3红", range_val=6)
 ACTION_JUJI = Action(name="狙击", action_type="射击", cost="M", dice="2黄2红", range_val=12,
                      effects=build_effects(EFFECT_TWO_HANDED_SNIPER))
@@ -65,6 +69,8 @@ ACTION_SUSHE = Action(name="速射", action_type="射击", cost="M", dice="4黄1
                         effects=build_effects(EFFECT_TWO_HANDED_RANGE_2))
 ACTION_SUSHE_PC6 = Action(name="速射【霰射(PC-6)】", action_type="射击", cost="S", dice="3黄1红", range_val=3,
                         effects=build_effects(EFFECT_MELEE_SHOOTING, EFFECT_SCATTERSHOT))
+ACTION_SUSHE_R7K = Action(name="速射【R7K】", action_type="射击", cost="S", dice="4黄", range_val=4,
+                        effects=build_effects())
 ACTION_DIANSHE_ZHAN = Action(name="点射【战】", action_type="射击", cost="S", dice="1黄2红", range_val=6)
 
 # --- 快速 (Quick) ---
@@ -73,6 +79,7 @@ ACTION_JETTISON = Action(name="【弃置】", action_type="快速", cost="S", di
 
 # --- 移动 (Movement) ---
 ACTION_BENPAO = Action(name="奔跑", action_type="移动", cost="M", dice="", range_val=4)
+ACTION_BENPAO_231 = Action(name="奔跑", action_type="移动", cost="S", dice="", range_val=4)
 ACTION_TIAOYUE = Action(name="跳跃", action_type="移动", cost="S", dice="", range_val=2,
                         effects=build_effects(EFFECT_FLIGHT_MOVEMENT))
 ACTION_BENPAO_MA = Action(name="奔跑（马）", action_type="移动", cost="M", dice="", range_val=5)
@@ -206,4 +213,30 @@ ACTION_DELAYED_GUIDED_ATTACK_P = Action(
     range_val=0,
     aoe_range=0,
     effects=build_effects(EFFECT_SHOCK)
+)
+
+# --- 无人机动作 (Drone Actions) ---
+ACTION_DRONE_MOVE = Action(
+    name="指令移动",
+    action_type="指令",
+    cost="S",
+    dice="",
+    range_val=0
+)
+ACTION_DRONE_SWEEP = Action(
+    name="扫射",
+    action_type="自动",
+    cost="S",
+    dice="1黄2红",
+    range_val=4,
+    effects=build_effects(EFFECT_MELEE_SHOOTING)
+)
+ACTION_DRONE_SWEEP_INTERCEPT = Action(
+    name="扫射-拦截",
+    action_type="被动",
+    cost="",
+    dice="1黄2红",
+    range_val=4,
+    ammo=1,
+    effects=build_effects(EFFECT_INTERCEPTOR_1, EFFECT_MELEE_SHOOTING)
 )

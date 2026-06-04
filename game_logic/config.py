@@ -9,6 +9,44 @@ import os
 
 MAX_LOG_ENTRIES = 50
 
+
+def make_log_entry(message, level='info', category='action', collapsible=False):
+    """创建结构化战斗日志条目。
+    level: 'info' | 'warn' | 'error'
+    category: 'phase' | 'combat' | 'action' | 'system' | 'drone' | 'intercept'
+    collapsible: True 用于骰子详情等可折叠行
+    """
+    return {'l': level, 'c': category, 'm': message, 'd': collapsible}
+
+
+def log_action(msg):
+    return make_log_entry(msg)
+
+def log_phase(msg):
+    return make_log_entry(msg, category='phase')
+
+def log_combat(msg):
+    return make_log_entry(msg, category='combat')
+
+def log_system(msg, level='info'):
+    return make_log_entry(msg, level=level, category='system')
+
+def log_err(msg):
+    return make_log_entry(msg, level='error', category='system')
+
+def log_warn(msg):
+    return make_log_entry(msg, level='warn', category='system')
+
+def log_drone(msg):
+    return make_log_entry(msg, category='drone')
+
+def log_intercept(msg):
+    return make_log_entry(msg, category='intercept')
+
+def log_detail(msg):
+    """骰子详情等可折叠行。"""
+    return make_log_entry(msg, category='combat', collapsible=True)
+
 # --- Board ---
 
 BOARD_WIDTH = 10
@@ -25,6 +63,11 @@ DEFAULT_PROJECTILE_LIFESPAN = 3
 # --- Stance bonuses ---
 
 AGILE_ADJUST_MOVE_MULTIPLIER = 2
+
+# --- Drone ---
+
+MAX_DRONES_PER_TILE = 4
+MAX_DRONES_DEPLOYED = 4
 
 # --- Turn phases ---
 

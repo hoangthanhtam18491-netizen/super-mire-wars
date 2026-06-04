@@ -137,6 +137,10 @@ EFFECT_CURVED_FIRE = {
     "logic": {"action_style": "curved"},
     "name": "【曲射】"
 }
+EFFECT_INTERCEPTOR_1 = {
+    "logic": {"interceptor": 1},
+    "name": "【拦截1】"
+}
 EFFECT_INTERCEPTOR_3 = {
     "logic": {"interceptor": 3, "intercept_range": 3},
     "name": "【拦截3】"

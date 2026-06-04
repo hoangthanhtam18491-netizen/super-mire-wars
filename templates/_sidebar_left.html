@@ -157,6 +157,30 @@
 <div class="phase-indicator" style="color: var(--status-destroyed);">玩家机甲未加载</div>
 {% endif %}
 
+<!-- === 无人机状态面板 === -->
+{% set player_drones = [] %}
+{% for e in game.get_all_renderable_entities() %}
+    {% if e.entity_type == 'drone' and e.controller == 'player' %}
+        {% set _ = player_drones.append(e) %}
+    {% endif %}
+{% endfor %}
+{% if player_drones %}
+<div id="drone-panel" style="margin-top: 1rem; padding: 0.5rem; background: #1a202c; border-radius: 0.5rem; border: 1px solid #4a5568;">
+    <h4 style="color: #9f7aea; font-size: 0.9rem; margin-bottom: 0.25rem;">无人机 ({{ player_drones|length }})</h4>
+    {% for drone in player_drones %}
+    <div style="display: flex; justify-content: space-between; padding: 0.15rem 0; font-size: 0.8rem;">
+        <span style="color: #cbd5e0;">{{ drone.name }}</span>
+        <span style="color: {{ '#48bb78' if game.command_markers_assigned.get(drone.id) else '#718096' }};">
+            {{ '已指令' if game.command_markers_assigned.get(drone.id) else '待命' }}
+        </span>
+    </div>
+    {% endfor %}
+    <div style="color: #a0aec0; font-size: 0.7rem; margin-top: 0.25rem;">
+        指令标记: {{ game.command_markers_available }}
+    </div>
+</div>
+{% endif %}
+
 <!-- === 4. 结束回合按钮 (始终可见) === -->
 <!-- [MODIFIED] 移除 onclick -->
 <form id="end-turn-form" action="{{ url_for('game.end_turn') }}" method="POST" style="display: none;"><button type="submit"></button></form>

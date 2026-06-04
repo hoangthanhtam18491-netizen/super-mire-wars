@@ -1,5 +1,6 @@
 import random
 import copy
+from .config import log_action, log_system
 from .game_logic import (
     _get_distance, _is_adjacent, get_ai_lock_status,
     _is_tile_locked_by_opponent, _get_orientation_to_target
@@ -94,7 +95,7 @@ class AceTacticalPlanner:
 
         # 3. 评分并择优
         if not candidate_plans:
-            self.log.append("> [Ace规划] 未找到有效方案，生成待机方案。")
+            self.log.append(log_action("[Ace规划] 未找到有效方案，生成待机方案。"))
             return self._create_idle_plan()
 
         # 评分
@@ -398,7 +399,7 @@ def run_ace_turn(ace_mech, game_state):
 
     # 1. 资源初始化
     if ace_mech.stance == 'downed':
-        log.append(f"> [Ace系统] {ace_mech.name} 强制重启... 系统恢复。")
+        log.append(log_action(f"[Ace] {ace_mech.name} 强制重启... 系统恢复。"))
         ace_mech.player_ap = 1
         ace_mech.player_tp = 0
         ace_mech.stance = 'defense'
@@ -412,20 +413,20 @@ def run_ace_turn(ace_mech, game_state):
                 has_compromised = any(p.status in ['damaged', 'destroyed'] for p in player_mech.parts.values() if p)
                 if has_compromised:
                     ace_mech.player_ap += 1
-                    log.append(f"> [Ace技能: 乘胜追击] 侦测到敌方受损，AP+1 (当前: {ace_mech.player_ap})")
+                    log.append(log_action(f"[Ace技能] 乘胜追击] 侦测到敌方受损，AP+1 (当前: {ace_mech.player_ap})"))
 
     # 2. 获取计划 (优先读取缓存)
     # [关键] 检查是否有缓存的计划
     if hasattr(ace_mech, 'cached_ace_plan') and ace_mech.cached_ace_plan:
         best_plan = ace_mech.cached_ace_plan
         ace_mech.cached_ace_plan = None  # 使用后清除
-        log.append(f"> [Ace系统] 执行拼刀阶段预设战术: {best_plan.description}")
+        log.append(log_action(f"[Ace] 执行拼刀阶段预设战术: {best_plan.description}"))
     else:
         planner = AceTacticalPlanner(ace_mech, game_state)
         best_plan = planner.generate_best_plan()
         log.extend(planner.log)
 
-    log.append(f"> [Ace执行] 意图: {best_plan.intent} | 时机: {best_plan.timing}")
+    log.append(log_action(f"[Ace] 意图: {best_plan.intent} | 时机: {best_plan.timing}"))
 
     # 3. 应用时机和姿态
     ace_mech.timing = best_plan.timing
@@ -439,13 +440,13 @@ def run_ace_turn(ace_mech, game_state):
             ace_mech.pos = pos
             ace_mech.orientation = ori
             ace_mech.player_tp -= 1
-            log.append(f"> [Ace] 战术机动 -> {pos}")
+            log.append(log_action(f"[Ace] 战术机动 -> {pos}"))
 
     # 5. 执行主动作序列
     for (action, slot, target) in best_plan.action_sequence:
         cost_ap, cost_tp = _get_action_cost(action)
         if ace_mech.player_ap < cost_ap or ace_mech.player_tp < cost_tp:
-            log.append(f"> [Ace错误] 计划执行中断: 资源不足 ({action.name})")
+            log.append(log_action(f"[Ace错误] 计划执行中断: 资源不足 ({action.name})"))
             break
 
         ace_mech.player_ap -= cost_ap
@@ -456,7 +457,7 @@ def run_ace_turn(ace_mech, game_state):
             if isinstance(target, tuple):
                 ace_mech.last_pos = ace_mech.pos
                 ace_mech.pos = target
-                log.append(f"> [Ace] 移动 -> {target}")
+                log.append(log_action(f"[Ace] 移动 -> {target}"))
                 player_mech = game_state.get_player_mech()
                 if player_mech:
                     ace_mech.orientation = _get_orientation_to_target(ace_mech.pos, player_mech.pos)
@@ -480,7 +481,7 @@ def run_ace_turn(ace_mech, game_state):
 
         if extra:
             action, slot = extra
-            log.append(f"> [Ace连携] 剩余AP追击: {action.name}")
+            log.append(log_action(f"[Ace] 剩余AP追击: {action.name}"))
             ace_mech.player_ap -= 1
             ace_mech.actions_used_this_turn.append((slot, action.name))
 
@@ -512,7 +513,7 @@ def _execute_projectile_launch(mech, action, slot, target, game_state, log, atta
 
     if count > 0:
         game_state.ammo_counts[key] -= count
-        log.append(f"> [Ace] 发射 {action.name} (x{count})")
+        log.append(log_action(f"[Ace] 发射 {action.name} (x{count})"))
 
         target_pos = target.pos if hasattr(target, 'pos') else mech.pos
 

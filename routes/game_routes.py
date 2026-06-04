@@ -2,7 +2,7 @@ import traceback
 from flask import Blueprint, render_template, session, redirect, url_for, make_response, jsonify
 from game_logic.game_logic import GameState, get_player_lock_status
 from game_logic.data_models import Mech, Projectile
-from game_logic.config import MAX_LOG_ENTRIES, load_firebase_config, get_firebase_app_id, get_firebase_auth_token
+from game_logic.config import MAX_LOG_ENTRIES, load_firebase_config, get_firebase_app_id, get_firebase_auth_token, log_err
 import game_logic.game_controller as controller
 
 #
@@ -168,7 +168,7 @@ def end_turn():
 
         log.extend(new_logs)
         if error:
-            log.append(error)
+            log.append(log_err(error))
 
         if result_data and result_data.get('action_required'):
             session['pending_interrupt_data'] = result_data
@@ -180,7 +180,7 @@ def end_turn():
 
     except Exception as e:
         traceback.print_exc()
-        session['combat_log'] = session.get('combat_log', []) + [f'[系统错误] 回合结束失败: {str(e)}']
+        session['combat_log'] = session.get('combat_log', []) + [log_err(f'回合结束失败: {str(e)}')]
         return redirect(url_for('game.game'))
 
 
@@ -211,7 +211,7 @@ def run_projectile_phase():
 
         log.extend(new_logs)
         if error:
-            log.append(error)
+            log.append(log_err(error))
 
         session['game_state'] = updated_state.to_dict()
         _truncate_and_save_log(log)
@@ -240,7 +240,7 @@ def respawn_ai():
 
         log.extend(new_logs)
         if error:
-            log.append(error)
+            log.append(log_err(error))
 
         session['game_state'] = updated_state.to_dict()
         _truncate_and_save_log(log)

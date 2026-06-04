@@ -21,6 +21,7 @@ from ._pilots import *
 from ._parts_player import *
 from ._parts_ai import *
 from ._ai_loadouts import *
+from ._drones import *
 
 # 2. 重新组装最终的合并字典
 #    (这部分逻辑之前在 parts_database.py 的末尾)
@@ -62,5 +63,6 @@ __all__ = [
     "AI_LOADOUTS",
     "PLAYER_PILOTS",
     "AI_PILOTS",
-    "GENERIC_ACTIONS"
+    "GENERIC_ACTIONS",
+    "DRONE_TEMPLATES"
 ]

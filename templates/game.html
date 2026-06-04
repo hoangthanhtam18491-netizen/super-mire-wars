@@ -106,6 +106,15 @@
         </div>
     </div>
 
+    <!-- 无人机指令模态框 -->
+    <div id="drone-command-modal">
+        <h4 style="color: #9f7aea;">指令阶段 — 选择无人机</h4>
+        <p id="drone-command-info" style="font-size: 0.9rem; color: #a0aec0; margin-bottom: 1rem;"></p>
+        <div id="drone-command-buttons" style="display: flex; flex-direction: column; gap: 0.75rem;">
+        </div>
+        <button class="btn" id="drone-command-skip-btn" style="margin-top: 1rem; background-color: #718096;">跳过指令</button>
+    </div>
+
     <div id="game-over-modal">
         <h2 id="game-over-title" style="font-size: 2rem; margin-bottom: 1.5rem; white-space: pre-wrap;"></h2>
         <!-- [v_REFACTOR_FIX] 修复 url_for 命名空间 -->

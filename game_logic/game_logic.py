@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 from .data_models import (
     Mech, Part, Action, GameEntity, Projectile, Drone, Pilot
 )
-from .config import BOARD_WIDTH, BOARD_HEIGHT
+from .config import BOARD_WIDTH, BOARD_HEIGHT, log_action, log_drone, log_intercept, log_system
 # 数据库
 from .database import (
     ALL_PARTS, CORES, LEGS, LEFT_ARMS, RIGHT_ARMS, BACKPACKS,
-    PROJECTILE_TEMPLATES,
+    PROJECTILE_TEMPLATES, DRONE_TEMPLATES,
     AI_LOADOUTS,
     PLAYER_PILOTS, AI_PILOTS
 )
@@ -150,20 +150,20 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
     action_obj, part_slot = action_tuple
 
     if timing_to_run == '立即':
-        log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 立即执行 [{action_obj.name}]！")
+        log.append(log_action(f"[抛射物] {projectile.name} (在 {projectile.pos}) 立即执行 [{action_obj.name}]！"))
 
         # [重构] 拦截逻辑已移至 game_controller
 
         # 检查抛射物是否在拦截中存活
         if projectile.status == 'destroyed':
-            log.append(f"> [抛射物] {projectile.name} 在引爆前被拦截摧毁！")
+            log.append(log_action(f"[抛射物] {projectile.name} 在引爆前被拦截摧毁！"))
             return log, attacks_to_resolve  # 返回空队列
 
         # 查找目标：在抛射物 *自己* 格子上的所有 *敌方* 单位
         targets = game_state.get_entities_at_pos(projectile.pos, exclude_id=projectile.id)
         for target_entity in targets:
             if target_entity.controller != projectile.controller:
-                log.append(f"> [抛射物] 瞄准了同一格子上的 {target_entity.name}！")
+                log.append(log_action(f"[抛射物] 瞄准了同一格子上的 {target_entity.name}！"))
                 attacks_to_resolve.append({
                     'attacker': projectile,
                     'defender': target_entity,
@@ -171,7 +171,7 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
                 })
 
     elif timing_to_run == '延迟':
-        log.append(f"> [抛射物] {projectile.name} (在 {projectile.pos}) 激活【延迟】动作 [{action_obj.name}]！")
+        log.append(log_action(f"[抛射物] {projectile.name} (在 {projectile.pos}) 激活【延迟】动作 [{action_obj.name}]！"))
 
         # 1. '延迟' 动作 (如导弹) 寻找最近的敌人
         closest_enemy = None
@@ -184,11 +184,11 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
                     closest_enemy = entity
 
         if not closest_enemy:
-            log.append(f"> [抛射物] {projectile.name} 未找到敌方目标，自我销毁。")
+            log.append(log_action(f"[抛射物] {projectile.name} 未找到敌方目标，自我销毁。"))
             projectile.status = 'destroyed'  # 状态修改
             return log, attacks_to_resolve
 
-        log.append(f"> [抛射物] 锁定最近的目标: {closest_enemy.name} (在 {closest_enemy.pos})。")
+        log.append(log_action(f"[抛射物] 锁定最近的目标: {closest_enemy.name} (在 {closest_enemy.pos})。"))
 
         # 2. 计算【空中移动】路径
         move_range = projectile.move_range
@@ -226,20 +226,20 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
                 log.append(
                     f"> [抛射物] {projectile.name} 【空中移动】 {move_range} 格到 {best_pos} (距离目标 {min_dist_after_move} 格)。")
             else:
-                log.append(f"> [抛射物] {projectile.name} 无法找到更近的位置，停留在 {projectile.pos}。")
+                log.append(log_action(f"[抛射物] {projectile.name} 无法找到更近的位置，停留在 {projectile.pos}。"))
 
         # 4. [重构] 拦截逻辑已移至 game_controller
 
         # 5. 检查抛射物是否在拦截中存活
         if projectile.status == 'destroyed':
-            log.append(f"> [抛射物] {projectile.name} 在引爆前被拦截摧毁！")
+            log.append(log_action(f"[抛射物] {projectile.name} 在引爆前被拦截摧毁！"))
             return log, attacks_to_resolve  # 返回空队列
 
         # 6. 在最终位置引爆 (如果自己还活着)
         targets_at_destination = game_state.get_entities_at_pos(projectile.pos, exclude_id=projectile.id)
         for target_entity in targets_at_destination:
             if target_entity.controller != projectile.controller:
-                log.append(f"> [抛射物] 在 {projectile.pos} 尝试命中目标 {target_entity.name}！")
+                log.append(log_action(f"[抛射物] 在 {projectile.pos} 尝试命中目标 {target_entity.name}！"))
                 attacks_to_resolve.append({
                     'attacker': projectile,
                     'defender': target_entity,
@@ -251,11 +251,42 @@ def run_projectile_logic(projectile, game_state, timing_to_run='立即'):
 
 def run_drone_logic(drone, game_state):
     """
-    (骨架) 为单个无人机实体运行其AI逻辑。
+    为单个无人机运行自动阶段逻辑：找到最近敌方并执行自动动作。
+    返回 (log, attacks_to_resolve)。
     """
     log = []
     attacks_to_resolve = []
-    log.append(f"> [无人机] {drone.name} 逻辑（未实现）。")
+
+    if drone.status != 'ok' or drone.has_acted:
+        return log, attacks_to_resolve
+
+    drone.has_acted = True
+    drone.last_pos = drone.pos
+
+    auto_action, auto_slot = drone.get_action_by_timing('自动')
+    if not auto_action:
+        log.append(log_drone(f"{drone.name} 无可用自动动作。"))
+        return log, attacks_to_resolve
+
+    closest_enemy = None
+    min_dist = 999
+    for entity in game_state.entities.values():
+        if entity.controller != drone.controller and entity.status != 'destroyed':
+            dist = abs(drone.pos[0] - entity.pos[0]) + abs(drone.pos[1] - entity.pos[1])
+            if dist < min_dist:
+                min_dist = dist
+                closest_enemy = entity
+
+    if closest_enemy and min_dist <= auto_action.range_val:
+        log.append(log_drone(f"{drone.name} 自动执行 [{auto_action.name}]，目标 {closest_enemy.name}（距离{min_dist}）"))
+        attacks_to_resolve.append({
+            'attacker': drone,
+            'defender': closest_enemy,
+            'action': auto_action
+        })
+    else:
+        log.append(log_drone(f"{drone.name} 无有效目标。"))
+
     return log, attacks_to_resolve
 
 
@@ -345,7 +376,8 @@ class GameState:
     这是游戏状态的“唯一真实来源”。
     """
 
-    def __init__(self, player_mech_selection=None, ai_loadout_key=None, game_mode='duel', player_pilot_name=None):
+    def __init__(self, player_mech_selection=None, ai_loadout_key=None, game_mode='duel',
+                 player_pilot_name=None, drone_deployment=None):
         """
         初始化游戏状态，创建玩家和AI机甲，并根据游戏模式设置它们的起始位置。
         """
@@ -373,6 +405,11 @@ class GameState:
         self.round_phase = None
         self.phase_index = 0
         self.round_number = 1
+
+        # [NEW] 无人机状态
+        self.drone_deployment = drone_deployment or []
+        self.command_markers_available = 0
+        self.command_markers_assigned = {}
 
         # --- 初始化玩家机甲 ---
         if player_mech_selection:
@@ -418,6 +455,23 @@ class GameState:
             else:  # 'standard'
                 if player_mech: player_mech.pos, player_mech.orientation = (5, 2), 'N'
                 if ai_mech: ai_mech.pos, ai_mech.orientation = (5, 8), 'S'
+
+            # --- 部署玩家无人机 (位置确定后再部署) ---
+            if self.drone_deployment and player_mech:
+                from .config import MAX_DRONES_DEPLOYED
+                px, py = player_mech.pos
+                deploy_offsets = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+                offset_idx = 0
+                for drone_key in self.drone_deployment[:MAX_DRONES_DEPLOYED]:
+                    if offset_idx < len(deploy_offsets):
+                        dx, dy = deploy_offsets[offset_idx]
+                        spawn_pos = (px + dx, py + dy)
+                        if 1 <= spawn_pos[0] <= BOARD_WIDTH and 1 <= spawn_pos[1] <= BOARD_HEIGHT:
+                            self.spawn_drone(player_mech, spawn_pos, drone_key)
+                        offset_idx += 1
+
+            # 初始化首回合指令标记
+            self.command_markers_available = 1 if player_mech and player_mech.status != 'destroyed' else 0
 
         elif player_mech_selection:
             player_mech = self.get_player_mech()
@@ -549,6 +603,66 @@ class GameState:
         logger.info(f"生成了实体: {new_id} at {target_pos}")
         return new_id, new_projectile
 
+    def spawn_drone(self, controller_entity, pos, drone_key):
+        """在指定位置生成一个无人机实体。"""
+        if drone_key not in DRONE_TEMPLATES:
+            logger.error(f"找不到无人机模板 '{drone_key}'")
+            return None, None
+
+        template = DRONE_TEMPLATES[drone_key]
+        actions = [Action.from_dict(a) for a in template.get('actions', [])]
+
+        new_id = f"drone_{random.randint(10000, 99999)}"
+
+        new_drone = Drone(
+            id=new_id,
+            controller=controller_entity.controller,
+            pos=pos,
+            orientation=controller_entity.orientation,
+            name=template.get('name', '无人机'),
+            evasion=template.get('evasion', 0),
+            stance=template.get('stance', 'defense'),
+            actions=actions,
+            electronics=template.get('electronics', 0),
+            move_range=template.get('move_range', 0),
+            armor=template.get('armor', 0),
+            structure=template.get('structure', 1)
+        )
+        self.entities[new_id] = new_drone
+        # 初始化无人机弹药
+        for part_slot, part in new_drone.parts.items():
+            if part:
+                for action in part.actions:
+                    if action.ammo > 0:
+                        ammo_key = (new_id, part_slot, action.name)
+                        self.ammo_counts[ammo_key] = action.ammo
+        logger.info(f"生成了无人机: {new_id} at {pos}")
+        return new_id, new_drone
+
+    def _get_occupied_tiles_by_type(self, exclude_id=None):
+        """返回 (blocking_tiles, drone_tiles) — drone格可被碾压通过。"""
+        blocking = set()
+        drone_tiles = set()
+        for entity in self.entities.values():
+            if entity.status != 'destroyed':
+                if exclude_id and entity.id == exclude_id:
+                    continue
+                if entity.entity_type == 'drone':
+                    drone_tiles.add(entity.pos)
+                else:
+                    blocking.add(entity.pos)
+        return blocking, drone_tiles
+
+    def get_mech_occupied_tiles(self, exclude_id=None):
+        """返回所有机甲占据的格子（无人机不能进入）。"""
+        tiles = set()
+        for entity in self.entities.values():
+            if entity.status != 'destroyed' and entity.entity_type == 'mech':
+                if exclude_id and entity.id == exclude_id:
+                    continue
+                tiles.add(entity.pos)
+        return tiles
+
     def check_game_over(self):
         """
         检查游戏是否结束。
@@ -639,6 +753,10 @@ class GameState:
             'round_phase': self.round_phase,
             'phase_index': self.phase_index,
             'round_number': self.round_number,
+            # 无人机状态
+            'drone_deployment': self.drone_deployment,
+            'command_markers_available': self.command_markers_available,
+            'command_markers_assigned': self.command_markers_assigned,
         }
 
     @classmethod
@@ -674,6 +792,11 @@ class GameState:
         game_state.phase_index = data.get('phase_index', 0)
         game_state.round_number = data.get('round_number', 1)
 
+        # 无人机状态
+        game_state.drone_deployment = data.get('drone_deployment', [])
+        game_state.command_markers_available = data.get('command_markers_available', 0)
+        game_state.command_markers_assigned = data.get('command_markers_assigned', {})
+
         return game_state
 
     def calculate_move_range(self, entity, move_distance, is_flight=False):
@@ -685,8 +808,8 @@ class GameState:
         start_pos = entity.pos
         sx, sy = start_pos
 
-        # 获取所有被占据的格子，排除移动者自己
-        occupied_tiles = self.get_occupied_tiles(exclude_id=entity.id)
+        # 获取被占据的格子（分普通阻挡和无人机格），排除移动者自己
+        blocking_tiles, drone_tiles = self._get_occupied_tiles_by_type(exclude_id=entity.id)
 
         # 确定锁定者 (所有与移动者敌对的单位)
         lockers = []
@@ -755,7 +878,7 @@ class GameState:
                     next_pos = (nx, ny)
 
                     if not (1 <= nx <= self.board_width and 1 <= ny <= self.board_height): continue
-                    if next_pos in occupied_tiles: continue  # 路径不能穿过其他单位
+                    if next_pos in blocking_tiles: continue  # 路径不能穿过非无人机单位（无人机可被碾压）
 
                     # 移动成本是在 *离开* 格子时支付的
                     new_cost = cost + move_cost
@@ -835,16 +958,15 @@ class GameState:
                                 back_attack = False
                         valid_targets.append({'pos': entity.pos, 'entity': entity, 'is_back_attack': back_attack})
 
-        elif action.action_type == '射击' or action.action_type == '抛射' or action.action_type == '快速':
-            # --- 射击/抛射 目标实体 逻辑 ---
+        elif action.action_type in ('射击', '抛射', '快速', '自动'):
+            # --- 射击/抛射/自动 目标实体 逻辑 ---
             # 遍历所有敌方实体
             for entity in self.entities.values():
                 if entity.controller != attacker_entity.controller and entity.status != 'destroyed':
                     dist = _get_distance(start_pos, entity.pos)
                     if dist <= final_range:
-                        # 抛射 (或曲射) 无视朝向
-                        if action.action_type == '抛射' or is_curved or is_in_forward_arc(start_pos, orientation,
-                                                                                          entity.pos):
+                        # 抛射/曲射/自动 无视朝向（360度索敌）
+                        if action.action_type == '抛射' or action.action_type == '自动' or is_curved or is_in_forward_arc(start_pos, orientation, entity.pos):
                             back_attack = False
                             if isinstance(entity, Mech):
                                 back_attack = is_back_attack(start_pos, entity.pos, entity.orientation)
@@ -853,8 +975,8 @@ class GameState:
                             valid_targets.append({'pos': entity.pos, 'entity': entity, 'is_back_attack': back_attack})
 
             # 如果是抛射, *额外* 查找所有可发射的空格子
-            if action.action_type == '抛射':
-                # --- 抛射 目标格子 逻辑 ---
+            if action.action_type == '抛射' or action.action_type == '自动':
+                # --- 抛射/自动 目标格子 逻辑 ---
                 occupied_tiles = self.get_occupied_tiles()
                 for x in range(1, self.board_width + 1):
                     for y in range(1, self.board_height + 1):
@@ -863,8 +985,8 @@ class GameState:
 
                         dist = _get_distance(start_pos, cell_pos)
                         if 0 < dist <= final_range:  # 距离必须 > 0
-                            # 抛射 (或曲射) 无视朝向
-                            if action.action_type == '抛射' or is_curved or is_in_forward_arc(start_pos, orientation,
+                            # 抛射/自动 (或曲射) 无视朝向
+                            if action.action_type == '抛射' or action.action_type == '自动' or is_curved or is_in_forward_arc(start_pos, orientation,
                                                                                               cell_pos):
                                 valid_launch_cells.append(cell_pos)
 

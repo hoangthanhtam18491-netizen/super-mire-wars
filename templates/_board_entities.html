@@ -36,7 +36,7 @@ Jinja 在服务器端渲染所有实体，JS 在客户端将其定位。
 
         {% elif entity.entity_type == 'drone' %}
             <!-- 无人机图标 -->
-            {% set icon_url = 'https://placehold.co/64x64/9F7AEA/FFFFFF?text=DRONE' %}
+            {% set icon_url = 'static/images/icon/drone.png' %}
         {% endif %}
 
         <!-- [朝向] 添加 id="img-{{ entity.id }}" -->

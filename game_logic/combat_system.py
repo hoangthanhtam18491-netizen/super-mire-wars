@@ -3,6 +3,7 @@ import re
 import traceback
 from .dice_roller import roll_dice, process_rolls, reroll_specific_dice
 from .data_models import Mech, Projectile, Part, Action
+from .config import log_action, log_detail, log_err, log_warn, log_phase, log_system
 
 
 def parse_dice_string(dice_str):
@@ -136,12 +137,12 @@ class CombatState:
                 return self._resolve_initial_roll(log)
 
         except Exception as e:
-            log.append(f"[!!] 战斗计算时发生严重错误: {e}")
+            log.append(log_err(f"战斗计算时发生严重错误: {e}"))
             log.append(traceback.format_exc())
             self.stage = 'RESOLVED'
             return log, self._create_empty_packet('invalid')
 
-        log.append(f"[系统错误] CombatState 处于无效或已解决的状态: {self.stage}")
+        log.append(log_err(f"CombatState 处于无效或已解决的状态: {self.stage}"))
         self.stage = 'RESOLVED'
         return log, self._create_empty_packet('invalid')
 
@@ -155,7 +156,7 @@ class CombatState:
         current_stage = self.stage
 
         if current_stage not in ['AWAITING_ATTACK_REROLL', 'AWAITING_EFFECT_REROLL']:
-            log.append(f"[系统错误] 试图在 {current_stage} 阶段提交重投。")
+            log.append(log_err(f"试图在 {current_stage} 阶段提交重投。"))
             return log, self._create_empty_packet('invalid')
 
         player_did_reroll = False
@@ -175,30 +176,30 @@ class CombatState:
         # 检查攻击骰
         if selections_attacker:
             if rerolling_player and rerolling_player.pilot and rerolling_player.pilot.link_points > 0:
-                log.append(f"  > 玩家 (攻击方) 消耗 1 链接值重投 {len(selections_attacker)} 枚骰子！")
+                log.append(log_detail(f"玩家 (攻击方) 消耗 1 链接值重投 {len(selections_attacker)} 枚骰子！"))
                 rerolling_player.pilot.link_points -= 1  # 状态修改：消耗链接值
                 player_did_reroll = True
                 link_cost_applied = True
                 new_attack_rolls = reroll_specific_dice(new_attack_rolls, selections_attacker)
             else:
-                log.append("  > [警告] 玩家试图重投攻击骰，但链接值不足！")
+                log.append(log_detail("[警告] 玩家试图重投攻击骰，但链接值不足！"))
 
         # 检查防御骰
         if selections_defender:
             if rerolling_player and rerolling_player.pilot and rerolling_player.pilot.link_points > 0:
-                log.append(f"  > 玩家 (防御方) 消耗 1 链接值重投 {len(selections_defender)} 枚骰子！")
+                log.append(log_detail(f"玩家 (防御方) 消耗 1 链接值重投 {len(selections_defender)} 枚骰子！"))
                 if not link_cost_applied:
                     rerolling_player.pilot.link_points -= 1  # 状态修改：消耗链接值
                 player_did_reroll = True
                 new_defense_rolls = reroll_specific_dice(new_defense_rolls, selections_defender)
             else:
-                log.append("  > [警告] 玩家试图重投防御骰，但链接值不足！")
+                log.append(log_detail("[警告] 玩家试图重投防御骰，但链接值不足！"))
 
         # 记录日志
         if not player_did_reroll and (selections_attacker or selections_defender):
-            log.append("  > 玩家选择不重投。")
+            log.append(log_detail("玩家选择不重投。"))
         elif not player_did_reroll:
-            log.append("  > 玩家跳过重投。")
+            log.append(log_detail("玩家跳过重投。"))
 
         # --- 2. 推进状态机 ---
         # resolve() 将根据 self.stage 自动路由到正确的函数
@@ -211,11 +212,11 @@ class CombatState:
         (公共接口) 玩家提交了效果选择。
         """
         if self.stage != 'AWAITING_EFFECT_CHOICE':
-            log.append(f"[系统错误] 试图在 {self.stage} 阶段提交效果选择。")
+            log.append(log_err(f"试图在 {self.stage} 阶段提交效果选择。"))
             return log, self._create_empty_packet('invalid')
 
         if choice not in self.available_effect_options:
-            log.append(f"[系统错误] 玩家选择了无效的效果: {choice}")
+            log.append(log_err(f"玩家选择了无效的效果: {choice}"))
             return log, self._create_empty_packet('invalid')
 
         # 推进状态机：resolve() 将路由到 _resolve_chosen_effect
@@ -242,7 +243,7 @@ class CombatState:
         [NEW] 这里包含了 Ace AI 的同步重投逻辑。
         """
         # --- 1. 初始化 ---
-        log.append(f"> {self.attacker_entity.name} 使用 [{self.action.name}] 攻击 {self.defender_entity.name}。")
+        log.append(log_action(f"{self.attacker_entity.name} 使用 [{self.action.name}] 攻击 {self.defender_entity.name}。"))
         result_packet = self._create_empty_packet('miss')
         dice_roll_details = {
             'type': 'attack_roll',
@@ -258,12 +259,12 @@ class CombatState:
             target_part = self.defender_entity.parts.get('core')
             if target_part:
                 self.target_part_name = 'core'
-            log.append(f"  > 目标是抛射物，自动瞄准 [核心]。")
+            log.append(log_detail(f"目标是抛射物，自动瞄准 [核心]。"))
         elif isinstance(self.defender_entity, Mech):
             target_part = self.defender_entity.get_part_by_name(self.target_part_name)
 
         if not target_part:
-            log.append(f"  > [错误] 无法找到目标部件 '{self.target_part_name}'。攻击中止。")
+            log.append(log_detail(f"[错误] 无法找到目标部件 '{self.target_part_name}'。攻击中止。"))
             self.stage = 'RESOLVED'
             return log, self._create_empty_packet('invalid')
 
@@ -295,7 +296,7 @@ class CombatState:
                 if effect_dict.get("stance_mastery"):
                     if self.attacker_entity.stance == 'attack':
                         if self.action.action_type in ['近战', '射击', '战术']:
-                            log.append(f"  > [被动效果: 战斗型OS] 触发！攻击姿态下攻击骰 +1黄。")
+                            log.append(log_detail(f"[被动效果: 战斗型OS] 触发！攻击姿态下攻击骰 +1黄。"))
                             attack_dice_counts['yellow_count'] = attack_dice_counts.get('yellow_count', 0) + 1
 
         dice_roll_details['attack_dice_input'] = attack_dice_counts.copy()
@@ -312,7 +313,7 @@ class CombatState:
             convert_lightning_to_crit=convert_lightning
         )
         dice_roll_details['attack_dice_result'] = processed_attack_rolls
-        log.append(f"  > 攻击方投掷结果 (处理后): {attack_roll_summary or '无'}")
+        log.append(log_detail(f"攻击方投掷结果 (处理后): {attack_roll_summary or '无'}"))
 
         # --- 4. 投掷受击骰 ---
         white_dice_count = target_part.structure if original_status == 'damaged' else target_part.armor
@@ -321,7 +322,7 @@ class CombatState:
         if self.action.effects:
             ap_value = self.action.effects.get("armor_piercing", 0)
             if ap_value > 0 and original_status != 'damaged':
-                log.append(f"  > 动作效果【穿甲{ap_value}】触发！")
+                log.append(log_detail(f"动作效果【穿甲{ap_value}】触发！"))
                 white_dice_count = max(0, white_dice_count - ap_value)
 
         blue_dice_count = self.defender_entity.get_total_evasion() if self.defender_entity.stance == 'agile' else 0
@@ -329,7 +330,7 @@ class CombatState:
         if isinstance(self.defender_entity,
                       Mech) and self.action.action_type == '近战' and target_part.parry > 0 and not self.is_back_attack and self.defender_entity.stance != 'downed':
             white_dice_count += target_part.parry
-            log.append(f"  > [招架] 额外增加 {target_part.parry} 个白骰。")
+            log.append(log_detail(f"[招架] 额外增加 {target_part.parry} 个白骰。"))
 
         if is_mech_defender:
             passive_effects = self.defender_entity.get_passive_effects()
@@ -337,10 +338,10 @@ class CombatState:
                 if effect_dict.get("stance_mastery"):
                     if self.defender_entity.stance == 'defense':
                         white_dice_count += 1
-                        log.append(f"  > [被动效果: 战斗型OS] 触发！防御姿态下白骰 +1。")
+                        log.append(log_detail(f"[被动效果: 战斗型OS] 触发！防御姿态下白骰 +1。"))
                     elif self.defender_entity.stance == 'agile':
                         blue_dice_count += 2
-                        log.append(f"  > [被动效果: 战斗型OS] 触发！机动姿态下蓝骰 +2。")
+                        log.append(log_detail(f"[被动效果: 战斗型OS] 触发！机动姿态下蓝骰 +2。"))
 
         dice_roll_details['defense_dice_input'] = {'white_count': white_dice_count, 'blue_count': blue_dice_count}
 
@@ -351,7 +352,7 @@ class CombatState:
             stance=self.defender_entity.stance
         )
         dice_roll_details['defense_dice_result'] = processed_defense_rolls
-        log.append(f"  > 防御方结果 (处理后): {defense_roll_summary or '无'}")
+        log.append(log_detail(f"防御方结果 (处理后): {defense_roll_summary or '无'}"))
 
         # === [NEW] Ace AI 指令重投逻辑 (Synchronous) ===
         # 在玩家做出决定前，Ace AI 优先决定是否重投
@@ -368,7 +369,7 @@ class CombatState:
                         is_attacker=True
                     )
                     if reroll_selections:
-                        log.append(f"> [警告] 王牌机师 {self.attacker_entity.name} 消耗 1 链接值强制修正攻击弹道！")
+                        log.append(log_warn(f"王牌机师 {self.attacker_entity.name} 消耗 1 链接值强制修正攻击弹道！"))
                         self.attacker_entity.pilot.link_points -= 1
                         self.attack_raw_rolls = reroll_specific_dice(self.attack_raw_rolls, reroll_selections)
                         self.ace_rerolled = True
@@ -380,7 +381,7 @@ class CombatState:
                             convert_lightning_to_crit=convert_lightning
                         )
                         dice_roll_details['attack_dice_result'] = processed_attack_rolls
-                        log.append(f"  > (修正后) 攻击结果: {attack_roll_summary or '无'}")
+                        log.append(log_detail(f"(修正后) 攻击结果: {attack_roll_summary or '无'}"))
 
             # B. Ace 是防御方
             if is_mech_defender and self.defender_entity.controller == 'ai':
@@ -393,7 +394,7 @@ class CombatState:
                         is_attacker=False
                     )
                     if reroll_selections:
-                        log.append(f"> [警告] 王牌机师 {self.defender_entity.name} 消耗 1 链接值强制修正防御机动！")
+                        log.append(log_warn(f"王牌机师 {self.defender_entity.name} 消耗 1 链接值强制修正防御机动！"))
                         self.defender_entity.pilot.link_points -= 1
                         self.defense_raw_rolls = reroll_specific_dice(self.defense_raw_rolls, reroll_selections)
                         self.ace_rerolled = True
@@ -404,7 +405,7 @@ class CombatState:
                             stance=self.defender_entity.stance
                         )
                         dice_roll_details['defense_dice_result'] = processed_defense_rolls
-                        log.append(f"  > (修正后) 防御结果: {defense_roll_summary or '无'}")
+                        log.append(log_detail(f"(修正后) 防御结果: {defense_roll_summary or '无'}"))
 
         # === Ace 重投逻辑结束 ===
 
@@ -431,7 +432,7 @@ class CombatState:
                 elif player_is_defender and isinstance(self.defender_entity, Mech):
                     player_link_points = self.defender_entity.pilot.link_points
 
-                log.append(f"  > 玩家链接值: {player_link_points}。等待重投决策...")
+                log.append(log_detail(f"玩家链接值: {player_link_points}。等待重投决策..."))
 
                 self.stage = 'AWAITING_ATTACK_REROLL'
                 result_packet['status'] = 'reroll_choice_required'
@@ -461,7 +462,7 @@ class CombatState:
             target_part = self.defender_entity.get_part_by_name(self.target_part_name)
 
         if not target_part:
-            log.append(f"  > [错误] 重投后无法找到目标部件 '{self.target_part_name}'。")
+            log.append(log_detail(f"[错误] 重投后无法找到目标部件 '{self.target_part_name}'。"))
             self.stage = 'RESOLVED'
             return log, self._create_empty_packet('invalid')
 
@@ -499,7 +500,7 @@ class CombatState:
 
         cancelled_hits = min(hits, defenses)
         hits -= cancelled_hits
-        log.append(f"  > {cancelled_hits}个[防御]抵消了{cancelled_hits}个[轻击]。")
+        log.append(log_detail(f"{cancelled_hits}个[防御]抵消了{cancelled_hits}个[轻击]。"))
 
         cancelled_crits = min(crits, dodges)
         crits -= cancelled_crits
@@ -515,14 +516,14 @@ class CombatState:
         # --- 4.1 结算【震撼】效果 ---
         has_shock = self.action.effects.get("shock", False)
         if has_shock and attack_lightning > 0:
-            log.append(f"  > 动作效果【震撼】触发！")
-            log.append(f"  > 攻击方投出 {attack_lightning} [闪电]。")
+            log.append(log_detail(f"动作效果【震撼】触发！"))
+            log.append(log_detail(f"攻击方投出 {attack_lightning} [闪电]。"))
 
             cancelled_lightning = min(attack_lightning, dodges)
             net_lightning = max(0, attack_lightning - cancelled_lightning)
 
             if cancelled_lightning > 0:
-                log.append(f"  > {cancelled_lightning} 个剩余[闪避]抵消了 {cancelled_lightning} [闪电]。")
+                log.append(log_detail(f"{cancelled_lightning} 个剩余[闪避]抵消了 {cancelled_lightning} [闪电]。"))
                 dodges -= cancelled_lightning
 
             if net_lightning > 0:
@@ -537,13 +538,13 @@ class CombatState:
                             self.defender_entity.pilot.link_points - link_loss) <= 0 and self.defender_entity.stance != 'downed':
                         result_packet['entity_changes'].append(
                             {'target_id': self.defender_entity.id, 'stance': 'downed'})
-                        log.append(f"  > 驾驶员链接值归零！机甲 [{self.defender_entity.name}] 进入 [宕机姿态]！")
+                        log.append(log_detail(f"驾驶员链接值归零！机甲 [{self.defender_entity.name}] 进入 [宕机姿态]！"))
                 elif is_mech_defender:
-                    log.append(f"  > 目标驾驶员没有链接值，【震撼】无效。")
+                    log.append(log_detail(f"目标驾驶员没有链接值，【震撼】无效。"))
                 else:
-                    log.append(f"  > 目标不是机甲，【震撼】无效。")
+                    log.append(log_detail(f"目标不是机甲，【震撼】无效。"))
             else:
-                log.append(f"  > 所有[闪电]均被[闪避]抵消，【震撼】无效。")
+                log.append(log_detail(f"所有[闪电]均被[闪避]抵消，【震撼】无效。"))
 
         # --- 5. 判断结果 ---
         final_damage = hits + crits
@@ -551,28 +552,28 @@ class CombatState:
         self.overflow_crits = crits  # 存储溢出伤害
 
         if final_damage > 0:
-            log.append(f"  > 最终造成了 [击穿]！")
+            log.append(log_detail(f"最终造成了 [击穿]！"))
             result_packet['status'] = 'penetration'
 
             # [新增] 驾驶员技能：乘胜追击 (Pursuit)
             if is_mech_attacker and self.attacker_entity.pilot and "pursuit" in self.attacker_entity.pilot.skills:
                 self.attacker_entity.player_tp += 1
-                log.append(f"  > [驾驶员技能: 乘胜追击] 触发！{self.attacker_entity.name} 获得 1 TP。")
+                log.append(log_detail(f"[驾驶员技能: 乘胜追击] 触发！{self.attacker_entity.name} 获得 1 TP。"))
 
             # 5.1 更新状态 (记录变更)
             new_status = original_status
             if isinstance(self.defender_entity, Projectile):
                 new_status = 'destroyed'
-                log.append(f"  > [抛射物] 目标 [{target_part.name}] 被 [摧毁]！")
+                log.append(log_detail(f"[抛射物] 目标 [{target_part.name}] 被 [摧毁]！"))
             elif target_part.structure == 0:
                 new_status = 'destroyed'
-                log.append(f"  > (无结构) 部件 [{target_part.name}] 被 [摧毁]！")
+                log.append(log_detail(f"(无结构) 部件 [{target_part.name}] 被 [摧毁]！"))
             elif original_status == 'ok':
                 new_status = 'damaged'
-                log.append(f"  > 部件 [{target_part.name}] 状态变为 [破损]。")
+                log.append(log_detail(f"部件 [{target_part.name}] 状态变为 [破损]。"))
             elif original_status == 'damaged':
                 new_status = 'destroyed'
-                log.append(f"  > 已破损的部件 [{target_part.name}] 被 [摧毁]！")
+                log.append(log_detail(f"已破损的部件 [{target_part.name}] 被 [摧毁]！"))
 
             if new_status != original_status:
                 result_packet['part_changes'].append({
@@ -590,19 +591,19 @@ class CombatState:
                     if (self.defender_entity.pilot.link_points - 1) <= 0 and self.defender_entity.stance != 'downed':
                         result_packet['entity_changes'].append(
                             {'target_id': self.defender_entity.id, 'stance': 'downed'})
-                        log.append(f"  > 驾驶员链接值归零！机甲 [{self.defender_entity.name}] 进入 [宕机姿态]！")
+                        log.append(log_detail(f"驾驶员链接值归零！机甲 [{self.defender_entity.name}] 进入 [宕机姿态]！"))
 
             if new_status == 'destroyed' and self.target_part_name == 'core':
                 result_packet['entity_changes'].append({'target_id': self.defender_entity.id, 'status': 'destroyed'})
-                log.append(f"  > 实体 [{self.defender_entity.name}] 的核心被摧毁，实体被移除！")
+                log.append(log_detail(f"实体 [{self.defender_entity.name}] 的核心被摧毁，实体被移除！"))
 
             # --- 5.2 [中断点] 效果选择 ---
             if not is_mech_defender:
-                log.append(f"  > 目标不是机甲，跳过【毁伤】/【霰射】/【顺劈】效果结算。")
+                log.append(log_detail(f"目标不是机甲，跳过【毁伤】/【霰射】/【顺劈】效果结算。"))
                 if isinstance(self.attacker_entity, Projectile):
                     result_packet['entity_changes'].append(
                         {'target_id': self.attacker_entity.id, 'status': 'destroyed'})
-                    log.append(f"  > [抛射物] {self.attacker_entity.name} 在攻击后引爆并移除。")
+                    log.append(log_detail(f"[抛射物] {self.attacker_entity.name} 在攻击后引爆并移除。"))
                 self.stage = 'RESOLVED'
                 return log, result_packet
 
@@ -619,12 +620,12 @@ class CombatState:
                     other_arm_slot = 'right_arm' if action_slot == 'left_arm' else 'left_arm'
                     other_arm_part = self.attacker_entity.parts.get(other_arm_slot)
                     if other_arm_part and other_arm_part.status != 'destroyed' and "【空手】" in other_arm_part.tags:
-                        log.append(f"  > 动作效果【【双手】获得毁伤】触发 (另一只手为【空手】)！")
+                        log.append(log_detail(f"动作效果【【双手】获得毁伤】触发 (另一只手为【空手】)！"))
                         has_devastating = True
 
             if is_mech_attacker and not has_devastating and self.action.effects.get("stance_devastating", False):
                 if self.attacker_entity.stance == 'attack':
-                    log.append(f"  > 动作效果【攻击姿态】获得毁伤 触发！")
+                    log.append(log_detail(f"动作效果【攻击姿态】获得毁伤 触发！"))
                     has_devastating = True
 
             has_scattershot = self.action.effects.get("scattershot", False)
@@ -648,8 +649,8 @@ class CombatState:
 
             if len(self.available_effect_options) > 1:
                 if is_mech_attacker and self.attacker_entity.controller == 'player':
-                    log.append(f"> [玩家决策] 攻击同时触发 {len(self.available_effect_options)} 个效果！")
-                    log.append("> 请选择要发动的效果...")
+                    log.append(log_action(f"[玩家决策] 攻击同时触发 {len(self.available_effect_options)} 个效果！"))
+                    log.append(log_action("请选择要发动的效果..."))
 
                     self.stage = 'AWAITING_EFFECT_CHOICE'
                     result_packet['status'] = 'effect_choice_required'
@@ -657,7 +658,7 @@ class CombatState:
                 else:
                     chosen_effect = 'devastating' if 'devastating' in self.available_effect_options else \
                         'cleave' if 'cleave' in self.available_effect_options else 'scattershot'
-                    log.append(f"> [AI决策] AI 优先选择【{chosen_effect}】。")
+                    log.append(log_action(f"[AI决策] AI 优先选择【{chosen_effect}】。"))
                     return self._resolve_chosen_effect(log, chosen_effect, result_packet)
 
             elif len(self.available_effect_options) == 1:
@@ -667,7 +668,7 @@ class CombatState:
         # --- 6. 最终步骤 (无伤害或无效果) ---
         if isinstance(self.attacker_entity, Projectile):
             result_packet['entity_changes'].append({'target_id': self.attacker_entity.id, 'status': 'destroyed'})
-            log.append(f"  > [抛射物] {self.attacker_entity.name} 在攻击后引爆并移除。")
+            log.append(log_detail(f"[抛射物] {self.attacker_entity.name} 在攻击后引爆并移除。"))
 
         self.stage = 'RESOLVED'
         return log, result_packet
@@ -678,7 +679,7 @@ class CombatState:
         这 *必须* 导致 'RESOLVED'。
         """
 
-        log.append(f"> 玩家提交了对【{self.pending_effect_reroll_data.get('chosen_effect')}】的重投。")
+        log.append(log_action(f"玩家提交了对【{self.pending_effect_reroll_data.get('chosen_effect')}】的重投。"))
 
         # --- 1. 准备 ---
         result_packet = self._create_empty_packet('penetration')
@@ -688,7 +689,7 @@ class CombatState:
         target_part = self.defender_entity.get_part_by_name(pending_data['target_part_name'])
 
         if not target_part:
-            log.append(f"  > [错误] 效果重投结算时找不到部件 '{pending_data['target_part_name']}'。")
+            log.append(log_detail(f"[错误] 效果重投结算时找不到部件 '{pending_data['target_part_name']}'。"))
             self.stage = 'RESOLVED'
             return log, self._create_empty_packet('invalid')
 
@@ -711,11 +712,11 @@ class CombatState:
         # --- 4. 战斗完全结束 ---
         if effect_packet_ext.get('status') == 'reroll_choice_required':
             # 这不应该发生，但作为安全措施
-            log.append("[系统警告] 效果重投后再次触发了重投！战斗强制结束。")
+            log.append(log_warn("效果重投后再次触发了重投！战斗强制结束。"))
 
         if isinstance(self.attacker_entity, Projectile):
             result_packet['entity_changes'].append({'target_id': self.attacker_entity.id, 'status': 'destroyed'})
-            log.append(f"  > [抛射物] {self.attacker_entity.name} 在攻击后引爆并移除。")
+            log.append(log_detail(f"[抛射物] {self.attacker_entity.name} 在攻击后引爆并移除。"))
 
         self.stage = 'RESOLVED'
         return log, result_packet
@@ -729,12 +730,12 @@ class CombatState:
             # 如果是从 submit_effect_choice 恢复的，我们需要重新填充 dice_roll_details
             result_packet['dice_roll_details'] = self.initial_dice_roll_details.copy()
 
-        log.append(f"> 选定效果: 【{chosen_effect}】")
+        log.append(log_action(f"选定效果: 【{chosen_effect}】"))
 
         # 1. 计算效果逻辑
         target_part = self.defender_entity.get_part_by_name(self.target_part_name)
         if not target_part:
-            log.append(f"  > [错误] 无法找到目标部件 '{self.target_part_name}'。")
+            log.append(log_detail(f"[错误] 无法找到目标部件 '{self.target_part_name}'。"))
             self.stage = 'RESOLVED'
             return log, result_packet
 
@@ -771,7 +772,7 @@ class CombatState:
         # 4. 结束战斗
         if isinstance(self.attacker_entity, Projectile):
             result_packet['entity_changes'].append({'target_id': self.attacker_entity.id, 'status': 'destroyed'})
-            log.append(f"  > [抛射物] {self.attacker_entity.name} 在攻击后引爆并移除。")
+            log.append(log_detail(f"[抛射物] {self.attacker_entity.name} 在攻击后引爆并移除。"))
 
         self.stage = 'RESOLVED'
         return log, result_packet
@@ -793,7 +794,7 @@ class CombatState:
         pending_reroll_data = None
 
         if not isinstance(defender_entity, Mech):
-            log.append(f"  > [效果：{chosen_effect}] 触发，但目标不是机甲，效果跳过。")
+            log.append(log_detail(f"[效果：{chosen_effect}] 触发，但目标不是机甲，效果跳过。"))
             return log, dice_roll_details_2, packet_extension
 
         # 检查 [战斗型OS] 效果加成 (用于所有效果掷骰的防御方)
@@ -809,14 +810,14 @@ class CombatState:
                         stance_mastery_bonus_blue += 2
 
         if stance_mastery_bonus_white > 0:
-            log.append(f"  > [被动效果: 战斗型OS] 触发！防御姿态下额外增加 +{stance_mastery_bonus_white}白。")
+            log.append(log_detail(f"[被动效果: 战斗型OS] 触发！防御姿态下额外增加 +{stance_mastery_bonus_white}白。"))
         if stance_mastery_bonus_blue > 0:
-            log.append(f"  > [被动效果: 战斗型OS] 触发！机动姿态下额外增加 +{stance_mastery_bonus_blue}蓝。")
+            log.append(log_detail(f"[被动效果: 战斗型OS] 触发！机动姿态下额外增加 +{stance_mastery_bonus_blue}蓝。"))
 
         # 5.2.A 【毁伤】
         if chosen_effect == 'devastating':
-            log.append(f"  > [效果：毁伤] 触发！")
-            log.append(f"  > 计算对结构值的溢出伤害: {overflow_crits}重, {overflow_hits}轻。")
+            log.append(log_detail(f"[效果：毁伤] 触发！"))
+            log.append(log_detail(f"计算对结构值的溢出伤害: {overflow_crits}重, {overflow_hits}轻。"))
             white_dice_count_2 = target_part.structure + stance_mastery_bonus_white
             blue_dice_count_2 = (
                     defender_entity.get_total_evasion() + stance_mastery_bonus_blue) if defender_entity.stance == 'agile' else 0
@@ -830,7 +831,7 @@ class CombatState:
 
             if rerolled_defense_raw:
                 defense_raw_rolls_2 = rerolled_defense_raw
-                log.append("  > (使用重投后的毁伤防御骰...)")
+                log.append(log_detail("(使用重投后的毁伤防御骰...)"))
             else:
                 defense_raw_rolls_2 = roll_dice(white_count=white_dice_count_2, blue_count=blue_dice_count_2)
 
@@ -844,7 +845,7 @@ class CombatState:
                         defender_entity.pilot.link_points > 0
                 )
                 if defender_can_reroll:
-                    log.append(f"  > [毁伤结算] 玩家链接值: {defender_entity.pilot.link_points}。等待重投决策...")
+                    log.append(log_detail(f"[毁伤结算] 玩家链接值: {defender_entity.pilot.link_points}。等待重投决策..."))
 
                     processed_rolls, _ = process_rolls(defense_raw_rolls_2, stance=defender_entity.stance)
                     dice_roll_details_2['defense_dice_result'] = processed_rolls
@@ -886,7 +887,7 @@ class CombatState:
 
             cancelled_hits_2 = min(hits_2, defenses_2)
             hits_2 -= cancelled_hits_2
-            log.append(f"  > [毁伤结算] {cancelled_hits_2}个[防御]抵消了{cancelled_hits_2}个[轻击]。")
+            log.append(log_detail(f"[毁伤结算] {cancelled_hits_2}个[防御]抵消了{cancelled_hits_2}个[轻击]。"))
 
             cancelled_crits_2 = min(crits_2, dodges_2)
             crits_2 -= cancelled_crits_2
@@ -899,20 +900,20 @@ class CombatState:
 
             final_damage_2 = hits_2 + crits_2
             if final_damage_2 > 0:
-                log.append(f"  > [毁伤结算] 结构值被击穿！")
+                log.append(log_detail(f"[毁伤结算] 结构值被击穿！"))
 
                 # [新增] 驾驶员技能：乘胜追击 (Pursuit) - 毁伤效果也算作击穿
                 if isinstance(attacker_entity,
                               Mech) and attacker_entity.pilot and "pursuit" in attacker_entity.pilot.skills:
                     attacker_entity.player_tp += 1
-                    log.append(f"  > [驾驶员技能: 乘胜追击] 触发 (毁伤)！{attacker_entity.name} 获得 1 TP。")
+                    log.append(log_detail(f"[驾驶员技能: 乘胜追击] 触发 (毁伤)！{attacker_entity.name} 获得 1 TP。"))
 
                 packet_extension['part_changes'].append({
                     'target_id': defender_entity.id,
                     'part_slot': target_part.name,  # 毁伤总是命中原始部件
                     'new_status': 'destroyed'
                 })
-                log.append(f"  > (毁伤) 部件 [{target_part.name}] 被 [摧毁]！")
+                log.append(log_detail(f"(毁伤) 部件 [{target_part.name}] 被 [摧毁]！"))
 
                 if defender_entity.pilot and defender_entity.pilot.link_points > 0:
                     packet_extension['pilot_changes'].append({
@@ -927,25 +928,25 @@ class CombatState:
                             'target_id': defender_entity.id,
                             'stance': 'downed'
                         })
-                        log.append(f"  > 驾驶员链接值归零！机甲 [{defender_entity.name}] 进入 [宕机姿态]！")
+                        log.append(log_detail(f"驾驶员链接值归零！机甲 [{defender_entity.name}] 进入 [宕机姿态]！"))
 
                 if target_part.name.endswith("核心"):
                     packet_extension['entity_changes'].append({
                         'target_id': defender_entity.id,
                         'status': 'destroyed'
                     })
-                    log.append(f"  > [毁伤结算] 实体 [{defender_entity.name}] 的核心被摧毁，实体被移除！")
+                    log.append(log_detail(f"[毁伤结算] 实体 [{defender_entity.name}] 的核心被摧毁，实体被移除！"))
 
         # 5.2.B 【霰射】 / 5.2.C 【顺劈】
         elif chosen_effect in ['scattershot', 'cleave']:
             log_effect_name = "霰射" if chosen_effect == 'scattershot' else "顺劈"
-            log.append(f"  > [效果：{log_effect_name}] 触发！")
+            log.append(log_detail(f"[效果：{log_effect_name}] 触发！"))
 
             other_parts = [(slot, p) for slot, p in defender_entity.parts.items() if
                            p and p.status != 'destroyed' and p.name != target_part.name]
 
             if not other_parts:
-                log.append(f"  > [{log_effect_name}] 没有其他有效部件可以作为目标。")
+                log.append(log_detail(f"[{log_effect_name}] 没有其他有效部件可以作为目标。"))
             else:
                 secondary_target_slot, secondary_target = random.choice(other_parts)
                 secondary_status = secondary_target.status
@@ -967,7 +968,7 @@ class CombatState:
 
                 if rerolled_defense_raw:
                     defense_raw_rolls_2 = rerolled_defense_raw
-                    log.append(f"  > (使用重投后的{log_effect_name}防御骰...)")
+                    log.append(log_detail(f"(使用重投后的{log_effect_name}防御骰...)"))
                 else:
                     defense_raw_rolls_2 = roll_dice(white_count=white_dice_2, blue_count=blue_dice_2)
 
@@ -1024,7 +1025,7 @@ class CombatState:
 
                 cancelled_hits_2 = min(hits_2, defenses_2)
                 hits_2 -= cancelled_hits_2
-                log.append(f"  > [{log_effect_name}结算] {cancelled_hits_2}个[防御]抵消了{cancelled_hits_2}个[轻击]。")
+                log.append(log_detail(f"[{log_effect_name}结算] {cancelled_hits_2}个[防御]抵消了{cancelled_hits_2}个[轻击]。"))
 
                 cancelled_crits_2 = min(crits_2, dodges_2)
                 crits_2 -= cancelled_crits_2
@@ -1037,7 +1038,7 @@ class CombatState:
 
                 final_damage_2 = hits_2 + crits_2
                 if final_damage_2 > 0:
-                    log.append(f"  > [{log_effect_name}结算] 击穿了 [{secondary_target.name}]！")
+                    log.append(log_detail(f"[{log_effect_name}结算] 击穿了 [{secondary_target.name}]！"))
 
                     # [新增] 驾驶员技能：乘胜追击 (Pursuit) - 顺劈/霰射击穿也算
                     if isinstance(attacker_entity,
@@ -1059,7 +1060,7 @@ class CombatState:
                         'part_slot': secondary_target_slot,
                         'new_status': new_status
                     })
-                    log.append(f"  > ({log_effect_name}) 部件 [{secondary_target.name}] 状态变为 [{new_status}]！")
+                    log.append(log_detail(f"({log_effect_name}) 部件 [{secondary_target.name}] 状态变为 [{new_status}]！"))
 
                     if new_status == 'destroyed':
                         if defender_entity.pilot and defender_entity.pilot.link_points > 0:
@@ -1075,7 +1076,7 @@ class CombatState:
                                     'target_id': defender_entity.id,
                                     'stance': 'downed'
                                 })
-                                log.append(f"  > 驾驶员链接值归零！机甲 [{defender_entity.name}] 进入 [宕机姿态]！")
+                                log.append(log_detail(f"驾驶员链接值归零！机甲 [{defender_entity.name}] 进入 [宕机姿态]！"))
 
                     if new_status == 'destroyed' and secondary_target.name.endswith("核心"):
                         packet_extension['entity_changes'].append({
@@ -1085,6 +1086,6 @@ class CombatState:
                         log.append(
                             f"  > [{log_effect_name}结算] 实体 [{defender_entity.name}] 的核心被摧毁，实体被移除！")
                 else:
-                    log.append(f"  > [{log_effect_name}结算] 第二个部件抵消了所有溢出伤害。")
+                    log.append(log_detail(f"[{log_effect_name}结算] 第二个部件抵消了所有溢出伤害。"))
 
         return log, dice_roll_details_2, packet_extension

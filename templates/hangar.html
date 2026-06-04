@@ -462,9 +462,29 @@
                 </div>
             </div>
 
+            <!-- 无人机部署 -->
+            {% if drones %}
+            <div class="mt-10">
+                <h2 class="text-3xl font-bold mb-6 text-center text-purple-300">4. 部署无人机（最多4台）</h2>
+                <div class="flex justify-center flex-wrap gap-6">
+                    {% for drone_key, drone in drones.items() %}
+                    <div class="mb-4">
+                        <input type="checkbox" id="drone_{{ drone_key }}" name="drones" value="{{ drone_key }}" class="hidden peer">
+                        <label for="drone_{{ drone_key }}" class="part-card block bg-gray-700 p-6 rounded-lg border-2 border-gray-600 cursor-pointer w-full sm:w-72 peer-checked:border-purple-500 peer-checked:bg-purple-900">
+                            <h4 class="font-bold text-xl text-purple-300">{{ drone.name }}</h4>
+                            <p class="text-sm mt-2 text-gray-300">装甲: {{ drone.armor }} | 结构: {{ drone.structure }}</p>
+                            <p class="text-sm text-gray-400">电子: {{ drone.electronics }} | 移动: {{ drone.move_range }}</p>
+                            <p class="text-xs mt-1 text-gray-500">自动动作: {{ drone.actions[1].name if drone.actions|length > 1 else drone.actions[0].name }}</p>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
             <!-- 游戏模式选择 -->
             <div class="mt-10">
-                <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">4. 选择游戏模式</h2>
+                <h2 class="text-3xl font-bold mb-6 text-center text-blue-300">5. 选择游戏模式</h2>
                 <div class="flex justify-center flex-wrap gap-6">
                     <div class="mb-4">
                         <input type="radio" id="mode_duel" name="game_mode" value="duel" class="hidden" required checked>

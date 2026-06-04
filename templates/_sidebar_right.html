@@ -70,4 +70,26 @@
     </tbody>
 </table>
 <h4>战斗日志</h4>
-<div class="combat-log">{% for entry in combat_log %}<div class="log-entry">{{ entry }}</div>{% else %}<div>暂无战斗记录。</div>{% endfor %}</div>
+<div class="combat-log">
+{% for entry in combat_log %}
+{% if entry is mapping %}
+  {% set level = entry.get('l', 'info') %}
+  {% set category = entry.get('c', 'action') %}
+  {% set message = entry.get('m', '') %}
+  {% set is_collapsible = entry.get('d', false) %}
+  {% if is_collapsible %}
+    {% set prev_is_collapsible = (combat_log[loop.index0 - 1].get('d', false) if combat_log[loop.index0 - 1] is mapping else false) if loop.index0 > 0 else false %}
+    {% set next_is_collapsible = (combat_log[loop.index0 + 1].get('d', false) if combat_log[loop.index0 + 1] is mapping else false) if loop.index0 < combat_log|length - 1 else false %}
+    {% if not prev_is_collapsible %}<details class="log-details" open><summary class="log-summary">骰子详情</summary>{% endif %}
+    <div class="log-entry log-level-{{ level }} log-cat-{{ category }} log-collapsible">{{ message }}</div>
+    {% if not next_is_collapsible %}</details>{% endif %}
+  {% else %}
+    <div class="log-entry log-level-{{ level }} log-cat-{{ category }}">{{ message }}</div>
+  {% endif %}
+{% else %}
+  <div class="log-entry log-level-info log-cat-action">{{ entry }}</div>
+{% endif %}
+{% else %}
+<div>暂无战斗记录。</div>
+{% endfor %}
+</div>

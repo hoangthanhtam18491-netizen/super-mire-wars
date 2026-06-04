@@ -3,6 +3,7 @@
 从 game_controller.py 拆分，依赖 ai_actions 中的 _resolve_queued_attack。
 """
 
+from .config import log_action, log_phase, log_system, log_intercept
 from .data_models import Mech, Projectile
 from .game_logic import run_projectile_logic
 from .game_controller import _run_interception_checks
@@ -22,7 +23,7 @@ def handle_run_projectile_phase(game_state, reset_round=True):
     game_ended_mid_turn = False
     result_data = {}
 
-    log.append("--- 延迟动作阶段 (抛射物) ---")
+    log.append(log_phase("延迟动作阶段 (抛射物)"))
 
     # 1. 初始化队列
     if not game_state.pending_projectile_queue:
@@ -48,7 +49,7 @@ def handle_run_projectile_phase(game_state, reset_round=True):
         game_state.pending_projectile_queue = [p.id for p in projectiles_to_act]
 
         if projectiles_to_act:
-            log.append(f"> [系统] {len(projectiles_to_act)} 个抛射物准备行动。")
+            log.append(log_system(f"{len(projectiles_to_act)} 个抛射物准备行动。"))
 
     # 2. 处理队列
     while game_state.pending_projectile_queue:
@@ -65,7 +66,7 @@ def handle_run_projectile_phase(game_state, reset_round=True):
         # 移动前拦截
         game_state, log = _run_interception_checks(entity, game_state, log)
         if entity.status == 'destroyed':
-            log.append(f"> [拦截] {entity.name} 在移动前被摧毁。")
+            log.append(log_intercept(f"{entity.name} 在移动前被摧毁。"))
             game_state.pending_projectile_queue.pop(0)
             continue
 
@@ -76,7 +77,7 @@ def handle_run_projectile_phase(game_state, reset_round=True):
         # 移动后拦截
         game_state, log = _run_interception_checks(entity, game_state, log)
         if entity.status == 'destroyed':
-            log.append(f"> [拦截] {entity.name} 在移动后被摧毁。")
+            log.append(log_intercept(f"{entity.name} 在移动后被摧毁。"))
             game_state.pending_projectile_queue.pop(0)
             continue
 
@@ -110,12 +111,12 @@ def handle_run_projectile_phase(game_state, reset_round=True):
             if not game_state.game_over and not (player_mech and player_mech.pending_combat):
                 log.append(
                     "> AI回合结束。请开始你的回合。" if game_state.game_mode != 'range' else "> [靶场模式] 请开始你的回合。")
-                log.append("-" * 20)
+                log.append(log_phase("-" * 20))
 
                 if player_mech:
                     if player_mech.stance == 'downed':
-                        log.append("> [系统] 驾驶员链接恢复。机甲 [宕机姿态] 解除。")
-                        log.append("> [警告] 系统冲击！本回合 AP-1, TP-1！")
+                        log.append(log_system("驾驶员链接恢复。机甲 [宕机姿态] 解除。"))
+                        log.append(log_warn("系统冲击！本回合 AP-1, TP-1！"))
                         player_mech.player_ap = 1
                         player_mech.player_tp = 0
                         player_mech.stance = 'defense'
@@ -131,6 +132,6 @@ def handle_run_projectile_phase(game_state, reset_round=True):
 
                 game_state.check_game_over()
             elif player_mech and player_mech.pending_combat:
-                log.append("> [系统] 玩家有待处理的中断，跳过回合重置。")
+                log.append(log_system("玩家有待处理的中断，跳过回合重置。"))
 
     return game_state, log, result_data, None
