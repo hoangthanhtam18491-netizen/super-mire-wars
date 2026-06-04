@@ -53,9 +53,9 @@ ACTION_DIANSHE_PC6 = Action(name="点射【霰射(PC-6)】", action_type="射击
                            effects=build_effects(EFFECT_MELEE_SHOOTING))
 ACTION_DIANSHE_RF = Action(name="点射【RF】", action_type="射击", cost="S", dice="3红", range_val=6)
 ACTION_DIANSHE_IGX106 = Action(name="点射【IGX106】", action_type="射击", cost="S", dice="3黄1红", range_val=3,
-                           effects=build_effects(EFFECT_MELEE_SHOOTING, EFFECT_SCATTERSHOT))
+                           effects=build_effects(EFFECT_MELEE_SHOOTING, EFFECT_SCATTERSHOT, EFFECT_CHARGE_DEVASTATING, EFFECT_ION_WEAPON))
 ACTION_DIANSHE_R7K = Action(name="点射【R7K】", action_type="射击", cost="M", dice="5黄", range_val=8,
-                           effects=build_effects(EFFECT_TWO_HANDED_RANGE_2))
+                           effects=build_effects(EFFECT_TWO_HANDED_RANGE_2, EFFECT_LASER_WEAPON))
 ACTION_LIANSHE_RF = Action(name="连射【RF】", action_type="射击", cost="M", dice="2黄3红", range_val=6)
 ACTION_JUJI = Action(name="狙击", action_type="射击", cost="M", dice="2黄2红", range_val=12,
                      effects=build_effects(EFFECT_TWO_HANDED_SNIPER))
@@ -70,12 +70,13 @@ ACTION_SUSHE = Action(name="速射", action_type="射击", cost="M", dice="4黄1
 ACTION_SUSHE_PC6 = Action(name="速射【霰射(PC-6)】", action_type="射击", cost="S", dice="3黄1红", range_val=3,
                         effects=build_effects(EFFECT_MELEE_SHOOTING, EFFECT_SCATTERSHOT))
 ACTION_SUSHE_R7K = Action(name="速射【R7K】", action_type="射击", cost="S", dice="4黄", range_val=4,
-                        effects=build_effects())
+                        effects=build_effects(EFFECT_LASER_WEAPON))
 ACTION_DIANSHE_ZHAN = Action(name="点射【战】", action_type="射击", cost="S", dice="1黄2红", range_val=6)
 
 # --- 快速 (Quick) ---
 ACTION_JETTISON = Action(name="【弃置】", action_type="快速", cost="S", dice="", range_val=0,
                          effects=build_effects(EFFECT_JETTISON))
+ACTION_CHARGE = Action(name="充能", action_type="快速", cost="S", dice="", range_val=0)
 
 # --- 移动 (Movement) ---
 ACTION_BENPAO = Action(name="奔跑", action_type="移动", cost="M", dice="", range_val=4)
@@ -106,6 +107,10 @@ ACTION_CI_MIAN_XIANG_DI = Action(name="此面向敌", action_type="被动", cost
 # [新增] 战斗型OS 被动动作
 ACTION_BATLLETYPE = Action(name="战斗型OS", action_type="被动", cost="", dice="", range_val=0,
                            effects=build_effects(EFFECT_STANCE_MASTERY))
+ACTION_COORDINATED_OBSERVATION = Action(name="协同观测", action_type="被动", cost="", dice="", range_val=0,
+                                        effects=build_effects(EFFECT_COORDINATED_OBSERVATION))
+ACTION_SLIDE_JUMP = Action(name="滑跃", action_type="被动", cost="", dice="", range_val=0,
+                           effects=build_effects(EFFECT_SLIDE_JUMP))
 
 
 # --- 拦截 (Interceptor) ---

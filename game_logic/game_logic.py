@@ -392,6 +392,12 @@ class GameState:
         # 弹药追踪
         self.ammo_counts = {}  # { ('player_1', 'left_arm', '火箭弹'): 2 }
 
+        # 充能追踪（跨回合保持）
+        self.charge_counts = {}  # { ('player_1', 'left_arm', '点射【IGX106】'): 1 }
+
+        # 脆弱标记追踪（跨回合保持，可叠加）
+        self.vulnerability_counts = {}  # { 'ai_1': 2 }
+
         # 视觉事件
         self.visual_events = []
 
@@ -747,6 +753,8 @@ class GameState:
             'ai_defeat_count': self.ai_defeat_count,
             'game_over': self.game_over,
             'ammo_counts': self.ammo_counts,
+            'charge_counts': self.charge_counts,
+            'vulnerability_counts': self.vulnerability_counts,
             'visual_events': self.visual_events,
             'pending_projectile_queue': self.pending_projectile_queue,  # [新增] 序列化队列
             'projectile_phase_active': self.projectile_phase_active,  # [NEW] 序列化
@@ -780,6 +788,8 @@ class GameState:
         game_state.ai_defeat_count = data.get('ai_defeat_count', 0)
         game_state.game_over = data.get('game_over', None)
         game_state.ammo_counts = data.get('ammo_counts', {})
+        game_state.charge_counts = data.get('charge_counts', {})
+        game_state.vulnerability_counts = data.get('vulnerability_counts', {})
         game_state.visual_events = data.get('visual_events', [])
 
         # [新增] 反序列化队列

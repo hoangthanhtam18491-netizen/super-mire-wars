@@ -40,6 +40,18 @@ PLAYER_PILOTS = {
     "【锤头鲨-04-内务能手】": PILOT_HAMMERHEAD_04
 }
 
+PILOT_CHALCEDONY = Pilot(
+    name="【玉髓-温柔和弦】",
+    link_points=5,
+    speed_stats={
+        '快速': 6, '近战': 2, '抛射': 3,
+        '射击': 5, '移动': 4, '战术': 4
+    },
+    skills=["grace_note"],
+    image_url="images/badge/Onyx Mellow Chord.png"
+)
+
 AI_PILOTS = {
-    "Raven": PILOT_RAVEN
+    "Raven": PILOT_RAVEN,
+    "Chalcedony": PILOT_CHALCEDONY
 }

@@ -173,7 +173,7 @@
         }
 
         const playerLinkPoints = (S.playerEntity && S.playerEntity.pilot) ? S.playerEntity.pilot.link_points : 0;
-        const canReroll = playerLinkPoints > 0;
+        const canReroll = playerLinkPoints > 1;
 
         const rerollButtons = document.getElementById('dice-roll-buttons-reroll');
         const closeButton = document.getElementById('dice-roll-buttons-default');

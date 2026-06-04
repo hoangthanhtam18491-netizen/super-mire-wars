@@ -75,11 +75,24 @@ AI_LOADOUT_RAVEN = {
 }
 
 # AI 加载项的主字典
+AI_LOADOUT_CHALCEDONY = {
+    'name': "AC: CHALCEDONY (玉髓)",
+    'pilot': "Chalcedony",
+    'selection': {
+        'core': 'TM31Q “野猫”主战核心',
+        'legs': 'LM231 标准下肢',
+        'left_arm': 'S9 “流星”盾 + IGX106 离子炮',
+        'right_arm': 'R7K 战术步枪',
+        'backpack': 'JP5 机动提升包'
+    }
+}
+
 AI_LOADOUTS = {
     "heavy": AI_LOADOUT_HEAVY,
     "heavy_m": AI_LOADOUT_HEAVY_M,
     "standard": AI_LOADOUT_STANDARD,
     "lighta": AI_LOADOUT_LIGHTA,
     "lightb": AI_LOADOUT_LIGHTB,
-    "raven": AI_LOADOUT_RAVEN, # 注册新的 Ace
+    "raven": AI_LOADOUT_RAVEN,
+    "chalcedony": AI_LOADOUT_CHALCEDONY,
 }

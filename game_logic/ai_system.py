@@ -600,8 +600,10 @@ def run_ai_turn(ai_mech, game_state):
     adjust_move_val = 0
     if legs_part and legs_part.status != 'destroyed':
         adjust_move_val = legs_part.adjust_move
-        if stance == 'agile':
-            adjust_move_val *= 2
+    for eff in ai_mech.get_passive_effects():
+        adjust_move_val += eff.get('adjust_move_bonus', 0)
+    if legs_part and legs_part.status != 'destroyed' and stance == 'agile':
+        adjust_move_val *= 2
 
     potential_adjust_move_pos = None
     potential_attack_timing = timing
@@ -990,6 +992,24 @@ def run_ai_turn(ai_mech, game_state):
 
     if not opening_move_taken and not attacks_to_resolve_list:
         log.append(log_action(f"AI {ai_mech.name} 结束回合，未执行任何主要动作。"))
+
+    # AI 自动充能：如果还有 AP 且有可充能部件
+    if ap >= 1:
+        charge_action_tuple = None
+        chargeable_targets = []
+        for action, part_slot in all_actions_raw:
+            if action.name == '充能':
+                charge_action_tuple = (action, part_slot)
+            if action.effects and action.effects.get('charge_devastating'):
+                charge_key = (ai_mech.id, part_slot, action.name)
+                if game_state.charge_counts.get(charge_key, 0) == 0:
+                    chargeable_targets.append((action, part_slot))
+        if charge_action_tuple and chargeable_targets:
+            target_action, target_slot = chargeable_targets[0]
+            charge_key = (ai_mech.id, target_slot, target_action.name)
+            game_state.charge_counts[charge_key] = 1
+            log.append(log_action(f"[AI充能] {ai_mech.name} 为 [{target_action.name}] 充能！"))
+            ap -= 1
 
     ai_mech.player_ap = ap
     ai_mech.player_tp = tp

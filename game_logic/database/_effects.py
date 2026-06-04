@@ -176,3 +176,24 @@ EFFECT_STANCE_MASTERY = {
     "logic": {"stance_mastery": True},
     "name": "【战斗型OS】"
 }
+
+EFFECT_COORDINATED_OBSERVATION = {
+    "logic": {"coordinated_observation": True},
+    "name": "【协同观测】"
+}
+EFFECT_CHARGE_DEVASTATING = {
+    "logic": {"charge_devastating": True},
+    "name": "【充能】获得毁伤"
+}
+EFFECT_LASER_WEAPON = {
+    "logic": {"laser_weapon": True},
+    "name": "【激光武器】"
+}
+EFFECT_ION_WEAPON = {
+    "logic": {"ion_weapon": True},
+    "name": "【离子武器】"
+}
+EFFECT_SLIDE_JUMP = {
+    "logic": {"adjust_move_bonus": 1},
+    "name": "【滑跃】"
+}

@@ -188,6 +188,7 @@ def _run_interception_checks(projectile, game_state, log):
                             is_back_attack=False,
                             is_interception_attack=True,
                             ace_reroll_callback=ace_logic.decide_reroll,
+                            game_state=game_state,
                         )
 
                         log, result_packet = combat_session.resolve(log)
@@ -259,6 +260,7 @@ from .player_actions import (
     handle_execute_attack,
     handle_jettison_part,
     handle_debug_skill,
+    handle_charge_part,
 )
 
 from .ai_actions import (

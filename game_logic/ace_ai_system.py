@@ -250,7 +250,11 @@ class AceTacticalPlanner:
         legs = self.ace.parts.get('legs')
         tp_range = 0
         if legs and legs.status != 'destroyed' and self.initial_tp > 0:
-            tp_range = legs.adjust_move * 2
+            tp_range = legs.adjust_move
+        for eff in self.ace.get_passive_effects():
+            tp_range += eff.get('adjust_move_bonus', 0)
+        if legs and legs.status != 'destroyed' and self.initial_tp > 0:
+            tp_range *= 2
 
         self.reachable_tiles_tp = {
             pos: cost for pos, cost in self.all_reachable_costs.items()
@@ -281,12 +285,17 @@ class AceTacticalPlanner:
         return (target_x, target_y)
 
     def _get_available_weapons(self):
+        is_locked, _ = get_ai_lock_status(self.game_state, self.ace)
         weapons = []
         for slot, part in self.ace.parts.items():
             if part and part.status != 'destroyed':
                 for action in part.actions:
                     if (slot, action.name) in self.ace.actions_used_this_turn: continue
                     if action.action_type not in ['近战', '射击', '抛射', '战术']: continue
+                    # 近战锁定：被锁定时射击动作必须带近战射击
+                    if is_locked and action.action_type == '射击':
+                        if not action.effects.get('melee_shooting'):
+                            continue
                     if action.ammo > 0:
                         key = (self.ace.id, slot, action.name)
                         if self.game_state.ammo_counts.get(key, 0) <= 0: continue
@@ -536,12 +545,18 @@ def _find_extra_filler_action(mech, game_state):
     player = game_state.get_player_mech()
     if not player: return None
 
+    is_locked, _ = get_ai_lock_status(game_state, mech)
     candidates = []
     for slot, part in mech.parts.items():
         if part and part.status != 'destroyed':
             for action in part.actions:
                 if (slot, action.name) in mech.actions_used_this_turn: continue
                 if action.cost != 'S': continue
+
+                # 近战锁定检查：被锁定时只能使用近战/抛射/曲射/近战射击
+                if is_locked and action.action_type == '射击':
+                    if not action.effects.get('melee_shooting'):
+                        continue
 
                 if action.ammo > 0:
                     key = (mech.id, slot, action.name)

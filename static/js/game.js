@@ -132,7 +132,10 @@
 
         let url = '', body = { action_name: name, part_slot: partSlot, player_id: S.playerID };
 
-        if (type === '移动' || name === '调整移动') {
+        if (name === '充能') {
+            S.initiateCharge(partSlot);
+            return;
+        } else if (type === '移动' || name === '调整移动') {
             url = S.apiUrls.getMoveRange;
         } else if (type === '近战' || type === '射击' || type === '抛射' || type === '快速') {
             url = S.apiUrls.getAttackRange;
@@ -179,6 +182,97 @@
         postAndReload(S.apiUrls.jettisonPart, {
             action_name: '【弃置】',
             part_slot: partSlot
+        });
+    }
+
+    function initiateCharge(partSlot) {
+        if (S.gameState.pendingEffect || S.gameState.pendingReroll) return;
+        if (window.__actionInFlight) return;
+        S.clearHighlights();
+        window.__actionInFlight = true;
+
+        fetch(S.apiUrls.chargePart, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action_name: '充能', part_slot: partSlot, player_id: S.playerID })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data || !data.success) {
+                window.__actionInFlight = false;
+                S.showErrorModal('充能失败', (data && data.message) || '未知错误');
+                return;
+            }
+            if (data.action_required === 'select_charge_target') {
+                window.__actionInFlight = false;
+                S.showChargeTargetSelector(data.chargeable_parts, partSlot);
+                return;
+            }
+            refreshGameUI();
+        })
+        .catch(e => {
+            window.__actionInFlight = false;
+            S.showErrorModal('充能错误', e.message);
+        });
+    }
+
+    function showChargeTargetSelector(chargeableParts, chargePartSlot) {
+        // 复用部件选择弹窗
+        var modal = document.getElementById('part-selector-modal');
+        var title = document.getElementById('part-selector-title');
+        var list = document.getElementById('part-selector-list');
+        var cancelBtn = document.getElementById('part-selector-cancel-btn');
+
+        if (!modal || !list) return;
+        title.innerText = '选择充能目标';
+        list.innerHTML = '';
+
+        chargeableParts.forEach(function(p) {
+            var btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.style.cssText = 'background-color: var(--primary-color); margin-bottom: 0.5rem;';
+            btn.innerHTML = '<strong>' + p.part_name + '</strong><br><small>' + p.action_name + '</small>';
+            btn.onclick = function() {
+                modal.style.display = 'none';
+                confirmChargeTarget(chargePartSlot, p.slot);
+            };
+            list.appendChild(btn);
+        });
+
+        cancelBtn.onclick = function() {
+            modal.style.display = 'none';
+            window.__actionInFlight = false;
+        };
+
+        modal.style.display = 'block';
+    }
+
+    function confirmChargeTarget(chargePartSlot, targetPartSlot) {
+        if (window.__actionInFlight) return;
+        window.__actionInFlight = true;
+
+        fetch(S.apiUrls.chargePart, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                action_name: '充能',
+                part_slot: chargePartSlot,
+                target_part_slot: targetPartSlot,
+                player_id: S.playerID
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (!data || !data.success) {
+                window.__actionInFlight = false;
+                S.showErrorModal('充能失败', (data && data.message) || '未知错误');
+                return;
+            }
+            refreshGameUI();
+        })
+        .catch(e => {
+            window.__actionInFlight = false;
+            S.showErrorModal('充能错误', e.message);
         });
     }
 
@@ -986,6 +1080,9 @@
     S.showGameOverModal = showGameOverModal;
     S.selectAction = selectAction;
     S.initiateJettison = initiateJettison;
+    S.initiateCharge = initiateCharge;
+    S.showChargeTargetSelector = showChargeTargetSelector;
+    S.confirmChargeTarget = confirmChargeTarget;
     S.initiateAttack = initiateAttack;
     S.initiateLaunch = initiateLaunch;
     S.confirmPartSelection = confirmPartSelection;

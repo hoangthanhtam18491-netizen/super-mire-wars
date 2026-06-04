@@ -98,6 +98,7 @@ def _resolve_queued_attack(game_state, log, attack_data, remaining_attacks_queue
         target_part_name=target_part_slot,
         is_back_attack=back_attack,
         ace_reroll_callback=ace_logic.decide_reroll,
+        game_state=game_state,
     )
     log, result_packet = combat_session.resolve(log)
 
@@ -392,7 +393,7 @@ def handle_end_turn(game_state):
                 else:
                     entity.last_pos = entity.pos
 
-                    is_ace = entity.pilot and "Raven" in entity.pilot.name
+                    is_ace = entity.pilot and entity.pilot.skills
                     if is_ace:
                         entity_log, attacks = ace_ai_system.run_ace_turn(entity, game_state)
                     else:

@@ -4,6 +4,7 @@ import traceback
 from .dice_roller import roll_dice, process_rolls, reroll_specific_dice
 from .data_models import Mech, Projectile, Part, Action
 from .config import log_action, log_detail, log_err, log_warn, log_phase, log_system
+from .game_logic import is_in_forward_arc
 
 
 def parse_dice_string(dice_str):
@@ -27,7 +28,7 @@ class CombatState:
 
     def __init__(self, attacker_entity, defender_entity, action, target_part_name,
                  is_back_attack=False, is_interception_attack=False,
-                 ace_reroll_callback=None):
+                 ace_reroll_callback=None, game_state=None):
         """
         初始化一个新的战斗会话。
 
@@ -35,6 +36,7 @@ class CombatState:
             签名: (mech, opponent, action, attack_summary, defense_summary,
                    attack_raw_rolls, defense_raw_rolls, is_attacker) -> list | None
             由 game_controller 注入，避免 combat_system 直接依赖 ace_logic。
+        game_state: 可选，用于被动效果（如协同观测）查找友军。
         """
         # --- 核心上下文 (在战斗中不变) ---
         self.attacker_entity = attacker_entity
@@ -44,6 +46,7 @@ class CombatState:
         self.is_back_attack = is_back_attack
         self.is_interception_attack = is_interception_attack  # 拦截攻击不能被重投
         self.ace_reroll_callback = ace_reroll_callback
+        self.game_state = game_state
 
         # --- 状态管理 ---
         self.stage = 'INITIAL_ROLL'
@@ -99,6 +102,7 @@ class CombatState:
             data.get('is_back_attack', False),
             data.get('is_interception_attack', False),
             ace_reroll_callback=ace_reroll_callback,
+            game_state=game_state,
         )
 
         # 恢复所有内部状态
@@ -175,9 +179,13 @@ class CombatState:
         # --- 1. 执行玩家的重投 ---
         # 检查攻击骰
         if selections_attacker:
-            if rerolling_player and rerolling_player.pilot and rerolling_player.pilot.link_points > 0:
+            if rerolling_player and rerolling_player.pilot and rerolling_player.pilot.link_points > 1:
                 log.append(log_detail(f"玩家 (攻击方) 消耗 1 链接值重投 {len(selections_attacker)} 枚骰子！"))
-                rerolling_player.pilot.link_points -= 1  # 状态修改：消耗链接值
+                rerolling_player.pilot.link_points -= 1
+                if rerolling_player.pilot.link_points <= 0 and rerolling_player.stance != 'downed':
+                    result_packet.setdefault('entity_changes', []).append(
+                        {'target_id': rerolling_player.id, 'stance': 'downed'})
+                    log.append(log_detail(f"链接值归零！{rerolling_player.name} 进入 [宕机姿态]！"))
                 player_did_reroll = True
                 link_cost_applied = True
                 new_attack_rolls = reroll_specific_dice(new_attack_rolls, selections_attacker)
@@ -186,10 +194,14 @@ class CombatState:
 
         # 检查防御骰
         if selections_defender:
-            if rerolling_player and rerolling_player.pilot and rerolling_player.pilot.link_points > 0:
+            if rerolling_player and rerolling_player.pilot and rerolling_player.pilot.link_points > 1:
                 log.append(log_detail(f"玩家 (防御方) 消耗 1 链接值重投 {len(selections_defender)} 枚骰子！"))
                 if not link_cost_applied:
-                    rerolling_player.pilot.link_points -= 1  # 状态修改：消耗链接值
+                    rerolling_player.pilot.link_points -= 1
+                    if rerolling_player.pilot.link_points <= 0 and rerolling_player.stance != 'downed':
+                        result_packet.setdefault('entity_changes', []).append(
+                            {'target_id': rerolling_player.id, 'stance': 'downed'})
+                        log.append(log_detail(f"链接值归零！{rerolling_player.name} 进入 [宕机姿态]！"))
                 player_did_reroll = True
                 new_defense_rolls = reroll_specific_dice(new_defense_rolls, selections_defender)
             else:
@@ -299,6 +311,14 @@ class CombatState:
                             log.append(log_detail(f"[被动效果: 战斗型OS] 触发！攻击姿态下攻击骰 +1黄。"))
                             attack_dice_counts['yellow_count'] = attack_dice_counts.get('yellow_count', 0) + 1
 
+            # [驾驶员技能: 装饰音] 射击目标距离≤3时 +1黄骰
+            if self.attacker_entity.pilot and "grace_note" in self.attacker_entity.pilot.skills:
+                if self.action.action_type == '射击':
+                    dist = abs(self.attacker_entity.pos[0] - self.defender_entity.pos[0]) + abs(self.attacker_entity.pos[1] - self.defender_entity.pos[1])
+                    if dist <= 3:
+                        attack_dice_counts['yellow_count'] = attack_dice_counts.get('yellow_count', 0) + 1
+                        log.append(log_detail(f"[驾驶员技能: 装饰音] 触发！目标距离{dist}≤3，+1黄骰。"))
+
         dice_roll_details['attack_dice_input'] = attack_dice_counts.copy()
 
         # 存储原始骰子，以便重投
@@ -306,6 +326,11 @@ class CombatState:
 
         attacker_stance = 'attack' if (is_mech_attacker and self.attacker_entity.stance == 'attack') else 'defense'
         convert_lightning = self.action.effects and self.action.effects.get("convert_lightning_to_crit", False)
+        # [离子武器] 目标有脆弱标记时闪电→重击
+        if not convert_lightning and self.action.effects and self.action.effects.get("ion_weapon"):
+            if self.game_state and self.game_state.vulnerability_counts.get(self.defender_entity.id, 0) > 0:
+                convert_lightning = True
+                log.append(log_detail(f"[离子武器] 目标存在脆弱标记，闪电视为重击！"))
 
         processed_attack_rolls, attack_roll_summary = process_rolls(
             self.attack_raw_rolls,
@@ -314,6 +339,38 @@ class CombatState:
         )
         dice_roll_details['attack_dice_result'] = processed_attack_rolls
         log.append(log_detail(f"攻击方投掷结果 (处理后): {attack_roll_summary or '无'}"))
+
+        # --- 3.5 [协同观测] 友军被动：友方机甲可重投攻击骰中的眼睛 ---
+        if is_mech_attacker and self.game_state:
+            eye_dice = []
+            for color, faces in self.attack_raw_rolls.items():
+                for idx, face in enumerate(faces):
+                    if face == '眼':
+                        eye_dice.append({'color': color, 'index': idx})
+            if eye_dice:
+                for entity in self.game_state.entities.values():
+                    if (entity.id != self.attacker_entity.id
+                            and entity.controller == self.attacker_entity.controller
+                            and entity.entity_type == 'mech'
+                            and entity.status != 'destroyed'):
+                        for effect_dict in entity.get_passive_effects():
+                            if effect_dict.get('coordinated_observation'):
+                                if is_in_forward_arc(entity.pos, entity.orientation, self.defender_entity.pos):
+                                    log.append(log_action(
+                                        f"[协同观测] {entity.name} 观测到目标，{self.attacker_entity.name} 重投 {len(eye_dice)} 枚眼睛骰！"))
+                                    self.attack_raw_rolls = reroll_specific_dice(
+                                        self.attack_raw_rolls, eye_dice)
+                                    processed_attack_rolls, attack_roll_summary = process_rolls(
+                                        self.attack_raw_rolls,
+                                        stance=attacker_stance,
+                                        convert_lightning_to_crit=convert_lightning
+                                    )
+                                    dice_roll_details['attack_dice_result'] = processed_attack_rolls
+                                    log.append(log_detail(
+                                        f"(协同观测后) 攻击结果: {attack_roll_summary or '无'}"))
+                                    break
+                            if effect_dict.get('coordinated_observation'):
+                                break
 
         # --- 4. 投掷受击骰 ---
         white_dice_count = target_part.structure if original_status == 'damaged' else target_part.armor
@@ -324,6 +381,13 @@ class CombatState:
             if ap_value > 0 and original_status != 'damaged':
                 log.append(log_detail(f"动作效果【穿甲{ap_value}】触发！"))
                 white_dice_count = max(0, white_dice_count - ap_value)
+
+        # [脆弱标记] 减少白骰
+        if self.game_state:
+            vuln = self.game_state.vulnerability_counts.get(self.defender_entity.id, 0)
+            if vuln > 0:
+                white_dice_count = max(0, white_dice_count - vuln)
+                log.append(log_detail(f"[脆弱] {self.defender_entity.name} 脆弱标记 x{vuln}，白骰 -{min(vuln, white_dice_count + vuln)}。"))
 
         blue_dice_count = self.defender_entity.get_total_evasion() if self.defender_entity.stance == 'agile' else 0
 
@@ -360,8 +424,8 @@ class CombatState:
         if not self.ace_rerolled and not self.is_interception_attack and self.ace_reroll_callback:
             # A. Ace 是攻击方
             if is_mech_attacker and self.attacker_entity.controller == 'ai':
-                # 检测 Ace 特征 (有 Link Points)
-                if self.attacker_entity.pilot and self.attacker_entity.pilot.link_points > 0:
+                # 检测 Ace 特征 (链接值 >= 2 才可重投)
+                if self.attacker_entity.pilot and self.attacker_entity.pilot.link_points > 1:
                     reroll_selections = self.ace_reroll_callback(
                         self.attacker_entity, self.defender_entity, self.action,
                         attack_roll_summary, defense_roll_summary,
@@ -371,6 +435,10 @@ class CombatState:
                     if reroll_selections:
                         log.append(log_warn(f"王牌机师 {self.attacker_entity.name} 消耗 1 链接值强制修正攻击弹道！"))
                         self.attacker_entity.pilot.link_points -= 1
+                        if self.attacker_entity.pilot.link_points <= 0 and self.attacker_entity.stance != 'downed':
+                            result_packet.setdefault('entity_changes', []).append(
+                                {'target_id': self.attacker_entity.id, 'stance': 'downed'})
+                            log.append(log_detail(f"链接值归零！{self.attacker_entity.name} 进入 [宕机姿态]！"))
                         self.attack_raw_rolls = reroll_specific_dice(self.attack_raw_rolls, reroll_selections)
                         self.ace_rerolled = True
 
@@ -385,8 +453,8 @@ class CombatState:
 
             # B. Ace 是防御方
             if is_mech_defender and self.defender_entity.controller == 'ai':
-                # 检测 Ace 特征
-                if self.defender_entity.pilot and self.defender_entity.pilot.link_points > 0:
+                # 检测 Ace 特征 (链接值 >= 2 才可重投)
+                if self.defender_entity.pilot and self.defender_entity.pilot.link_points > 1:
                     reroll_selections = self.ace_reroll_callback(
                         self.defender_entity, self.attacker_entity, self.action,
                         attack_roll_summary, defense_roll_summary,
@@ -396,6 +464,10 @@ class CombatState:
                     if reroll_selections:
                         log.append(log_warn(f"王牌机师 {self.defender_entity.name} 消耗 1 链接值强制修正防御机动！"))
                         self.defender_entity.pilot.link_points -= 1
+                        if self.defender_entity.pilot.link_points <= 0 and self.defender_entity.stance != 'downed':
+                            result_packet.setdefault('entity_changes', []).append(
+                                {'target_id': self.defender_entity.id, 'stance': 'downed'})
+                            log.append(log_detail(f"链接值归零！{self.defender_entity.name} 进入 [宕机姿态]！"))
                         self.defense_raw_rolls = reroll_specific_dice(self.defense_raw_rolls, reroll_selections)
                         self.ace_rerolled = True
 
@@ -418,11 +490,11 @@ class CombatState:
             player_is_defender = (self.defender_entity.controller == 'player')
             attacker_can_reroll = (
                     player_is_attacker and isinstance(self.attacker_entity, Mech) and
-                    self.attacker_entity.pilot and self.attacker_entity.pilot.link_points > 0
+                    self.attacker_entity.pilot and self.attacker_entity.pilot.link_points > 1
             )
             defender_can_reroll = (
                     player_is_defender and isinstance(self.defender_entity, Mech) and
-                    self.defender_entity.pilot and self.defender_entity.pilot.link_points > 0
+                    self.defender_entity.pilot and self.defender_entity.pilot.link_points > 1
             )
 
             if attacker_can_reroll or defender_can_reroll:
@@ -555,6 +627,17 @@ class CombatState:
             log.append(log_detail(f"最终造成了 [击穿]！"))
             result_packet['status'] = 'penetration'
 
+            # [激光武器] 击穿时给目标叠加脆弱标记
+            if self.game_state and self.action.effects and self.action.effects.get('laser_weapon'):
+                vid = self.defender_entity.id
+                prev = self.game_state.vulnerability_counts.get(vid, 0)
+                self.game_state.vulnerability_counts[vid] = prev + 1
+                result_packet['entity_changes'].append({
+                    'target_id': vid,
+                    'vulnerability_gained': 1
+                })
+                log.append(log_action(f"[激光武器] {self.defender_entity.name} 获得 1 层脆弱标记（共 {prev + 1} 层）！"))
+
             # [新增] 驾驶员技能：乘胜追击 (Pursuit)
             if is_mech_attacker and self.attacker_entity.pilot and "pursuit" in self.attacker_entity.pilot.skills:
                 self.attacker_entity.player_tp += 1
@@ -607,6 +690,26 @@ class CombatState:
                 self.stage = 'RESOLVED'
                 return log, result_packet
 
+            # --- [充能] 检查充能标记并消费 ---
+            charge_applied = False
+            if is_mech_attacker and self.game_state:
+                action_slot = None
+                for slot, part in self.attacker_entity.parts.items():
+                    if part and part.status != 'destroyed':
+                        for act in part.actions:
+                            if act.name == self.action.name:
+                                action_slot = slot
+                                break
+                    if action_slot:
+                        break
+                if action_slot:
+                    charge_key = (self.attacker_entity.id, action_slot, self.action.name)
+                    if self.game_state.charge_counts.get(charge_key, 0) > 0:
+                        self.game_state.charge_counts[charge_key] = 0
+                        self.action.effects['devastating'] = True
+                        charge_applied = True
+                        log.append(log_action(f"[充能] {self.action.name} 充能释放！获得毁伤效果。"))
+
             # 检查动态效果
             has_devastating = self.action.effects.get("devastating", False)
             if is_mech_attacker and not has_devastating and self.action.effects.get("two_handed_devastating", False):
@@ -630,6 +733,11 @@ class CombatState:
 
             has_scattershot = self.action.effects.get("scattershot", False)
             has_cleave = self.action.effects.get("cleave", False)
+
+            # 清理充能临时注入的 devastating
+            if charge_applied:
+                self.action.effects.pop('devastating', None)
+
             has_overflow = (self.overflow_hits > 0 or self.overflow_crits > 0)
 
             devastating_conditions_met = (
@@ -842,7 +950,7 @@ class CombatState:
                         player_is_defender and
                         isinstance(defender_entity, Mech) and
                         defender_entity.pilot and
-                        defender_entity.pilot.link_points > 0
+                        defender_entity.pilot.link_points > 1
                 )
                 if defender_can_reroll:
                     log.append(log_detail(f"[毁伤结算] 玩家链接值: {defender_entity.pilot.link_points}。等待重投决策..."))
@@ -979,7 +1087,7 @@ class CombatState:
                             player_is_defender and
                             isinstance(defender_entity, Mech) and
                             defender_entity.pilot and
-                            defender_entity.pilot.link_points > 0
+                            defender_entity.pilot.link_points > 1
                     )
                     if defender_can_reroll:
                         log.append(

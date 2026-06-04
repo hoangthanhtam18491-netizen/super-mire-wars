@@ -20,8 +20,8 @@ def index():
     同时加载并解析 Game Introduction.md 以显示规则。
     """
     update_notes = [
-        "版本 v3.0: 无人机",
-        "- [新增] 对战包复盟侧。",
+        "版本 v3.1: 联合来袭",
+        "- [新增] 对战包复盟侧，对战包联合机甲及驾驶员。",
         "- [优化] 重写了游戏流程。",
     ]
     rules_html = ""
@@ -109,7 +109,9 @@ def start_game():
     player_pilot_name = request.form.get('pilot')
     drone_deployment = request.form.getlist('drones')
 
-    if ai_opponent_key == 'raven':
+    # ACE 驾驶员登场特效
+    ace_keys = ['raven', 'chalcedony']
+    if ai_opponent_key in ace_keys:
         session['show_raven_intro'] = True
 
     game = GameState(

@@ -162,8 +162,13 @@
             });
             const endTurnBtn = document.getElementById('end-turn-btn');
             if(endTurnBtn) {
-                endTurnBtn.classList.add('disabled');
-                endTurnBtn.title = '机甲宕机中，无法行动';
+                endTurnBtn.classList.remove('disabled');
+                endTurnBtn.title = '机甲宕机，跳过回合';
+            }
+            const mobileEndBtn = document.getElementById('mobile-end-turn-btn');
+            if(mobileEndBtn) {
+                mobileEndBtn.classList.remove('disabled');
+                mobileEndBtn.title = '机甲宕机，跳过回合';
             }
             return;
         }

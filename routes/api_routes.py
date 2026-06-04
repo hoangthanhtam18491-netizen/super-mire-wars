@@ -45,6 +45,13 @@ def _check_no_combat_silent(player_mech):
     return None
 
 
+def _check_not_downed(player_mech):
+    """检查玩家是否处于宕机姿态。如果是，返回错误 JSON；否则返回 None。"""
+    if player_mech.stance == 'downed':
+        return jsonify({'success': False, 'message': '机甲宕机中，无法行动。请等待回合结束。'})
+    return None
+
+
 def _get_game_state_and_player(data):
     """
     (辅助函数) 安全地从 session 中获取当前的 game_state 和 player_mech 实例。
@@ -109,6 +116,9 @@ def select_timing():
     error = _check_no_combat(player_mech)
     if error: return error
 
+    error = _check_not_downed(player_mech)
+    if error: return error
+
     new_state, logs, _, result, err = controller.handle_select_timing(game_state, player_mech, data.get('timing'))
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -122,6 +132,9 @@ def confirm_timing():
     if error_response: return error_response
 
     error = _check_no_combat(player_mech)
+    if error: return error
+
+    error = _check_not_downed(player_mech)
     if error: return error
 
     new_state, logs, _, result, err = controller.handle_confirm_timing(game_state, player_mech)
@@ -149,6 +162,9 @@ def change_stance():
     error = _check_no_combat(player_mech)
     if error: return error
 
+    error = _check_not_downed(player_mech)
+    if error: return error
+
     new_state, logs, _, result, err = controller.handle_change_stance(game_state, player_mech, data.get('stance'))
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -162,6 +178,9 @@ def confirm_stance():
     if error_response: return error_response
 
     error = _check_no_combat(player_mech)
+    if error: return error
+
+    error = _check_not_downed(player_mech)
     if error: return error
 
     new_state, logs, _, result, err = controller.handle_confirm_stance(game_state, player_mech)
@@ -181,6 +200,9 @@ def execute_adjust_move():
     error = _check_no_combat(player_mech)
     if error: return error
 
+    error = _check_not_downed(player_mech)
+    if error: return error
+
     new_state, logs, _, result, err = controller.handle_adjust_move(
         game_state, player_mech, data.get('target_pos'), data.get('final_orientation')
     )
@@ -196,6 +218,9 @@ def change_orientation():
     if error_response: return error_response
 
     error = _check_no_combat(player_mech)
+    if error: return error
+
+    error = _check_not_downed(player_mech)
     if error: return error
 
     new_state, logs, _, result, err = controller.handle_change_orientation(
@@ -215,6 +240,9 @@ def skip_adjustment():
     error = _check_no_combat(player_mech)
     if error: return error
 
+    error = _check_not_downed(player_mech)
+    if error: return error
+
     new_state, logs, _, result, err = controller.handle_skip_adjustment(game_state, player_mech)
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -230,6 +258,9 @@ def move_player():
     if error_response: return error_response
 
     error = _check_no_combat(player_mech)
+    if error: return error
+
+    error = _check_not_downed(player_mech)
     if error: return error
 
     new_state, logs, _, result, err = controller.handle_move_player(
@@ -251,6 +282,9 @@ def execute_attack():
     error = _check_no_combat(player_mech)
     if error: return error
 
+    error = _check_not_downed(player_mech)
+    if error: return error
+
     new_state, logs, _, result, err = controller.handle_execute_attack(game_state, player_mech, data)
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -266,8 +300,34 @@ def jettison_part():
     error = _check_no_combat(player_mech)
     if error: return error
 
+    error = _check_not_downed(player_mech)
+    if error: return error
+
     new_state, logs, _, result, err = controller.handle_jettison_part(
         game_state, player_mech, data.get('part_slot')
+    )
+    return _handle_controller_response(new_state, logs, result, err)
+
+
+@api_bp.route('/charge_part', methods=['POST'])
+@handle_errors
+def charge_part():
+    """API: 执行 [充能] 动作"""
+    data = request.get_json()
+    game_state, player_mech, error_response = _get_game_state_and_player(data)
+    if error_response: return error_response
+
+    error = _check_no_combat(player_mech)
+    if error: return error
+
+    error = _check_not_downed(player_mech)
+    if error: return error
+
+    new_state, logs, _, result, err = controller.handle_charge_part(
+        game_state, player_mech,
+        data.get('action_name'),
+        data.get('part_slot'),
+        data.get('target_part_slot')
     )
     return _handle_controller_response(new_state, logs, result, err)
 
@@ -281,6 +341,9 @@ def debug_skill():
     if error_response: return error_response
 
     error = _check_no_combat(player_mech)
+    if error: return error
+
+    error = _check_not_downed(player_mech)
     if error: return error
 
     new_state, logs, _, result, err = controller.handle_debug_skill(game_state, player_mech)
@@ -507,6 +570,8 @@ def get_move_range():
         legs_part = player_mech.parts.get('legs')
         if legs_part and legs_part.status != 'destroyed':
             move_distance = legs_part.adjust_move
+        for eff in player_mech.get_passive_effects():
+            move_distance += eff.get('adjust_move_bonus', 0)
         if player_mech.stance == 'agile':
             move_distance *= 2
     else:
@@ -676,6 +741,7 @@ def get_game_state():
             'confirmStance': url_for('api.confirm_stance'),
             'skipAdjustment': url_for('api.skip_adjustment'),
             'jettisonPart': url_for('api.jettison_part'),
+            'chargePart': url_for('api.charge_part'),
             'resolveEffectChoice': url_for('api.resolve_effect_choice'),
             'resolveReroll': url_for('api.resolve_reroll'),
             'getMoveRange': url_for('api.get_move_range'),

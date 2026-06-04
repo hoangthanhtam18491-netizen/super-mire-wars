@@ -1,12 +1,12 @@
-<!-- [DYNAMIC STYLE] Raven 判定 (提升到顶部以供整个侧边栏使用) -->
-{% set is_raven = ai_pilot and ('Raven' in ai_pilot.name or 'raven' in ai_pilot.name) %}
+<!-- [DYNAMIC STYLE] ACE 驾驶员判定 (提升到顶部以供整个侧边栏使用) -->
+{% set is_ace = ai_pilot and ai_pilot.skills %}
 
 <!-- [MODIFIED] 标题样式恢复默认颜色 -->
 <h4>AI机甲状态</h4>
 
 <!-- [MODIFIED] AI 驾驶员信息 -->
-{% set raven_style_name = 'color: #f56565;' if is_raven else '' %}
-{% set raven_style_value = 'color: #f56565;' if is_raven else 'color: #e2e8f0;' %}
+{% set raven_style_name = 'color: #f56565;' if is_ace else '' %}
+{% set raven_style_value = 'color: #f56565;' if is_ace else 'color: #e2e8f0;' %}
 {% set raven_border = 'border-color: #4b5563;' %}
 
 <div id="ai-pilot-info" class="bg-gray-900 p-3 rounded-lg border mb-4" style="{{ raven_border }}">
@@ -14,11 +14,12 @@
         <!-- 驾驶员姓名 (Raven 变红) -->
         <h5 class="font-bold text-lg" style="{{ raven_style_name }}">{{ ai_pilot.name }}</h5>
 
-        <!-- [NEW] 图片插入位置：在名字下方 -->
-        {% if is_raven %}
+        <!-- [NEW] ACE驾驶员徽章：优先使用image_url，否则默认Raven徽章 -->
+        {% if is_ace %}
         <div class="my-2">
-             <img src="{{ url_for('static', filename='images/badge/Raven.png') }}"
-                 alt="Raven Emblem"
+             {% set badge_path = ai_pilot.image_url if ai_pilot.image_url else 'images/badge/Raven.png' %}
+             <img src="{{ url_for('static', filename=badge_path) }}"
+                 alt="ACE Emblem"
                  style="width: 100%; max-width: 80px; height: auto; object-fit: contain; opacity: 0.9; filter: drop-shadow(0 0 5px #f56565);"
                  onerror="this.style.display='none'">
         </div>
@@ -46,8 +47,8 @@
 <!-- [修改结束] -->
 
 <!-- [MODIFIED] 表格样式 (仅文字变红，线条保持默认) -->
-<!-- [NOTE] 如果 is_raven 为真，给 table 添加 text-red-400 类 -->
-<table class="{{ 'text-red-400' if is_raven else '' }}">
+<!-- [NOTE] 如果 is_ace 为真，给 table 添加 text-red-400 类 -->
+<table class="{{ 'text-red-400' if is_ace else '' }}">
     <thead>
         <tr>
             <th>槽位</th>

@@ -182,7 +182,7 @@ def handle_advance_round(game_state):
                     break
                 if entity.controller != 'ai' or entity.entity_type != 'mech' or entity.status != 'ok':
                     continue
-                if entity.pilot and "Raven" in entity.pilot.name:
+                if entity.pilot and entity.pilot.skills:
                     continue
                 if entity.has_acted_this_round:
                     continue
@@ -286,7 +286,7 @@ def handle_advance_round(game_state):
             log.append(log_phase(f"[{phase}] 阶段"))
 
             ace_mech = game_state.get_ai_mech()
-            is_ace = ace_mech and ace_mech.pilot and "Raven" in ace_mech.pilot.name
+            is_ace = ace_mech and ace_mech.pilot and ace_mech.pilot.skills
 
             player_chose = (
                 player_mech

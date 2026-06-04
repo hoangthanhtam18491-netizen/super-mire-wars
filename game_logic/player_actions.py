@@ -39,7 +39,7 @@ def handle_confirm_timing(game_state, player_mech):
 
         # [Ace Logic] 检查是否触发抢先手
         ai_mech = game_state.get_ai_mech()
-        if ai_mech and ai_mech.pilot and "Raven" in ai_mech.pilot.name:
+        if ai_mech and ai_mech.pilot and ai_mech.pilot.skills:
             log.append(log_phase("[⚠️ WARNING] 遭遇王牌机师！"))
 
             # 守卫：Ace 已在本回合抢先行动过，跳过重复拼刀
@@ -321,6 +321,7 @@ def _execute_player_projectile(game_state, player_mech, attack_action,
                 attacker_entity=attacker, defender_entity=defender,
                 action=action, target_part_name=target_part_slot, is_back_attack=False,
                 ace_reroll_callback=ace_logic.decide_reroll,
+                game_state=game_state,
             )
             log, result_packet = combat_session.resolve(log)
             game_state = _apply_combat_packet(game_state, result_packet, log)
@@ -439,6 +440,7 @@ def _execute_player_direct_attack(game_state, player_mech, attack_action,
         attacker_entity=player_mech, defender_entity=defender_entity,
         action=attack_action, target_part_name=target_part_slot, is_back_attack=back_attack,
         ace_reroll_callback=ace_logic.decide_reroll,
+        game_state=game_state,
     )
     log, result_packet = combat_session.resolve(log)
     game_state = _apply_combat_packet(game_state, result_packet, log)
@@ -550,6 +552,79 @@ def handle_debug_skill(game_state, player_mech):
     player_mech.player_ap += 1
     player_mech.actions_used_this_turn.append(('skill', '【除虫】'))
     log.append(log_action(f"【除虫】消耗 1 点链接值，获得 1 点行动时点 (AP)。剩余链接值: {player_mech.pilot.link_points}"))
+
+    game_state = _clear_transient_state(game_state)
+    return game_state, log, None, None, None
+
+
+def handle_charge_part(game_state, player_mech, action_name, part_slot, target_part_slot=None):
+    """(玩家) 阶段 4：执行【充能】— 为可充能部件的动作添加充能标记"""
+    log = []
+    game_state.visual_events = []
+
+    if player_mech.turn_phase != 'main':
+        return game_state, log, None, None, "只能在主阶段使用【充能】。"
+
+    charge_action = player_mech.get_action_by_name_and_slot(action_name, part_slot)
+    if not charge_action:
+        return game_state, log, None, None, "找不到充能动作。"
+
+    # 扫描所有部件，找出可充能的动作
+    chargeable = []
+    for slot, part in player_mech.parts.items():
+        if not part or part.status == 'destroyed':
+            continue
+        for action in part.actions:
+            if action.effects and action.effects.get('charge_devastating'):
+                chargeable.append({
+                    'slot': slot,
+                    'part_name': part.name,
+                    'action_name': action.name
+                })
+
+    if not chargeable:
+        return game_state, log, None, None, "没有可充能的部件。"
+
+    # 无目标时返回可选列表（多个时让玩家选择）
+    if not target_part_slot:
+        if len(chargeable) == 1:
+            target_part_slot = chargeable[0]['slot']
+        else:
+            return game_state, log, None, {
+                'action_required': 'select_charge_target',
+                'chargeable_parts': chargeable
+            }, None
+
+    # 验证目标部件
+    target_part = player_mech.parts.get(target_part_slot)
+    if not target_part or target_part.status == 'destroyed':
+        return game_state, log, None, None, f"目标部件 {target_part_slot} 无效。"
+
+    # 找到目标部件上的可充能动作
+    chargeable_action = None
+    for action in target_part.actions:
+        if action.effects and action.effects.get('charge_devastating'):
+            chargeable_action = action
+            break
+
+    if not chargeable_action:
+        return game_state, log, None, None, f"目标部件 {target_part_slot} 无可充能动作。"
+
+    # 检查是否已充能
+    charge_key = (player_mech.id, target_part_slot, chargeable_action.name)
+    if game_state.charge_counts.get(charge_key, 0) >= 1:
+        return game_state, log, None, None, f"[{chargeable_action.name}] 已充能，无法再次充能。"
+
+    # 消耗 AP
+    game_state, action_log, success, message = _execute_main_action(
+        game_state, player_mech, charge_action, action_name, part_slot)
+    log.extend(action_log)
+    if not success:
+        return game_state, log, None, None, message
+
+    # 添加充能标记
+    game_state.charge_counts[charge_key] = 1
+    log.append(log_action(f"[充能] {chargeable_action.name} 获得充能标记！"))
 
     game_state = _clear_transient_state(game_state)
     return game_state, log, None, None, None

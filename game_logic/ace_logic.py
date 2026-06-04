@@ -139,7 +139,7 @@ def decide_reroll(ace_entity, enemy_entity, action, attack_roll_summary, defense
     3. 技能 (Pilot Skills)
     4. 期望收益 (Expected Value)
     """
-    if not ace_entity.pilot or ace_entity.pilot.link_points <= 0:
+    if not ace_entity.pilot or ace_entity.pilot.link_points <= 1:
         return []
 
     selections = []
@@ -200,7 +200,7 @@ def decide_reroll(ace_entity, enemy_entity, action, attack_roll_summary, defense
                 elif has_pursuit and dodges_remaining <= 1 and defenses <= 1:
                      selections.extend(bad_dice)
                 # 链接值充裕时
-                elif current_links >= 3:
+                elif current_links >= 4:
                      selections.extend(bad_dice)
 
         # 策略 A-2: 追求爆发 (Burst Damage)
@@ -208,7 +208,7 @@ def decide_reroll(ace_entity, enemy_entity, action, attack_roll_summary, defense
         elif net_damage > 0:
              # 检查是否有“空心重击”或者“空白”的红骰
              red_duds = _collect_dice_by_face(attack_raw_rolls, ['blank', 'hollow_heavy_hit', 'hollow_light_hit', 'eye'], color_filter=['red'])
-             if red_duds and current_links >= 2:
+             if red_duds and current_links >= 3:
                  selections.extend(red_duds)
 
     # --- 场景 B: Ace 是防御方 (Defense Mode) ---
